@@ -1,0 +1,552 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  MASTER
+  ADMIN
+  USER
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  BLOCKED
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  INACTIVE
+  CANCELED
+  EXPIRED
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+}
+
+enum BudgetStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+}
+
+enum PlanPeriod {
+  MONTHLY
+  YEARLY
+}
+
+enum NotificationType {
+  TASK_ASSIGNED
+  TASK_COMPLETED
+  BUDGET_APPROVED
+  BUDGET_PENDING_APPROVAL
+  BUDGET_REJECTED
+  SYSTEM_ALERT
+  PAYMENT_REMINDER
+  TASK_OVERDUE
+  NEW_MESSAGE
+  COLLECTION_LAUNCHED
+  LOW_STOCK_ALERT
+}
+
+enum QuantidadeTipo {
+  QTDE
+  MEDIA
+}
+
+
+
+model Company {
+  id        String   @id @default(uuid()) @db.Uuid @map("id")
+  name      String   @db.VarChar(150) @map("nome")
+  cnpj      String   @unique @db.VarChar(18) @map("cnpj")
+  status    String   @default("ativo") @db.VarChar(20) @map("status")
+  
+  telefone        String   @db.VarChar(20) @map("telefone")
+  email           String   @db.VarChar(255) @map("email")
+  endereco        String   @db.VarChar(300) @map("endereco")
+  numero          String   @db.VarChar(10) @map("numero")
+  complemento     String?   @db.VarChar(100) @map("complemento")
+  bairro          String   @db.VarChar(100) @map("bairro")
+  cidade          String   @db.VarChar(100) @map("cidade")
+  estado          String   @db.VarChar(2) @map("estado")
+  cep             String  @db.VarChar(9) @map("cep")
+  ramoAtividade   String?   @db.VarChar(100) @map("ramo_atividade")
+
+  createdAt DateTime @default(now()) @map("data_de_criacao")
+  updatedAt DateTime @updatedAt @map("atualizado_em")
+
+  users           User[]
+  kanbanCols      KanbanColumn[]
+  tasks           Task[]
+  settings        CompanyConfig[]
+  notifications   Notification[]
+  materials       Material[]
+  products        Product[]
+  budgets         Budget[]
+  collections     Collection[]   
+  subscription    Subscription?
+  taskImages      TaskImage[]
+  taskAudios      TaskAudio[]
+  taskVideos      TaskVideo[]
+  taskAddresses   TaskAddress[]
+
+  @@index([cnpj])
+  @@index([status])
+  @@index([createdAt])
+  @@map("empresas")
+}
+
+model Plan {
+  id             String     @id @default(uuid()) @db.Uuid @map("id")
+  name           String     @db.VarChar(100) @map("nome")
+  price          Decimal    @db.Decimal(10, 2) @map("preco")
+  period         PlanPeriod                 @map("periodo")
+  trialPeriod    Int?                       @map("periodo_teste")
+  userLimit      Int                        @map("limite_usuarios")
+  isActive       Boolean    @default(true)  @map("ativo")
+  features       Json?                      @map("recursos")
+  createdAt      DateTime   @default(now()) @map("criado_em")
+  updatedAt      DateTime   @updatedAt      @map("atualizado_em")
+
+  subscriptions  Subscription[]
+
+  @@index([isActive])
+  @@index([price])
+  @@map("planos")
+}
+
+model User {
+  id               String     @id @default(uuid()) @db.Uuid @map("id")
+  name             String    @db.VarChar(150) @map("nome")
+  email            String     @unique @db.VarChar(255) @map("email")
+  password         String     @db.VarChar(255) @map("senha")
+  status           UserStatus @default(ACTIVE) @map("status")
+  role             UserRole                    @map("perfil")
+  isProfessional   Boolean    @default(false)  @map("profissional")
+  professionalRole String?    @db.VarChar(100) @map("cargo_profissional")
+  contact          String     @db.VarChar(20)  @map("contato")
+
+  createdAt        DateTime   @default(now())  @map("criado_em")
+  updatedAt        DateTime   @updatedAt       @map("atualizado_em")
+
+  createdTasks     Task[]          @relation("CreatedTasks")
+  completedTasks   Task[]          @relation("CompletedTasks")
+  assignedTasks    Task[]          @relation("AssignedTasks")
+  notifications    UserNotification[]
+  createdBudgets   Budget[]        @relation("CreatedBudgets")
+  assignedBudgets  Budget[]        @relation("AssignedBudgets")
+  createdKanbanColumns KanbanColumn[]
+  companyId        String          @db.Uuid @map("empresa_id")
+  company          Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([email])
+  @@index([role])
+  @@index([status])
+  @@index([createdAt])
+  @@map("usuarios")
+}
+
+model Subscription {
+  id            String             @id @default(uuid()) @db.Uuid @map("id")
+  status        SubscriptionStatus @default(ACTIVE) @map("status")
+  startDate     DateTime           @default(now()) @map("data_inicio")
+  renewalDate   DateTime                           @map("data_renovacao")
+  endDate       DateTime?                          @map("data_fim")
+  paymentMethod String?            @db.VarChar(50) @map("forma_pagamento")
+  trialEndsAt   DateTime?                          @map("fim_teste")
+
+  createdAt     DateTime           @default(now()) @map("criado_em")
+  updatedAt     DateTime           @updatedAt      @map("atualizado_em")
+
+  companyId String  @unique @db.Uuid @map("empresa_id")
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  planId    String  @db.Uuid @map("plano_id")
+  plan      Plan    @relation(fields: [planId], references: [id])
+
+  @@index([status])
+  @@index([renewalDate])
+  @@index([trialEndsAt])
+  @@map("assinaturas")
+}
+
+model KanbanColumn {
+  id        String   @id @default(uuid()) @db.Uuid @map("id")
+  title     String   @db.Text @map("titulo")
+  order     Int      @default(0) @map("ordem")
+  isActive  Boolean  @default(true) @map("ativo")
+
+  createdAt DateTime @default(now()) @map("criado_em")
+  updatedAt DateTime @updatedAt @map("atualizado_em")
+  
+  companyId String @db.Uuid @map("empresa_id")
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdById String @db.Uuid @map("criado_por_id")
+  createdBy   User   @relation(fields: [createdById], references: [id])
+  tasks     Task[]
+
+  @@unique([companyId, title], name: "empresa_titulo")
+  @@index([companyId])
+  @@index([order])
+  @@index([isActive])
+  @@map("colunas_kanban")
+}
+
+model Task {
+  id          String    @id @default(uuid()) @db.Uuid @map("id")
+  title       String    @db.VarChar(200) @map("titulo")
+  description String?   @db.Text @map("descricao")
+  dueDate     DateTime?           @map("prazo")
+  status      TaskStatus @default(PENDING) @map("status")
+  priority    Int       @default(1) @map("prioridade")
+  scheduledAt DateTime  @default(now()) @map("agendado_para")
+  completedAt DateTime?           @map("concluido_em")
+  failedAt    DateTime?           @map("falhou_em")
+  createdAt   DateTime  @default(now()) @map("criado_em")
+  updatedAt   DateTime  @updatedAt @map("atualizado_em")
+
+  createdById   String? @db.Uuid @map("criado_por_id")
+  createdBy     User? @relation("CreatedTasks", fields: [createdById], references: [id])
+  completedById String? @db.Uuid @map("concluido_por_id")
+  completedBy   User? @relation("CompletedTasks", fields: [completedById], references: [id])
+
+  companyId String @db.Uuid @map("empresa_id")
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  columnId  String  @db.Uuid @map("coluna_id")
+  column    KanbanColumn @relation(fields: [columnId], references: [id], onDelete: Cascade)
+  assignedToId String? @db.Uuid @map("atribuido_para_id")
+  assignedTo   User?   @relation("AssignedTasks", fields: [assignedToId], references: [id])
+  routeId     String? @db.Uuid @map("rota_id")
+  route       Route?  @relation(fields: [routeId], references: [id])
+
+  notifications Notification[]
+  budgets       Budget[]
+  taskImages    TaskImage[]
+  taskAudios    TaskAudio[]
+  taskVideos    TaskVideo[]
+  taskAddress   TaskAddress?
+
+  @@index([companyId])
+  @@index([assignedToId])
+  @@index([status])
+  @@index([dueDate])
+  @@index([priority])
+  @@index([createdAt])
+  @@index([companyId, status])
+  @@index([dueDate, status])
+  @@index([assignedToId, status])
+  @@index([routeId])
+  @@map("tarefas")
+}
+
+model TaskAddress {
+  id        String   @id @default(uuid()) @db.Uuid @map("id")
+  rua       String   @db.VarChar(200) @map("rua")
+  numero    String   @db.VarChar(10) @map("numero")
+  complemento String? @db.VarChar(100) @map("complemento")
+  bairro    String   @db.VarChar(100) @map("bairro")
+  cidade    String   @db.VarChar(100) @map("cidade")
+  estado    String   @db.VarChar(2) @map("estado")
+  cep       String   @db.VarChar(9) @map("cep")
+  createdAt DateTime @default(now()) @map("criado_em")
+  updatedAt DateTime @updatedAt @map("atualizado_em")
+
+  taskId    String   @unique @db.Uuid @map("tarefa_id")
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  companyId String   @db.Uuid @map("empresa_id")
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([taskId])
+  @@map("enderecos_tarefas")
+}
+
+model TaskImage {
+  id        String   @id @default(uuid()) @db.Uuid @map("id")
+  url       String   @db.VarChar(500) @map("url")
+  filename  String   @db.VarChar(200) @map("nome_arquivo")
+  size      Int?                       @map("tamanho")
+  createdAt DateTime @default(now()) @map("criado_em")
+
+  taskId    String   @db.Uuid @map("tarefa_id")
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  companyId String   @db.Uuid @map("empresa_id")
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([taskId])
+  
+  @@map("imagens_tarefas")
+}
+
+model TaskAudio {
+  id        String   @id @default(uuid()) @db.Uuid @map("id")
+  url       String   @db.VarChar(500) @map("url")
+  filename  String   @db.VarChar(200) @map("nome_arquivo")
+  duration  Int?                       @map("duracao")
+  size      Int?                       @map("tamanho")
+  createdAt DateTime @default(now()) @map("criado_em")
+
+  taskId    String   @db.Uuid @map("tarefa_id")
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  companyId String   @db.Uuid @map("empresa_id")
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([taskId])
+  @@map("audios_tarefas")
+}
+
+model TaskVideo {
+  id        String   @id @default(uuid()) @db.Uuid @map("id")
+  url       String   @db.VarChar(500) @map("url")
+  filename  String   @db.VarChar(200) @map("nome_arquivo")
+  duration  Int?                       @map("duracao")
+  size      Int?                       @map("tamanho")
+  createdAt DateTime @default(now()) @map("criado_em")
+
+  taskId    String   @db.Uuid @map("tarefa_id")
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  companyId String   @db.Uuid @map("empresa_id")
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([taskId])
+  @@map("videos_tarefas")
+}
+
+model Route {
+  id        String   @id @default(uuid()) @db.Uuid @map("id")
+  title     String   @db.VarChar(200) @map("titulo")
+  createdAt DateTime @default(now()) @map("criado_em")
+  updatedAt DateTime @updatedAt @map("atualizado_em")
+
+  tasks     Task[]
+
+  @@map("rotas")
+}
+
+model Notification {
+  id        String           @id @default(uuid()) @db.Uuid @map("id")
+  title     String           @db.VarChar(200) @map("titulo")
+  message   String           @db.Text @map("mensagem")
+  type      NotificationType          @map("tipo")
+  isRead    Boolean          @default(false) @map("lida")
+
+  createdAt DateTime         @default(now()) @map("criado_em")
+  readAt    DateTime?                 @map("lido_em")
+
+  users UserNotification[]
+  companyId String @db.Uuid @map("empresa_id")
+  company   Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  taskId    String?   @db.Uuid @map("tarefa_id")
+  task      Task?     @relation(fields: [taskId], references: [id])
+
+  @@index([companyId])
+  @@index([type])
+  @@index([createdAt])
+  @@index([isRead])
+  @@map("notificacoes")
+}
+
+model UserNotification {
+  userId         String   @db.Uuid @map("usuario_id")
+  notificationId String   @db.Uuid @map("notificacao_id")
+  createdAt      DateTime @default(now()) @map("criado_em")
+  emailedAt      DateTime? @map("enviado_email_em")
+
+  user           User     @relation(fields: [userId], references: [id])
+  notification   Notification @relation(fields: [notificationId], references: [id])
+
+  @@id([userId, notificationId])
+  @@index([createdAt])
+  @@map("notificacoes_usuario")
+}
+
+model Material {
+  id                   String       @id @default(uuid())  @db.Uuid @map("id")
+  description          String       @db.VarChar(200) @map("descricao")
+  type                 String       @db.VarChar(50) @map("tipo") 
+  month                String?      @db.VarChar(10)  @map("mes")
+  supplier             String?      @db.VarChar(100) @map("fornecedor")
+
+  unitPrice            Decimal?     @db.Decimal(10, 4) @map("valor_unitario")
+  unitOfMeasure        String?      @db.VarChar(20)   @map("unidade_medida")
+  quantityPerUnit      Float?                          @map("quantidade_por_unidade")
+
+  pricePerKg           Decimal?     @db.Decimal(10, 4) @map("valor_por_kg")
+  pricePerMeter        Decimal?     @db.Decimal(10, 4) @map("valor_por_metro")
+  color                String?      @db.VarChar(50)   @map("cor")
+  fabricUnit           String?      @db.VarChar(20)   @map("unidade_tecido")
+  yield                String?      @db.VarChar(50)   @map("rendimento")
+  weightPerMeter       String?      @db.VarChar(50)   @map("peso_mt")
+
+  sku                  String?      @db.VarChar(50)   @map("sku")
+  minStock             Decimal?     @db.Decimal(10, 2) @default(0) @map("estoque_minimo")
+  isActive             Boolean      @default(true)    @map("ativo")
+
+  createdAt            DateTime     @default(now())   @map("criado_em")
+  updatedAt            DateTime     @updatedAt        @map("atualizado_em")
+
+  companyId            String       @db.Uuid @map("empresa_id")
+  company              Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  products             ProductMaterial[]
+
+  @@index([companyId])
+  @@index([type])
+  @@index([supplier])
+  @@index([month])
+  @@index([description])
+  @@index([sku])
+  @@index([isActive])
+  @@map("materiais")
+}
+
+model Product {
+  id           String     @id @default(uuid())  @db.Uuid @map("id")
+  ref          String     @unique @db.VarChar(50) @map("referencia")
+  name         String     @db.VarChar(150) @map("nome")
+  description  String?    @db.Text @map("descricao")
+  baseCost     Decimal    @db.Decimal(10, 2) @map("custo_base")
+  sellingPrice Decimal    @db.Decimal(10, 2) @map("preco_venda")
+  sizeRange    String?    @db.VarChar(50) @map("faixa_tamanhos")
+  isActive     Boolean    @default(true) @map("ativo")
+  createdAt    DateTime   @default(now()) @map("criado_em")
+  updatedAt    DateTime   @updatedAt @map("atualizado_em")
+
+  companyId    String @db.Uuid @map("empresa_id")
+  company      Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  materials    ProductMaterial[]
+  collections     Collection[]   
+
+  @@index([companyId])
+  @@index([ref])
+  @@index([isActive])
+  @@map("produtos")
+}
+
+model ProductMaterial {
+  productId      String         @db.Uuid @map("produto_id")
+  materialId     String         @db.Uuid @map("material_id")
+
+  quantidade     Decimal        @db.Decimal(10, 4) @map("quantidade")
+  tipoQuantidade QuantidadeTipo                  @map("tipo_quantidade")
+  valorUnitario  Decimal        @db.Decimal(10, 4) @map("valor_unitario")
+  custoUnitario  Decimal        @db.Decimal(10, 4) @map("custo_unitario")
+
+  createdAt      DateTime       @default(now()) @map("criado_em")
+  updatedAt      DateTime       @updatedAt      @map("atualizado_em")
+
+  product        Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  material       Material       @relation(fields: [materialId], references: [id], onDelete: Restrict)
+  
+
+  @@id([productId, materialId])
+  @@index([productId])
+  @@index([materialId])
+  @@index([tipoQuantidade])
+  @@map("produtos_materiais")
+}
+
+model Budget {
+  id          String       @id @default(uuid()) @db.Uuid @map("id")
+  title       String       @db.VarChar(200) @map("titulo")
+  clientName  String?      @db.VarChar(150) @map("nome_cliente")
+  clientEmail String?      @db.VarChar(255) @map("email_cliente")
+  clientPhone String?      @db.VarChar(20)  @map("telefone_cliente")
+  total       Decimal      @db.Decimal(12, 2) @map("total")
+  status      BudgetStatus @default(PENDING) @map("status")
+  items       Json?                     @map("itens")
+  validity    DateTime?                 @map("validade")
+  notes       String?      @db.Text     @map("observacoes")
+  
+  service           String?   @db.VarChar(200) @map("servico")
+  unitPrice         Decimal?  @db.Decimal(12, 2) @map("valor_unitario")
+  paymentMethod     String?   @db.VarChar(50) @map("forma_pagamento")
+  deliveryEstimate  DateTime?                 @map("previsao_entrega")
+  quantity          Int?                      @map("quantidade")
+
+  approvedAt  DateTime?               @map("aprovado_em")
+  rejectedAt  DateTime?               @map("rejeitado_em")
+  
+  createdAt   DateTime     @default(now()) @map("criado_em")
+  updatedAt   DateTime     @updatedAt @map("atualizado_em")
+
+  companyId   String @db.Uuid @map("empresa_id")
+  company     Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdById String @db.Uuid @map("criado_por_id")
+  createdBy   User    @relation("CreatedBudgets", fields: [createdById], references: [id])
+  assignedToId String? @db.Uuid @map("atribuido_para_id")
+  assignedTo   User?   @relation("AssignedBudgets", fields: [assignedToId], references: [id])
+  taskId      String? @db.Uuid @map("tarefa_id")
+  task        Task?   @relation(fields: [taskId], references: [id])
+
+  @@index([companyId])
+  @@index([createdById])
+  @@index([assignedToId])
+  @@index([status])
+  @@index([clientName])
+  @@index([taskId])
+  @@index([createdAt])
+  @@index([validity])
+  @@map("orcamentos")
+}
+
+model CompanyConfig {
+  id          String   @id @default(uuid()) @db.Uuid @map("id")
+  key         String   @db.VarChar(100) @map("chave")
+  value       Json?                 @map("valor")
+  description String?  @db.VarChar(300) @map("descricao")
+  isActive    Boolean  @default(true) @map("ativo")
+  createdAt   DateTime @default(now()) @map("criado_em")
+  updatedAt   DateTime @updatedAt @map("atualizado_em")
+  companyId   String   @db.Uuid @map("empresa_id")
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, key])
+  @@index([companyId])
+  @@index([isActive])
+  @@map("configuracoes_empresa")
+}
+
+model Collection {
+  id           String   @id @default(uuid()) @db.Uuid @map("id")
+  name         String   @db.VarChar(100) @map("nome")
+  reference    String   @unique @db.VarChar(50) @map("referencia")
+  model        String   @db.VarChar(150) @map("modelo")
+  cutQuantity  Int      @map("quantidade_cortada")
+  totalCost    Decimal  @db.Decimal(10, 2) @map("custo_total")
+  launch       Boolean  @default(false) @map("lancamento")
+  color        String   @db.VarChar(100) @map("cor")
+  createdAt    DateTime @default(now()) @map("criado_em")
+  updatedAt    DateTime @updatedAt @map("atualizado_em")
+
+  companyId    String   @db.Uuid @map("empresa_id")
+  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  productId    String?  @db.Uuid @map("produto_id")
+  product      Product? @relation(fields: [productId], references: [id])
+
+  @@index([companyId])
+  @@index([name])
+  @@index([reference])
+  @@index([launch])
+  @@index([createdAt])
+  @@map("colecoes")
+}
