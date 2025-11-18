@@ -65,10 +65,7 @@ enum NotificationType {
   LOW_STOCK_ALERT
 }
 
-enum QuantidadeTipo {
-  QTDE
-  MEDIA
-}
+
 
 
 
@@ -447,7 +444,7 @@ model ProductMaterial {
   materialId     String         @db.Uuid @map("material_id")
 
   quantidade     Decimal        @db.Decimal(10, 4) @map("quantidade")
-  tipoQuantidade QuantidadeTipo                  @map("tipo_quantidade")
+  tipoQuantidade String         @db.VarChar(20)  @map("tipo_quantidade")
   valorUnitario  Decimal        @db.Decimal(10, 4) @map("valor_unitario")
   custoUnitario  Decimal        @db.Decimal(10, 4) @map("custo_unitario")
 
