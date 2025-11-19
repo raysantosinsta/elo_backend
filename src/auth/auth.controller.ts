@@ -11,23 +11,33 @@ import {
   Get,
   Request,
   Param,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { LoginUserDto } from './dto/login-user.dto';
 import { AuthGuard } from '@nestjs/passport';
 import { JwtService } from '@nestjs/jwt';
+import { JwtAuthGuard } from './jwt-auth.guard';
 
 @Controller('auth')
 export class AuthController {
   constructor(
     private authService: AuthService,
     private jwtService: JwtService,
-  ) {}
+  ) { }
 
   @Post('signup')
   async signUp(@Body() createUserDto: CreateUserDto) {
     return this.authService.signUp(createUserDto);
+  }
+
+  // Nova rota protegida para criação de usuários por administradores
+  @Post('admin/signup')
+  @UseGuards(JwtAuthGuard)
+  async adminSignUp(@Body() createUserDto: CreateUserDto, @Request() req) {
+    // Passa o usuário autenticado para o service
+    return this.authService.signUp(createUserDto, req.user);
   }
 
   @Post('login')
@@ -56,42 +66,24 @@ export class AuthController {
     return this.authService.getProfile(req.user.sub);
   }
 
+  // 🔥 ROTA PÚBLICA PARA LISTAR EMPRESAS (qualquer um pode ver)
   @Get('companies')
   async getCompanies() {
     return this.authService.getCompanies();
   }
 
-  @Post('create-test-company')
-  async createTestCompany() {
-    const company = await this.authService.createTestCompany();
-    return {
-      message: 'Company de teste criada com sucesso',
-      company,
-    };
+  // 🔥 NOVA ROTA: EMPRESAS PARA MASTER (PROTEGIDA - apenas MASTER pode acessar)
+  @Get('companies/master')
+  @UseGuards(JwtAuthGuard)
+  async getCompaniesForMaster(@Request() req) {
+    // Verificar se o usuário é MASTER
+    if (req.user.role !== 'MASTER') {
+      throw new UnauthorizedException('Apenas usuários MASTER podem acessar esta lista de empresas');
+    }
+
+    return this.authService.getCompaniesForMaster();
   }
 
-  @Get('test-data')
-  async getTestData() {
-    const companies = await this.authService.getCompanies();
-    return {
-      companies,
-      message:
-        companies.length > 0
-          ? 'Use um companyId acima para teste'
-          : 'Nenhuma company encontrada. Execute o script de seed primeiro.',
-    };
-  }
-
-  @Get('debug-token')
-  async debugToken(@Request() req) {
-    // O usuário já está disponível no req.user devido ao JwtAuthGuard
-    return {
-      userFromRequest: req.user,
-      tokenPayload: this.jwtService.decode(
-        req.headers.authorization.replace('Bearer ', ''),
-      ),
-    };
-  }
 
   @Get('professionals/:companyId')
   async getProfessionals(@Param('companyId') companyId: string) {

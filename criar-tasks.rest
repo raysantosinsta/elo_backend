@@ -3,8 +3,8 @@ POST http://localhost:3000/auth/login
 Content-Type: application/json
 
 {
-  "email": "santosray62@gmail.com",
-  "password": "Blessedhr10@"
+  "email": "novousuario@empresa.com",
+  "password": "senha123"
 }
 
 ### 6. Criar nova task (sem arquivos)

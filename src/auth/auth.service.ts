@@ -14,10 +14,93 @@ export class AuthService {
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
-  ) {}
+  ) { }
 
-  async signUp(createUserDto: CreateUserDto): Promise<AuthResponse> {
+  // async signUp(createUserDto: CreateUserDto): Promise<AuthResponse> {
+  //   const { email, password, name, companyId, role, contact } = createUserDto;
+
+  //   try {
+  //     // Verificar se a company existe
+  //     const companyExists = await this.prisma.company.findUnique({
+  //       where: { id: companyId },
+  //     });
+
+  //     if (!companyExists) {
+  //       throw new NotFoundException(`Empresa com ID ${companyId} não encontrada`);
+  //     }
+
+  //     // Verificar se usuário já existe
+  //     const existingUser = await this.prisma.user.findUnique({
+  //       where: { email },
+  //     });
+
+  //     if (existingUser) {
+  //       throw new ConflictException('Usuário com este email já existe');
+  //     }
+
+  //     // Hash da senha
+  //     const hashedPassword = await bcrypt.hash(password, 12);
+
+  //     // Criar usuário
+  //     const user = await this.prisma.user.create({
+  //       data: {
+  //         email,
+  //         password: hashedPassword,
+  //         name,
+  //         companyId,
+  //         role: (role as UserRole) || 'USER',
+  //         contact,
+  //         isProfessional: false,
+  //       },
+  //       select: {
+  //         id: true,
+  //         email: true,
+  //         name: true,
+  //         role: true,
+  //         status: true,
+  //         companyId: true,
+  //         createdAt: true,
+  //       },
+  //     });
+
+  //     // Gerar tokens
+  //     const tokens = await this.generateTokens(user);
+
+  //     return {
+  //       user,
+  //       ...tokens,
+  //     };
+  //   } catch (error) {
+  //     if (error.code === 'P2003') {
+  //       throw new BadRequestException('Empresa não encontrada');
+  //     }
+  //     throw error;
+  //   }
+  // }
+  async signUp(createUserDto: CreateUserDto, requestingUser?: UserProfile): Promise<AuthResponse> {
     const { email, password, name, companyId, role, contact } = createUserDto;
+
+
+    // 🔥 VALIDAÇÃO DO companyId
+    if (!companyId || companyId.trim() === '') {
+      throw new BadRequestException('ID da empresa é obrigatório');
+    }
+
+    // 🔥 VALIDAR FORMATO DO UUID (opcional, mas recomendado)
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(companyId)) {
+      throw new BadRequestException('ID da empresa deve ser um UUID válido');
+    }
+
+    // VERIFICAÇÃO DE PERMISSÃO - apenas MASTER ou ADMIN podem criar usuários
+    if (requestingUser && !['MASTER', 'ADMIN'].includes(requestingUser.role)) {
+      throw new UnauthorizedException('Você não tem permissão para criar usuários. Apenas MASTER e ADMIN podem realizar esta ação.');
+    }
+
+    // Se não houver requestingUser (registro público), também bloqueia
+    if (!requestingUser) {
+      throw new UnauthorizedException('Autenticação necessária para criar usuários.');
+    }
 
     try {
       // Verificar se a company existe
@@ -65,12 +148,15 @@ export class AuthService {
 
       // Gerar tokens
       const tokens = await this.generateTokens(user);
-      
+
       return {
         user,
         ...tokens,
       };
     } catch (error) {
+      if (error.code === 'P2023') {
+        throw new BadRequestException('ID da empresa inválido');
+      }
       if (error.code === 'P2003') {
         throw new BadRequestException('Empresa não encontrada');
       }
@@ -112,7 +198,7 @@ export class AuthService {
 
     // Gerar tokens
     const tokens = await this.generateTokens(user);
-    
+
     return {
       user: {
         id: user.id,
@@ -159,7 +245,7 @@ export class AuthService {
   async verifyToken(token: string): Promise<{ valid: boolean; user?: UserProfile }> {
     try {
       const payload: JwtPayload = this.jwtService.verify(token);
-      
+
       const user = await this.prisma.user.findUnique({
         where: { id: payload.sub },
         select: {
@@ -221,11 +307,11 @@ export class AuthService {
   }
 
   private async generateTokens(user: UserProfile): Promise<UserTokens> {
-    const payload: JwtPayload = { 
-      sub: user.id, 
-      email: user.email, 
+    const payload: JwtPayload = {
+      sub: user.id,
+      email: user.email,
       role: user.role,
-      companyId: user.companyId 
+      companyId: user.companyId
     };
 
     const [accessToken, refreshToken] = await Promise.all([
@@ -307,21 +393,38 @@ export class AuthService {
     return companies;
   }
 
+  async getCompaniesForMaster() {
+    const companies = await this.prisma.company.findMany({
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        status: true,
+      },
+      where: {
+        status: 'ativo'
+      },
+      orderBy: { name: 'asc' }
+    });
+
+    return companies;
+  }
+
   async getProfessionals(companyId: string) {
-  return this.prisma.user.findMany({
-    where: {
-      companyId,
-      status: 'ACTIVE',
-      // Opcional: só quem pode ser responsável (ex: não admins bloqueados)
-      // role: { in: ['USER', 'PROFESSIONAL', 'ADMIN'] }
-    },
-    select: {
-      id: true,
-      name: true,
-      email: true,
-      role: true,
-    },
-    orderBy: { name: 'asc' },
-  });
-}
+    return this.prisma.user.findMany({
+      where: {
+        companyId,
+        status: 'ACTIVE',
+        // Opcional: só quem pode ser responsável (ex: não admins bloqueados)
+        // role: { in: ['USER', 'PROFESSIONAL', 'ADMIN'] }
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+      },
+      orderBy: { name: 'asc' },
+    });
+  }
 }

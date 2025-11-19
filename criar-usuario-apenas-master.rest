@@ -1,0 +1,27 @@
+# # 2. Usar o token para criar novo usuário
+# POST http://localhost:3000/auth/admin/signup
+# Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiMTlmNGU4Ny1iZmMxLTQ4NzgtOTcxMC1jY2QyNzNjYjZkYzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiI2Y2M2ZmFmZS1lZDI3LTQwMDAtODc4MC04NjIzYjg4NTliYzUiLCJpYXQiOjE3NjM1NzIwNjksImV4cCI6MTc2MzU3Mjk2OX0.5XSRBiLEo7allsaEjZ76BQfihheRJpNp0DzepQB-9UU
+# Content-Type: application/json
+
+# {
+#   "email": "novousuario@empresa.com",
+#   "password": "senha123",
+#   "name": "Novo Usuário",
+#   "companyId": "6cc6fafe-ed27-4000-8780-8623b8859bc5",
+#   "role": "USER",
+#   "contact": "(11) 99999-9999"
+# }
+
+# 2. para dar erro pois to usando token de user
+POST http://localhost:3000/auth/admin/signup
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhOWFlMDIzMS1lYjZjLTRjZjEtYmEwNy0yMzhlZGQxZmUzM2UiLCJlbWFpbCI6Im5vdm91c3VhcmlvQGVtcHJlc2EuY29tIiwicm9sZSI6IlVTRVIiLCJjb21wYW55SWQiOiI2Y2M2ZmFmZS1lZDI3LTQwMDAtODc4MC04NjIzYjg4NTliYzUiLCJpYXQiOjE3NjM1NzI0MjMsImV4cCI6MTc2MzU3MzMyM30.ykDzOAwDBw1ggcaoxVSRwiTQ8i11D9jXFaCBca62VPs 
+Content-Type: application/json
+
+{
+  "email": "novousuario1@empresa.com",
+  "password": "senha1234",
+  "name": "Novo Usuário 1",
+  "companyId": "6cc6fafe-ed27-4000-8780-8623b8859bc5",
+  "role": "USER",
+  "contact": "(11) 99999-9998"
+}
