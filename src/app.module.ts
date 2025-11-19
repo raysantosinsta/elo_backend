@@ -5,6 +5,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { SupabaseModule } from './supabase/supabase.module';
 import { AuthModule } from './auth/auth.module';
 import { KanbanColumnsModule } from './kanban-columns/kanban-columns.module';
+import { TasksModule } from './tasks/tasks.module';
 
 @Module({
   imports: [
@@ -13,6 +14,7 @@ import { KanbanColumnsModule } from './kanban-columns/kanban-columns.module';
     SupabaseModule,
     AuthModule,
     KanbanColumnsModule,
+    TasksModule,
     // outros módulos
   ],
 })

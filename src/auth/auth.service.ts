@@ -306,4 +306,22 @@ export class AuthService {
 
     return companies;
   }
+
+  async getProfessionals(companyId: string) {
+  return this.prisma.user.findMany({
+    where: {
+      companyId,
+      status: 'ACTIVE',
+      // Opcional: só quem pode ser responsável (ex: não admins bloqueados)
+      // role: { in: ['USER', 'PROFESSIONAL', 'ADMIN'] }
+    },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      role: true,
+    },
+    orderBy: { name: 'asc' },
+  });
+}
 }
