@@ -1,0 +1,178 @@
+### Fazer login para obter token
+POST http://localhost:3000/auth/login
+Content-Type: application/json
+
+{
+  "email": "santosray62@gmail.com",
+  "password": "Blessedhr10@"
+}
+
+### 6. Criar nova task (sem arquivos)
+POST http://localhost:3000/tasks
+Content-Type: application/json
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiMTlmNGU4Ny1iZmMxLTQ4NzgtOTcxMC1jY2QyNzNjYjZkYzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiI2Y2M2ZmFmZS1lZDI3LTQwMDAtODc4MC04NjIzYjg4NTliYzUiLCJpYXQiOjE3NjM1MjY5MjksImV4cCI6MTc2MzUyNzgyOX0.o4BnKpKwYKsFEME1ss_mGao79r7AtOf6ue51CF-Yguw
+
+{
+  "title": "N",
+  "description": "Descrição da task de teste",
+  "columnId": "339d0b67-1dd7-4a40-8b20-7e90d43041d4",
+  "dueDate": "2025-12-31",
+  "assignedToId": "d6a262ef-1a87-4c88-8fdb-7685039351a6",
+  "priority": 2
+}
+
+### 1. Listar todas as tasks (com filtros)
+GET http://localhost:3000/tasks
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiMTlmNGU4Ny1iZmMxLTQ4NzgtOTcxMC1jY2QyNzNjYjZkYzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiI2Y2M2ZmFmZS1lZDI3LTQwMDAtODc4MC04NjIzYjg4NTliYzUiLCJpYXQiOjE3NjM1MjY5MjksImV4cCI6MTc2MzUyNzgyOX0.o4BnKpKwYKsFEME1ss_mGao79r7AtOf6ue51CF-Yguw
+
+### 18. Atualizar task
+PUT http://localhost:3000/tasks/4ad179d1-e02e-4cdd-ba63-37c229e9af85
+Content-Type: application/json
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiMTlmNGU4Ny1iZmMxLTQ4NzgtOTcxMC1jY2QyNzNjYjZkYzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiI2Y2M2ZmFmZS1lZDI3LTQwMDAtODc4MC04NjIzYjg4NTliYzUiLCJpYXQiOjE3NjM1MjY5MjksImV4cCI6MTc2MzUyNzgyOX0.o4BnKpKwYKsFEME1ss_mGao79r7AtOf6ue51CF-Yguw
+
+{
+  "title": "Task Atualizada",
+  "description": "Descrição atualizada",
+  "columnId": "01dbe7c7-6218-48cf-9e0c-7cfb6b7a9a6e",
+  "dueDate": "2025-12-25",
+  "priority": 1
+}
+
+### 25. Deletar task
+DELETE http://localhost:3000/tasks/20a31306-e36b-4a3e-9a7e-83856bbe9310
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiMTlmNGU4Ny1iZmMxLTQ4NzgtOTcxMC1jY2QyNzNjYjZkYzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiI2Y2M2ZmFmZS1lZDI3LTQwMDAtODc4MC04NjIzYjg4NTliYzUiLCJpYXQiOjE3NjM1MjY5MjksImV4cCI6MTc2MzUyNzgyOX0.o4BnKpKwYKsFEME1ss_mGao79r7AtOf6ue51CF-Yguw
+
+### 2. Listar tasks com paginação
+GET http://localhost:3000/tasks?page=1&limit=10
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiMTlmNGU4Ny1iZmMxLTQ4NzgtOTcxMC1jY2QyNzNjYjZkYzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiI2Y2M2ZmFmZS1lZDI3LTQwMDAtODc4MC04NjIzYjg4NTliYzUiLCJpYXQiOjE3NjM1MjY5MjksImV4cCI6MTc2MzUyNzgyOX0.o4BnKpKwYKsFEME1ss_mGao79r7AtOf6ue51CF-Yguw
+
+### 3. Listar tasks filtradas por coluna
+GET http://localhost:3000/tasks?columnId=123e4567-e89b-12d3-a456-426614174000
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiMTlmNGU4Ny1iZmMxLTQ4NzgtOTcxMC1jY2QyNzNjYjZkYzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiI2Y2M2ZmFmZS1lZDI3LTQwMDAtODc4MC04NjIzYjg4NTliYzUiLCJpYXQiOjE3NjM1MjY5MjksImV4cCI6MTc2MzUyNzgyOX0.o4BnKpKwYKsFEME1ss_mGao79r7AtOf6ue51CF-Yguw
+
+### 4. Listar tasks filtradas por usuário atribuído
+GET http://localhost:3000/tasks?assignedToId=123e4567-e89b-12d3-a456-426614174001
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiMTlmNGU4Ny1iZmMxLTQ4NzgtOTcxMC1jY2QyNzNjYjZkYzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiI2Y2M2ZmFmZS1lZDI3LTQwMDAtODc4MC04NjIzYjg4NTliYzUiLCJpYXQiOjE3NjM1MjY5MjksImV4cCI6MTc2MzUyNzgyOX0.o4BnKpKwYKsFEME1ss_mGao79r7AtOf6ue51CF-Yguw
+
+### 5. Buscar tasks por texto
+GET http://localhost:3000/tasks?search=reunião
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiMTlmNGU4Ny1iZmMxLTQ4NzgtOTcxMC1jY2QyNzNjYjZkYzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiI2Y2M2ZmFmZS1lZDI3LTQwMDAtODc4MC04NjIzYjg4NTliYzUiLCJpYXQiOjE3NjM1MjY5MjksImV4cCI6MTc2MzUyNzgyOX0.o4BnKpKwYKsFEME1ss_mGao79r7AtOf6ue51CF-Yguw
+
+
+
+# ### 7. Criar task simples
+# POST http://localhost:3000/tasks
+# Content-Type: application/json
+# Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiMTlmNGU4Ny1iZmMxLTQ4NzgtOTcxMC1jY2QyNzNjYjZkYzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiI2Y2M2ZmFmZS1lZDI3LTQwMDAtODc4MC04NjIzYjg4NTliYzUiLCJpYXQiOjE3NjM1MjY5MjksImV4cCI6MTc2MzUyNzgyOX0.o4BnKpKwYKsFEME1ss_mGao79r7AtOf6ue51CF-Yguw
+
+# {
+#   "title": "Task Simples",
+#   "description": "Apenas título e descrição"
+# }
+
+### 8. Buscar tasks atrasadas
+GET http://localhost:3000/tasks/overdue
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiMTlmNGU4Ny1iZmMxLTQ4NzgtOTcxMC1jY2QyNzNjYjZkYzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiI2Y2M2ZmFmZS1lZDI3LTQwMDAtODc4MC04NjIzYjg4NTliYzUiLCJpYXQiOjE3NjM1MjY5MjksImV4cCI6MTc2MzUyNzgyOX0.o4BnKpKwYKsFEME1ss_mGao79r7AtOf6ue51CF-Yguw
+
+### 9. Buscar tasks por coluna (ID)
+GET http://localhost:3000/tasks/column/339d0b67-1dd7-4a40-8b20-7e90d43041d4
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiMTlmNGU4Ny1iZmMxLTQ4NzgtOTcxMC1jY2QyNzNjYjZkYzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiI2Y2M2ZmFmZS1lZDI3LTQwMDAtODc4MC04NjIzYjg4NTliYzUiLCJpYXQiOjE3NjM1MjY5MjksImV4cCI6MTc2MzUyNzgyOX0.o4BnKpKwYKsFEME1ss_mGao79r7AtOf6ue51CF-Yguw
+
+### 10. Buscar tasks por coluna com limite
+GET http://localhost:3000/tasks/column/339d0b67-1dd7-4a40-8b20-7e90d43041d4?limit=5
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiMTlmNGU4Ny1iZmMxLTQ4NzgtOTcxMC1jY2QyNzNjYjZkYzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiI2Y2M2ZmFmZS1lZDI3LTQwMDAtODc4MC04NjIzYjg4NTliYzUiLCJpYXQiOjE3NjM1MjY5MjksImV4cCI6MTc2MzUyNzgyOX0.o4BnKpKwYKsFEME1ss_mGao79r7AtOf6ue51CF-Yguw
+
+### 11. Buscar tasks por título da coluna
+GET http://localhost:3000/tasks/column-title/Preenchimento Estilo
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiMTlmNGU4Ny1iZmMxLTQ4NzgtOTcxMC1jY2QyNzNjYjZkYzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiI2Y2M2ZmFmZS1lZDI3LTQwMDAtODc4MC04NjIzYjg4NTliYzUiLCJpYXQiOjE3NjM1MjY5MjksImV4cCI6MTc2MzUyNzgyOX0.o4BnKpKwYKsFEME1ss_mGao79r7AtOf6ue51CF-Yguw
+
+### 12. Buscar tasks por título da coluna com limite
+GET http://localhost:3000/tasks/column-title/Preenchimento Estilo?limit=3
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiMTlmNGU4Ny1iZmMxLTQ4NzgtOTcxMC1jY2QyNzNjYjZkYzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiI2Y2M2ZmFmZS1lZDI3LTQwMDAtODc4MC04NjIzYjg4NTliYzUiLCJpYXQiOjE3NjM1MjY5MjksImV4cCI6MTc2MzUyNzgyOX0.o4BnKpKwYKsFEME1ss_mGao79r7AtOf6ue51CF-Yguw
+
+### 13. Buscar tasks por usuário atribuído
+GET http://localhost:3000/tasks/assigned-to/d6a262ef-1a87-4c88-8fdb-7685039351a6
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiMTlmNGU4Ny1iZmMxLTQ4NzgtOTcxMC1jY2QyNzNjYjZkYzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiI2Y2M2ZmFmZS1lZDI3LTQwMDAtODc4MC04NjIzYjg4NTliYzUiLCJpYXQiOjE3NjM1MjY5MjksImV4cCI6MTc2MzUyNzgyOX0.o4BnKpKwYKsFEME1ss_mGao79r7AtOf6ue51CF-Yguw
+
+### 14. Buscar tasks por usuário atribuído com limite
+GET http://localhost:3000/tasks/assigned-to/d6a262ef-1a87-4c88-8fdb-7685039351a6?limit=5
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiMTlmNGU4Ny1iZmMxLTQ4NzgtOTcxMC1jY2QyNzNjYjZkYzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiI2Y2M2ZmFmZS1lZDI3LTQwMDAtODc4MC04NjIzYjg4NTliYzUiLCJpYXQiOjE3NjM1MjY5MjksImV4cCI6MTc2MzUyNzgyOX0.o4BnKpKwYKsFEME1ss_mGao79r7AtOf6ue51CF-Yguw
+
+### 15. Buscar tasks criadas por usuário
+GET http://localhost:3000/tasks/created-by/b19f4e87-bfc1-4878-9710-ccd273cb6dc3
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiMTlmNGU4Ny1iZmMxLTQ4NzgtOTcxMC1jY2QyNzNjYjZkYzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiI2Y2M2ZmFmZS1lZDI3LTQwMDAtODc4MC04NjIzYjg4NTliYzUiLCJpYXQiOjE3NjM1MjY5MjksImV4cCI6MTc2MzUyNzgyOX0.o4BnKpKwYKsFEME1ss_mGao79r7AtOf6ue51CF-Yguw
+
+### 16. Buscar tasks criadas por usuário com limite
+GET http://localhost:3000/tasks/created-by/123e4567-e89b-12d3-a456-426614174002?limit=5
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiMTlmNGU4Ny1iZmMxLTQ4NzgtOTcxMC1jY2QyNzNjYjZkYzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiI2Y2M2ZmFmZS1lZDI3LTQwMDAtODc4MC04NjIzYjg4NTliYzUiLCJpYXQiOjE3NjM1MjY5MjksImV4cCI6MTc2MzUyNzgyOX0.o4BnKpKwYKsFEME1ss_mGao79r7AtOf6ue51CF-Yguw
+
+### 17. Buscar task específica
+GET http://localhost:3000/tasks/123e4567-e89b-12d3-a456-42661417400A
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiMTlmNGU4Ny1iZmMxLTQ4NzgtOTcxMC1jY2QyNzNjYjZkYzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiI2Y2M2ZmFmZS1lZDI3LTQwMDAtODc4MC04NjIzYjg4NTliYzUiLCJpYXQiOjE3NjM1MjY5MjksImV4cCI6MTc2MzUyNzgyOX0.o4BnKpKwYKsFEME1ss_mGao79r7AtOf6ue51CF-Yguw
+
+
+
+# ### 19. Atualizar apenas título da task
+# PUT http://localhost:3000/tasks/123e4567-e89b-12d3-a456-42661417400A
+# Content-Type: application/json
+# Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiMTlmNGU4Ny1iZmMxLTQ4NzgtOTcxMC1jY2QyNzNjYjZkYzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiI2Y2M2ZmFmZS1lZDI3LTQwMDAtODc4MC04NjIzYjg4NTliYzUiLCJpYXQiOjE3NjM1MjY5MjksImV4cCI6MTc2MzUyNzgyOX0.o4BnKpKwYKsFEME1ss_mGao79r7AtOf6ue51CF-Yguw
+
+# {
+#   "title": "Apenas título atualizado"
+# }
+
+### 20. Atualizar status da task (mover entre colunas)
+PATCH http://localhost:3000/tasks/20a31306-e36b-4a3e-9a7e-83856bbe9310/status
+Content-Type: application/json
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiMTlmNGU4Ny1iZmMxLTQ4NzgtOTcxMC1jY2QyNzNjYjZkYzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiI2Y2M2ZmFmZS1lZDI3LTQwMDAtODc4MC04NjIzYjg4NTliYzUiLCJpYXQiOjE3NjM1MjY5MjksImV4cCI6MTc2MzUyNzgyOX0.o4BnKpKwYKsFEME1ss_mGao79r7AtOf6ue51CF-Yguw
+
+{
+  "columnId": "01dbe7c7-6218-48cf-9e0c-7cfb6b7a9a6e"
+}
+
+### 21. Remover task de coluna (deixar sem coluna)
+PATCH http://localhost:3000/tasks/123e4567-e89b-12d3-a456-42661417400A/status
+Content-Type: application/json
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiMTlmNGU4Ny1iZmMxLTQ4NzgtOTcxMC1jY2QyNzNjYjZkYzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiI2Y2M2ZmFmZS1lZDI3LTQwMDAtODc4MC04NjIzYjg4NTliYzUiLCJpYXQiOjE3NjM1MjY5MjksImV4cCI6MTc2MzUyNzgyOX0.o4BnKpKwYKsFEME1ss_mGao79r7AtOf6ue51CF-Yguw
+
+{
+  "columnId": null
+}
+
+### 22. Marcar task como concluída
+PATCH http://localhost:3000/tasks/123e4567-e89b-12d3-a456-42661417400A/complete
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiMTlmNGU4Ny1iZmMxLTQ4NzgtOTcxMC1jY2QyNzNjYjZkYzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiI2Y2M2ZmFmZS1lZDI3LTQwMDAtODc4MC04NjIzYjg4NTliYzUiLCJpYXQiOjE3NjM1MjY5MjksImV4cCI6MTc2MzUyNzgyOX0.o4BnKpKwYKsFEME1ss_mGao79r7AtOf6ue51CF-Yguw
+
+### 23. Reabrir task (remover conclusão)
+PATCH http://localhost:3000/tasks/123e4567-e89b-12d3-a456-42661417400A/reopen
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiMTlmNGU4Ny1iZmMxLTQ4NzgtOTcxMC1jY2QyNzNjYjZkYzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiI2Y2M2ZmFmZS1lZDI3LTQwMDAtODc4MC04NjIzYjg4NTliYzUiLCJpYXQiOjE3NjM1MjY5MjksImV4cCI6MTc2MzUyNzgyOX0.o4BnKpKwYKsFEME1ss_mGao79r7AtOf6ue51CF-Yguw
+
+### 24. Adicionar endereço à task
+POST http://localhost:3000/tasks/123e4567-e89b-12d3-a456-42661417400A/address
+Content-Type: application/json
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiMTlmNGU4Ny1iZmMxLTQ4NzgtOTcxMC1jY2QyNzNjYjZkYzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiI2Y2M2ZmFmZS1lZDI3LTQwMDAtODc4MC04NjIzYjg4NTliYzUiLCJpYXQiOjE3NjM1MjY5MjksImV4cCI6MTc2MzUyNzgyOX0.o4BnKpKwYKsFEME1ss_mGao79r7AtOf6ue51CF-Yguw
+
+{
+  "rua": "Rua das Flores",
+  "numero": "123",
+  "complemento": "Sala 45",
+  "bairro": "Centro",
+  "cidade": "São Paulo",
+  "estado": "SP",
+  "cep": "01234-567"
+}
+
+
+
+### 26. Teste de erro - Buscar task que não existe
+GET http://localhost:3000/tasks/00000000-0000-0000-0000-000000000000
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiMTlmNGU4Ny1iZmMxLTQ4NzgtOTcxMC1jY2QyNzNjYjZkYzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiI2Y2M2ZmFmZS1lZDI3LTQwMDAtODc4MC04NjIzYjg4NTliYzUiLCJpYXQiOjE3NjM1MjY5MjksImV4cCI6MTc2MzUyNzgyOX0.o4BnKpKwYKsFEME1ss_mGao79r7AtOf6ue51CF-Yguw
+
+### 27. Teste de erro - Criar task sem título
+POST http://localhost:3000/tasks
+Content-Type: application/json
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiMTlmNGU4Ny1iZmMxLTQ4NzgtOTcxMC1jY2QyNzNjYjZkYzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiI2Y2M2ZmFmZS1lZDI3LTQwMDAtODc4MC04NjIzYjg4NTliYzUiLCJpYXQiOjE3NjM1MjY5MjksImV4cCI6MTc2MzUyNzgyOX0.o4BnKpKwYKsFEME1ss_mGao79r7AtOf6ue51CF-Yguw
+
+{
+  "description": "Task sem título deve falhar"
+}
