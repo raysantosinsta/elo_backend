@@ -15,10 +15,11 @@ import { AuthService } from './auth.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { LoginUserDto } from './dto/login-user.dto';
 import { AuthGuard } from '@nestjs/passport';
+import { JwtService } from '@nestjs/jwt';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private authService: AuthService) {}
+  constructor(private authService: AuthService, private jwtService: JwtService) {}
 
   @Post('signup')
   async signUp(@Body() createUserDto: CreateUserDto) {
@@ -74,4 +75,14 @@ export class AuthController {
         : 'Nenhuma company encontrada. Execute o script de seed primeiro.'
     };
   }
+
+   @Get('debug-token')
+  async debugToken(@Request() req) {
+    // O usuário já está disponível no req.user devido ao JwtAuthGuard
+    return {
+      userFromRequest: req.user,
+      tokenPayload: this.jwtService.decode(req.headers.authorization.replace('Bearer ', '')),
+    };
+  }
+
 }

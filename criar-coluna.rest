@@ -1,0 +1,93 @@
+### Fazer login para obter token
+POST http://localhost:3000/auth/login
+Content-Type: application/json
+
+{
+  "email": "santosray62@gmail.com",
+  "password": "Blessedhr10@"
+}
+
+### 1. Buscar todas as colunas (vai criar as padrão se não existirem)
+GET http://localhost:3000/kanban-columns
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiMTlmNGU4Ny1iZmMxLTQ4NzgtOTcxMC1jY2QyNzNjYjZkYzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiI2Y2M2ZmFmZS1lZDI3LTQwMDAtODc4MC04NjIzYjg4NTliYzUiLCJpYXQiOjE3NjM1MDkxMTksImV4cCI6MTc2MzUxMDAxOX0.y9qLMfadOUnRCXBDlR6yOxtvsC8nOHqizvX1k5GNlWE
+
+### 2. Criar coluna "Backlog"
+POST http://localhost:3000/kanban-columns
+Content-Type: application/json
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiMTlmNGU4Ny1iZmMxLTQ4NzgtOTcxMC1jY2QyNzNjYjZkYzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiI2Y2M2ZmFmZS1lZDI3LTQwMDAtODc4MC04NjIzYjg4NTliYzUiLCJpYXQiOjE3NjM1MDkxMTksImV4cCI6MTc2MzUxMDAxOX0.y9qLMfadOUnRCXBDlR6yOxtvsC8nOHqizvX1k5GNlWE
+
+{
+  "title": "Backlog11"
+}
+
+### 3. Criar coluna "Em Progresso"
+POST http://localhost:3000/kanban-columns
+Content-Type: application/json
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiMTlmNGU4Ny1iZmMxLTQ4NzgtOTcxMC1jY2QyNzNjYjZkYzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiI2Y2M2ZmFmZS1lZDI3LTQwMDAtODc4MC04NjIzYjg4NTliYzUiLCJpYXQiOjE3NjM1MDkxMTksImV4cCI6MTc2MzUxMDAxOX0.y9qLMfadOUnRCXBDlR6yOxtvsC8nOHqizvX1k5GNlWE
+
+{
+  "title": "Em Progresso"
+}
+
+### 4. Criar coluna "Revisão"
+POST http://localhost:3000/kanban-columns
+Content-Type: application/json
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiMTlmNGU4Ny1iZmMxLTQ4NzgtOTcxMC1jY2QyNzNjYjZkYzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiI2Y2M2ZmFmZS1lZDI3LTQwMDAtODc4MC04NjIzYjg4NTliYzUiLCJpYXQiOjE3NjM1MDkxMTksImV4cCI6MTc2MzUxMDAxOX0.y9qLMfadOUnRCXBDlR6yOxtvsC8nOHqizvX1k5GNlWE
+
+{
+  "title": "Revisão"
+}
+
+### 5. Criar coluna "Concluído"
+POST http://localhost:3000/kanban-columns
+Content-Type: application/json
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiMTlmNGU4Ny1iZmMxLTQ4NzgtOTcxMC1jY2QyNzNjYjZkYzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiI2Y2M2ZmFmZS1lZDI3LTQwMDAtODc4MC04NjIzYjg4NTliYzUiLCJpYXQiOjE3NjM1MDkxMTksImV4cCI6MTc2MzUxMDAxOX0.y9qLMfadOUnRCXBDlR6yOxtvsC8nOHqizvX1k5GNlWE
+
+{
+  "title": "Concluído"
+}
+
+### 6. Buscar novamente para ver todas as colunas
+GET http://localhost:3000/kanban-columns
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiMTlmNGU4Ny1iZmMxLTQ4NzgtOTcxMC1jY2QyNzNjYjZkYzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiI2Y2M2ZmFmZS1lZDI3LTQwMDAtODc4MC04NjIzYjg4NTliYzUiLCJpYXQiOjE3NjM1MDkxMTksImV4cCI6MTc2MzUxMDAxOX0.y9qLMfadOUnRCXBDlR6yOxtvsC8nOHqizvX1k5GNlWE
+
+### 7. Tentar criar coluna com mesmo nome (deve dar erro)
+POST http://localhost:3000/kanban-columns
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiMTlmNGU4Ny1iZmMxLTQ4NzgtOTcxMC1jY2QyNzNjYjZkYzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiI2Y2M2ZmFmZS1lZDI3LTQwMDAtODc4MC04NjIzYjg4NTliYzUiLCJpYXQiOjE3NjM1MDkxMTksImV4cCI6MTc2MzUxMDAxOX0.y9qLMfadOUnRCXBDlR6yOxtvsC8nOHqizvX1k5GNlWE
+
+Content-Type: application/json
+
+{
+  "title": "Backlog"
+}
+
+### 8. Atualizar uma coluna (substitua o ID por um real da resposta anterior)
+PUT http://localhost:3000/kanban-columns/86af43d2-6c3f-4a47-9b29-da5a5b848726
+Content-Type: application/json
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiMTlmNGU4Ny1iZmMxLTQ4NzgtOTcxMC1jY2QyNzNjYjZkYzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiI2Y2M2ZmFmZS1lZDI3LTQwMDAtODc4MC04NjIzYjg4NTliYzUiLCJpYXQiOjE3NjM1MDkxMTksImV4cCI6MTc2MzUxMDAxOX0.y9qLMfadOUnRCXBDlR6yOxtvsC8nOHqizvX1k5GNlWE
+
+{
+  "title": "Sem etapa específica"
+}
+
+### 9. Buscar coluna específica (substitua o ID)
+GET http://localhost:3000/kanban-columns/86af43d2-6c3f-4a47-9b29-da5a5b848726
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiMTlmNGU4Ny1iZmMxLTQ4NzgtOTcxMC1jY2QyNzNjYjZkYzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiI2Y2M2ZmFmZS1lZDI3LTQwMDAtODc4MC04NjIzYjg4NTliYzUiLCJpYXQiOjE3NjM1MDkxMTksImV4cCI6MTc2MzUxMDAxOX0.y9qLMfadOUnRCXBDlR6yOxtvsC8nOHqizvX1k5GNlWE
+
+# ### 10. Reordenar colunas (substitua os IDs por reais)
+# PATCH http://localhost:3000/kanban-columns/reorder
+# Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiMTlmNGU4Ny1iZmMxLTQ4NzgtOTcxMC1jY2QyNzNjYjZkYzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiI2Y2M2ZmFmZS1lZDI3LTQwMDAtODc4MC04NjIzYjg4NTliYzUiLCJpYXQiOjE3NjM1MDkxMTksImV4cCI6MTc2MzUxMDAxOX0.y9qLMfadOUnRCXBDlR6yOxtvsC8nOHqizvX1k5GNlWE
+
+# Content-Type: application/json
+
+# {
+#   "columns": [
+#     {"id": "5a503329-f455-425c-b2d0-6b76829f836a", "order": 2},
+#     {"id": "3c80498d-ebd8-4f8d-8757-3ba4cfeee55f", "order": 0},
+#     {"id": "01dbe7c7-6218-48cf-9e0c-7cfb6b7a9a6e", "order": 1}
+#   ]
+# }
+
+### 11. Deletar uma coluna (substitua o ID)
+DELETE http://localhost:3000/kanban-columns/86af43d2-6c3f-4a47-9b29-da5a5b848726
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiMTlmNGU4Ny1iZmMxLTQ4NzgtOTcxMC1jY2QyNzNjYjZkYzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiI2Y2M2ZmFmZS1lZDI3LTQwMDAtODc4MC04NjIzYjg4NTliYzUiLCJpYXQiOjE3NjM1MDkxMTksImV4cCI6MTc2MzUxMDAxOX0.y9qLMfadOUnRCXBDlR6yOxtvsC8nOHqizvX1k5GNlWE
