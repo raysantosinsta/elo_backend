@@ -21,12 +21,12 @@ import {
   UseGuards,
   Request,
 } from '@nestjs/common';
-import { FilesInterceptor } from '@nestjs/platform-express';
+import { FileFieldsInterceptor } from '@nestjs/platform-express'; // 🔥 MUDAR para FileFieldsInterceptor
 import { TasksService } from './tasks.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
-// Interface para arquivos Multer
-interface MulterFile {
+// Interface para arquivos
+interface UploadedFile {
   fieldname: string;
   originalname: string;
   encoding: string;
@@ -60,42 +60,50 @@ export class TasksController {
     }
   }
 
-  // ➕ Criar task
+  // ➕ Criar task - 🔥 CORRIGIDO: Usar FileFieldsInterceptor
   @Post()
-  @UseInterceptors(FilesInterceptor('files'))
+  @UseInterceptors(FileFieldsInterceptor([
+    { name: 'images', maxCount: 10 },
+    { name: 'audios', maxCount: 10 },
+    { name: 'videos', maxCount: 10 },
+  ]))
   async create(
-    @UploadedFiles() files: MulterFile[], 
+    @UploadedFiles() files: {
+      images?: UploadedFile[];
+      audios?: UploadedFile[];
+      videos?: UploadedFile[];
+    },
     @Body() body: any,
     @Request() req
   ) {
     try {
       console.log('=== 📥 REQUISIÇÃO RECEBIDA NO BACKEND ===');
       console.log('Body recebido:', body);
+      console.log('Files recebidos:', files ? {
+        imagesCount: files.images?.length || 0,
+        audiosCount: files.audios?.length || 0,
+        videosCount: files.videos?.length || 0,
+        imagesDetails: files.images?.map(f => ({
+          name: f.originalname,
+          size: f.size,
+          type: f.mimetype
+        })),
+        audiosDetails: files.audios?.map(f => ({
+          name: f.originalname,
+          size: f.size,
+          type: f.mimetype
+        })),
+        videosDetails: files.videos?.map(f => ({
+          name: f.originalname,
+          size: f.size,
+          type: f.mimetype
+        }))
+      } : 'No files');
 
       const companyId = req.user.companyId;
       const createdById = req.user.id;
 
-      // Organizar os arquivos
-      const fileMap: {
-        images?: MulterFile[];
-        audios?: MulterFile[];
-        videos?: MulterFile[];
-      } = {};
-
-      if (files && files.length > 0) {
-        files.forEach((file) => {
-          if (file.mimetype.startsWith('image/')) {
-            if (!fileMap.images) fileMap.images = [];
-            fileMap.images.push(file);
-          } else if (file.mimetype.startsWith('audio/')) {
-            if (!fileMap.audios) fileMap.audios = [];
-            fileMap.audios.push(file);
-          } else if (file.mimetype.startsWith('video/')) {
-            if (!fileMap.videos) fileMap.videos = [];
-            fileMap.videos.push(file);
-          }
-        });
-      }
+      // 🔥 REMOVER a lógica de organização antiga - já vem organizado pelo FileFieldsInterceptor
 
       // Adicionar companyId e createdById ao body
       const taskData = {
@@ -104,9 +112,13 @@ export class TasksController {
         createdById,
         priority: body.priority ? parseInt(body.priority) : 1,
         dueDate: body.dueDate || null,
+        assignedToId: body.assignedToId || null,
+        columnId: body.columnId || null,
       };
 
-      return await this.tasksService.create(taskData, fileMap);
+      console.log('📤 Dados da task para criação:', taskData);
+
+      return await this.tasksService.create(taskData, files);
     } catch (error) {
       console.error('❌ Erro ao criar task:', error);
       throw new HttpException(
@@ -284,6 +296,9 @@ export class TasksController {
         ...body,
         priority: body.priority ? parseInt(body.priority) : undefined,
         dueDate: body.dueDate || null,
+        assignedToId: body.assignedToId || null,
+        columnId: body.columnId || null,
+        completedById: body.completedById || null,
       };
 
       return await this.tasksService.update(id, updateData, companyId);

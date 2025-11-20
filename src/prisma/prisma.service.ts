@@ -1,44 +1,40 @@
-// src/prisma/prisma.service.ts (para Prisma 6)
-import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
+// src/prisma/prisma.service.ts - VERSÃO SIMPLIFICADA
+import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
-  private readonly logger = new Logger(PrismaService.name);
+  private static instance: PrismaService;
 
   constructor() {
     super({
       log: ['warn', 'error'],
       errorFormat: 'minimal',
+      // 🔥 SEM datasources - o Prisma vai pegar do schema.prisma
     });
+
+    // 🔥 IMPEDE MÚLTIPLAS INSTÂNCIAS
+    if (PrismaService.instance) {
+      return PrismaService.instance;
+    }
+    PrismaService.instance = this;
   }
 
   async onModuleInit() {
-    await this.$connect();
-    this.logger.log('✅ Prisma connected to database');
+    try {
+      await this.$connect();
+      console.log('✅ Conectado ao banco de dados (Singleton)');
+    } catch (error) {
+      console.error('❌ Erro ao conectar com o banco:', error);
+    }
   }
 
   async onModuleDestroy() {
-    await this.$disconnect();
-    this.logger.log('✅ Prisma disconnected from database');
-  }
-
-  async executeWithRetry<T>(operation: () => Promise<T>): Promise<T> {
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        return await operation();
-      } catch (error: any) {
-        if (error.code === '42P05' && attempt < 3) {
-          this.logger.warn(`🔄 Prepared statement error, retrying attempt ${attempt}`);
-          await this.$disconnect();
-          await this.$connect();
-          await new Promise(resolve => setTimeout(resolve, 100 * attempt));
-          continue;
-        }
-        this.logger.error(`❌ Database operation failed after ${attempt} attempts:`, error);
-        throw error;
-      }
+    try {
+      await this.$disconnect();
+      console.log('❌ Desconectado do banco de dados');
+    } catch (error) {
+      console.error('❌ Erro ao desconectar:', error);
     }
-    throw new Error('Max retry attempts exceeded');
   }
 }

@@ -211,47 +211,113 @@ export class KanbanColumnService {
   }
 
   async delete(id: string, companyId: string) {
-    // Verificar se a coluna pertence à empresa
-    const column = await this.prisma.kanbanColumn.findFirst({
-      where: { 
-        id, 
-        companyId 
+  // Verificar se a coluna pertence à empresa
+  const column = await this.prisma.kanbanColumn.findFirst({
+    where: { 
+      id, 
+      companyId 
+    }
+  });
+
+  if (!column) {
+    throw new Error('Coluna não encontrada');
+  }
+
+  // 🔥 CORREÇÃO: Buscar a coluna padrão de forma mais flexível
+  const defaultColumn = await this.prisma.kanbanColumn.findFirst({
+    where: { 
+      OR: [
+        { 
+          title: { 
+            contains: 'sem etapa', 
+            mode: 'insensitive' 
+          }
+        },
+        { 
+          title: { 
+            contains: 'sem coluna', 
+            mode: 'insensitive' 
+          }
+        },
+        { 
+          title: { 
+            contains: 'pendente', 
+            mode: 'insensitive' 
+          }
+        }
+      ],
+      companyId,
+      id: { not: id } // Não pode ser a própria coluna que está sendo deletada
+    },
+    orderBy: { order: 'asc' } // Pegar a primeira coluna padrão encontrada
+  });
+
+  // 🔥 SE não encontrar coluna padrão, criar uma automaticamente
+  let targetColumnId: string | null = null;
+  
+  if (!defaultColumn) {
+    console.log('🔧 Coluna padrão não encontrada, criando automaticamente...');
+    
+    // Buscar um usuário da empresa para ser o criador
+    const companyUser = await this.prisma.user.findFirst({
+      where: { companyId },
+      select: { id: true }
+    });
+
+    if (!companyUser) {
+      throw new Error('Nenhum usuário encontrado para criar a coluna padrão');
+    }
+
+    // Criar coluna "Sem etapa" automaticamente
+    const newDefaultColumn = await this.prisma.kanbanColumn.create({
+      data: {
+        title: 'Sem etapa',
+        order: 0, // Colocar no início
+        companyId,
+        createdById: companyUser.id
       }
     });
+    
+    targetColumnId = newDefaultColumn.id;
+    console.log('✅ Coluna padrão criada automaticamente:', newDefaultColumn.title);
+  } else {
+    targetColumnId = defaultColumn.id;
+    console.log('✅ Coluna padrão encontrada:', defaultColumn.title);
+  }
 
-    if (!column) {
-      throw new Error('Coluna não encontrada');
-    }
-
-    // Buscar a coluna "Sem etapa" da mesma empresa
-    const semEtapa = await this.prisma.kanbanColumn.findFirst({
-      where: { 
-        title: { 
-          contains: 'Sem etapa', 
-          mode: 'insensitive' 
-        },
-        companyId
-      },
-    });
-
-    if (!semEtapa) {
-      throw new Error('Coluna "Sem etapa" não encontrada para realocar as tarefas');
-    }
-
-    // Atualizar todas as tarefas da coluna sendo deletada para a coluna "Sem etapa"
+  // 🔥 CORREÇÃO: Se ainda não tem targetColumnId, usar undefined (sem coluna)
+  if (!targetColumnId) {
+    console.log('⚠️ Nenhuma coluna padrão disponível, definindo tasks como sem coluna');
+    
+    // Atualizar tarefas para ficarem sem coluna (columnId = undefined)
     await this.prisma.task.updateMany({
       where: { 
         columnId: id,
         companyId 
       },
-      data: { columnId: semEtapa.id },
+      data: { columnId: undefined },
     });
-
-    // Deletar a coluna
-    return this.prisma.kanbanColumn.delete({ 
-      where: { id } 
+  } else {
+    // Atualizar todas as tarefas da coluna sendo deletada para a coluna padrão
+    await this.prisma.task.updateMany({
+      where: { 
+        columnId: id,
+        companyId 
+      },
+      data: { columnId: targetColumnId },
     });
   }
+
+  // Deletar a coluna
+  const result = await this.prisma.kanbanColumn.delete({ 
+    where: { id } 
+  });
+
+  console.log(`✅ Coluna "${column.title}" deletada com sucesso`);
+  console.log(`📊 Tarefas realocadas para: ${targetColumnId ? 'coluna padrão' : 'sem coluna'}`);
+  
+  return result;
+}
 
   async reorder(columns: Array<{ id: string; order: number }>, companyId: string) {
     // Verificar se todas as colunas pertencem à empresa

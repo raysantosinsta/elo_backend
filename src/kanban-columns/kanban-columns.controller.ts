@@ -35,7 +35,11 @@ export class KanbanColumnController {
   async create(@Body() createDto: { title: string }, @Request() req) {
     const companyId = req.user.companyId;
     const createdById = req.user.id;
-    return this.kanbanColumnService.create(createDto.title, companyId, createdById);
+    return this.kanbanColumnService.create(
+      createDto.title,
+      companyId,
+      createdById,
+    );
   }
 
   @Put(':id')
@@ -50,8 +54,19 @@ export class KanbanColumnController {
 
   @Delete(':id')
   async delete(@Param('id') id: string, @Request() req) {
-    const companyId = req.user.companyId;
-    return this.kanbanColumnService.delete(id, companyId);
+    try {
+      const companyId = req.user.companyId;
+      console.log(`🗑️ Tentando deletar coluna ${id} da empresa ${companyId}`);
+      console.log('Usuário:', req.user.email);
+
+      const result = await this.kanbanColumnService.delete(id, companyId);
+
+      console.log('✅ Coluna deletada com sucesso');
+      return result;
+    } catch (error) {
+      console.error('❌ Erro ao deletar coluna:', error);
+      throw error; // O NestJS vai lidar com a exception
+    }
   }
 
   @Patch('reorder')

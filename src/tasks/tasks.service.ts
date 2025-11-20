@@ -11,8 +11,7 @@ import {
 import { PrismaService } from 'src/prisma/prisma.service';
 import { SupabaseService } from 'src/supabase/supabase.service';
 
-// Corrigir o tipo Multer
-interface MulterFile {
+interface UploadedFile {
   fieldname: string;
   originalname: string;
   encoding: string;
@@ -20,6 +19,9 @@ interface MulterFile {
   size: number;
   buffer: Buffer;
 }
+
+type MulterFile = UploadedFile & { path: string };
+
 
 @Injectable()
 export class TasksService {
@@ -40,13 +42,30 @@ export class TasksService {
       priority?: number;
     },
     files?: { 
-      images?: MulterFile[];
-      audios?: MulterFile[];
-      videos?: MulterFile[];
+      images?: UploadedFile[]; // 🔥 USAR UploadedFile em vez de MulterFile
+      audios?: UploadedFile[];
+      videos?: UploadedFile[];
     },
   ) {
     console.log('=== INICIANDO CRIAÇÃO DE TASK ===');
     console.log('Body recebido:', body);
+    console.log('Files recebidos:', files ? {
+      images: files.images?.map(f => ({ 
+        originalname: f.originalname, 
+        size: f.size,
+        mimetype: f.mimetype 
+      })),
+      audios: files.audios?.map(f => ({ 
+        originalname: f.originalname, 
+        size: f.size,
+        mimetype: f.mimetype  
+      })),
+      videos: files.videos?.map(f => ({ 
+        originalname: f.originalname, 
+        size: f.size,
+        mimetype: f.mimetype 
+      }))
+    } : 'No files');
 
     const { title, description, columnId, dueDate, assignedToId, companyId, createdById, priority } = body;
     
@@ -148,9 +167,9 @@ export class TasksService {
     taskId: string, 
     companyId: string, 
     files: { 
-      images?: MulterFile[];
-      audios?: MulterFile[];
-      videos?: MulterFile[];
+      images?: UploadedFile[];
+      audios?: UploadedFile[];
+      videos?: UploadedFile[];
     }
   ) {
     const uploadPromises: Promise<any>[] = [];
@@ -190,7 +209,7 @@ export class TasksService {
         const path = `tasks/${taskId}/audios/${Date.now()}-${Math.random().toString(36).substring(7)}.${ext}`;
         
         uploadPromises.push(
-          this.supabaseService.uploadFile('task-audio', path, audioFile.buffer, {
+          this.supabaseService.uploadFile('task-audios', path, audioFile.buffer, {
             contentType: audioFile.mimetype,
             metadata: {
               originalName: audioFile.originalname,
@@ -418,7 +437,7 @@ export class TasksService {
     // Deletar áudios
     for (const audio of task.taskAudios) {
       const path = audio.url.replace(/^.*\/\/[^\/]+\//, '');
-      deletePromises.push(this.supabaseService.deleteFile('task-audio', path));
+      deletePromises.push(this.supabaseService.deleteFile('task-audios', path));
     }
 
     // Deletar vídeos
