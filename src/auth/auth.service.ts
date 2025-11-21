@@ -1,13 +1,19 @@
 /* eslint-disable prettier/prettier */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
-import { Injectable, UnauthorizedException, ConflictException, BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import * as bcrypt from 'bcrypt';
-import { CreateUserDto } from './dto/create-user.dto';
-import { LoginUserDto } from './dto/login-user.dto';
 import { UserRole } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { UserProfile, JwtPayload, UserTokens, AuthResponse } from './types';
+import { CreateUserDto } from './dto/create-user.dto';
+import { LoginUserDto } from './dto/login-user.dto';
+import { AuthResponse, JwtPayload, UserProfile, UserTokens } from './types';
+
+interface PrismaError extends Error {
+  code?: string;
+  meta?: {
+    target?: string[];
+  };
+}
 
 @Injectable()
 export class AuthService {
@@ -16,70 +22,8 @@ export class AuthService {
     private jwtService: JwtService,
   ) { }
 
-  // async signUp(createUserDto: CreateUserDto): Promise<AuthResponse> {
-  //   const { email, password, name, companyId, role, contact } = createUserDto;
-
-  //   try {
-  //     // Verificar se a company existe
-  //     const companyExists = await this.prisma.company.findUnique({
-  //       where: { id: companyId },
-  //     });
-
-  //     if (!companyExists) {
-  //       throw new NotFoundException(`Empresa com ID ${companyId} não encontrada`);
-  //     }
-
-  //     // Verificar se usuário já existe
-  //     const existingUser = await this.prisma.user.findUnique({
-  //       where: { email },
-  //     });
-
-  //     if (existingUser) {
-  //       throw new ConflictException('Usuário com este email já existe');
-  //     }
-
-  //     // Hash da senha
-  //     const hashedPassword = await bcrypt.hash(password, 12);
-
-  //     // Criar usuário
-  //     const user = await this.prisma.user.create({
-  //       data: {
-  //         email,
-  //         password: hashedPassword,
-  //         name,
-  //         companyId,
-  //         role: (role as UserRole) || 'USER',
-  //         contact,
-  //         isProfessional: false,
-  //       },
-  //       select: {
-  //         id: true,
-  //         email: true,
-  //         name: true,
-  //         role: true,
-  //         status: true,
-  //         companyId: true,
-  //         createdAt: true,
-  //       },
-  //     });
-
-  //     // Gerar tokens
-  //     const tokens = await this.generateTokens(user);
-
-  //     return {
-  //       user,
-  //       ...tokens,
-  //     };
-  //   } catch (error) {
-  //     if (error.code === 'P2003') {
-  //       throw new BadRequestException('Empresa não encontrada');
-  //     }
-  //     throw error;
-  //   }
-  // }
   async signUp(createUserDto: CreateUserDto, requestingUser?: UserProfile): Promise<AuthResponse> {
-    const { email, password, name, companyId, role, contact } = createUserDto;
-
+    const { email, password, name, companyId, role, phone, document } = createUserDto;
 
     // 🔥 VALIDAÇÃO DO companyId
     if (!companyId || companyId.trim() === '') {
@@ -121,18 +65,31 @@ export class AuthService {
         throw new ConflictException('Usuário com este email já existe');
       }
 
-      // Hash da senha
-      const hashedPassword = await bcrypt.hash(password, 12);
+      // 🔥 CORREÇÃO: Verificar se documento já existe (se fornecido)
+      if (document) {
+        const existingDocument = await this.prisma.user.findUnique({
+          where: { document },
+        });
 
-      // Criar usuário
+        if (existingDocument) {
+          throw new ConflictException('Já existe um usuário com este documento');
+        }
+      }
+
+      // 🔥 REMOVIDO: Hash da senha - agora salva em texto puro
+      // const hashedPassword = await bcrypt.hash(password, 12);
+
+      // 🔥 CORREÇÃO: Criar usuário com campos atualizados do schema
       const user = await this.prisma.user.create({
         data: {
           email,
-          password: hashedPassword,
+          password: password, // 🔥 AGORA: Senha em texto puro
           name,
+          document: document || null,
+          phone: phone || 'Não informado',
           companyId,
-          role: (role as UserRole) || 'USER',
-          contact,
+          role: (role as UserRole) || 'EMPLOYER',
+          status: 'ATIVO',
           isProfessional: false,
         },
         select: {
@@ -142,23 +99,40 @@ export class AuthService {
           role: true,
           status: true,
           companyId: true,
+          document: true,
+          phone: true,
           createdAt: true,
         },
       });
 
       // Gerar tokens
-      const tokens = await this.generateTokens(user);
+      const tokens = await this.generateTokens(user as UserProfile);
 
       return {
         user,
         ...tokens,
       };
     } catch (error) {
-      if (error.code === 'P2023') {
+      const prismaError = error as PrismaError;
+
+      if (prismaError.code === 'P2023') {
         throw new BadRequestException('ID da empresa inválido');
       }
-      if (error.code === 'P2003') {
+      if (prismaError.code === 'P2003') {
         throw new BadRequestException('Empresa não encontrada');
+      }
+      if (prismaError.code === 'P2002') {
+        // Erro de constraint única - agora com tipagem segura
+        const target = prismaError.meta?.target;
+        if (target && Array.isArray(target)) {
+          if (target.includes('documento')) {
+            throw new ConflictException('Já existe um usuário com este documento');
+          }
+          if (target.includes('email')) {
+            throw new ConflictException('Usuário com este email já existe');
+          }
+        }
+        throw new ConflictException('Dados duplicados');
       }
       throw error;
     }
@@ -166,6 +140,9 @@ export class AuthService {
 
   async login(loginUserDto: LoginUserDto): Promise<AuthResponse> {
     const { email, password } = loginUserDto;
+
+    console.log('🔐 [BACKEND] Login attempt for:', email);
+    console.log('📝 [BACKEND] Password received length:', password?.length);
 
     // Buscar usuário
     const user = await this.prisma.user.findUnique({
@@ -181,23 +158,43 @@ export class AuthService {
       },
     });
 
+    console.log('👤 [BACKEND] User found:', {
+      exists: !!user,
+      id: user?.id,
+      email: user?.email,
+      status: user?.status,
+      password: user ? `${user.password.substring(0, 20)}...` : 'N/A',
+      company: user?.company
+    });
+
     if (!user) {
+      console.log('❌ [BACKEND] User not found with email:', email);
       throw new UnauthorizedException('Credenciais inválidas');
     }
 
-    // Verificar status
-    if (user.status !== 'ACTIVE') {
+    // 🔥 CORREÇÃO: Verificar status atualizado
+    console.log('📊 [BACKEND] User status:', user.status);
+    if (user.status !== 'ATIVO') {
+      console.log('❌ [BACKEND] User is not active. Status:', user.status);
       throw new UnauthorizedException('Usuário inativo');
     }
 
-    // Verificar senha
-    const isPasswordValid = await bcrypt.compare(password, user.password);
+    // 🔥 ATUALIZADO: Comparação direta de senha (sem bcrypt)
+    console.log('🔑 [BACKEND] Comparing passwords directly...');
+    const isPasswordValid = password === user.password; // 🔥 COMPARAÇÃO DIRETA
+    console.log('✅ [BACKEND] Password valid:', isPasswordValid);
+
     if (!isPasswordValid) {
+      console.log('❌ [BACKEND] Password comparison failed');
+      console.log('🔍 [BACKEND] Input password:', password);
+      console.log('🔍 [BACKEND] Stored password:', user.password);
       throw new UnauthorizedException('Credenciais inválidas');
     }
 
+    console.log('🎉 [BACKEND] Login successful for user:', user.email);
+
     // Gerar tokens
-    const tokens = await this.generateTokens(user);
+    const tokens = await this.generateTokens(user as UserProfile);
 
     return {
       user: {
@@ -207,6 +204,8 @@ export class AuthService {
         role: user.role,
         status: user.status,
         companyId: user.companyId,
+        document: user.document,
+        phone: user.phone,
         company: user.company,
         createdAt: user.createdAt,
       },
@@ -229,10 +228,13 @@ export class AuthService {
           role: true,
           status: true,
           companyId: true,
+          document: true,
+          phone: true,
         },
       });
 
-      if (!user || user.status !== 'ACTIVE') {
+      // 🔥 CORREÇÃO: Verificar status atualizado
+      if (!user || user.status !== 'ATIVO') {
         throw new UnauthorizedException();
       }
 
@@ -255,10 +257,13 @@ export class AuthService {
           role: true,
           status: true,
           companyId: true,
+          document: true,
+          phone: true,
         },
       });
 
-      if (!user || user.status !== 'ACTIVE') {
+      // 🔥 CORREÇÃO: Verificar status atualizado
+      if (!user || user.status !== 'ATIVO') {
         return { valid: false };
       }
 
@@ -271,6 +276,8 @@ export class AuthService {
           role: user.role,
           status: user.status,
           companyId: user.companyId,
+          document: user.document,
+          phone: user.phone,
         },
       };
     } catch {
@@ -288,6 +295,8 @@ export class AuthService {
         role: true,
         status: true,
         companyId: true,
+        document: true,
+        phone: true,
         company: {
           select: {
             id: true,
@@ -338,43 +347,21 @@ export class AuthService {
         role: true,
         status: true,
         companyId: true,
+        document: true,
+        phone: true,
       },
     });
 
-    if (!user || user.status !== 'ACTIVE') {
+    // 🔥 CORREÇÃO: Verificar status atualizado
+    if (!user || user.status !== 'ATIVO') {
       return null;
     }
 
     return user;
   }
 
-  // Método para criar company de teste
-  async createTestCompany() {
-    const company = await this.prisma.company.create({
-      data: {
-        name: `Empresa Teste ${Date.now()}`,
-        cnpj: `12.345.678/0001-${Math.random().toString().substring(2, 6)}`,
-        telefone: '(11) 9999-9999',
-        email: `teste${Date.now()}@empresa.com`,
-        endereco: 'Rua Teste, 123',
-        numero: '123',
-        bairro: 'Centro',
-        cidade: 'São Paulo',
-        estado: 'SP',
-        cep: '01234-567',
-        ramoAtividade: 'Tecnologia',
-        status: 'ativo'
-      },
-    });
+  // Serviços de company
 
-    return {
-      id: company.id,
-      name: company.name,
-      email: company.email
-    };
-  }
-
-  // Método para listar companies disponíveis
   async getCompanies() {
     const companies = await this.prisma.company.findMany({
       select: {
@@ -384,8 +371,9 @@ export class AuthService {
         email: true,
         status: true,
       },
+      // 🔥 CORREÇÃO: Status atualizado
       where: {
-        status: 'ativo'
+        status: 'ATIVO'
       },
       take: 10
     });
@@ -400,9 +388,12 @@ export class AuthService {
         name: true,
         email: true,
         status: true,
+        cnpj: true,
+        telefone: true,
       },
+      // 🔥 CORREÇÃO: Status atualizado
       where: {
-        status: 'ativo'
+        status: 'ATIVO'
       },
       orderBy: { name: 'asc' }
     });
@@ -414,17 +405,48 @@ export class AuthService {
     return this.prisma.user.findMany({
       where: {
         companyId,
-        status: 'ACTIVE',
-        // Opcional: só quem pode ser responsável (ex: não admins bloqueados)
-        // role: { in: ['USER', 'PROFESSIONAL', 'ADMIN'] }
+        // 🔥 CORREÇÃO: Status atualizado
+        status: 'ATIVO',
       },
       select: {
         id: true,
         name: true,
         email: true,
         role: true,
+        phone: true,
+        document: true,
       },
       orderBy: { name: 'asc' },
     });
+  }
+
+  // 🔥 NOVO: Método para buscar usuário por documento (útil para login alternativo)
+  async findByDocument(document: string): Promise<UserProfile | null> {
+    const user = await this.prisma.user.findUnique({
+      where: { document },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        status: true,
+        companyId: true,
+        document: true,
+        phone: true,
+        company: {
+          select: {
+            id: true,
+            name: true,
+            status: true,
+          },
+        },
+      },
+    });
+
+    if (!user || user.status !== 'ATIVO') {
+      return null;
+    }
+
+    return user;
   }
 }

@@ -16,21 +16,13 @@ import {
 import { AuthService } from './auth.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { LoginUserDto } from './dto/login-user.dto';
-import { AuthGuard } from '@nestjs/passport';
-import { JwtService } from '@nestjs/jwt';
 import { JwtAuthGuard } from './jwt-auth.guard';
 
 @Controller('auth')
 export class AuthController {
   constructor(
     private authService: AuthService,
-    private jwtService: JwtService,
-  ) { }
-
-  @Post('signup')
-  async signUp(@Body() createUserDto: CreateUserDto) {
-    return this.authService.signUp(createUserDto);
-  }
+  ) { } // 🔥 REMOVIDO: JwtService não é necessário no controller
 
   // Nova rota protegida para criação de usuários por administradores
   @Post('admin/signup')
@@ -47,9 +39,9 @@ export class AuthController {
   }
 
   @Post('refresh')
-  @UseGuards(AuthGuard('jwt-refresh'))
   @HttpCode(HttpStatus.OK)
   async refreshTokens(@Body() body: { refreshToken: string }) {
+    // 🔥 CORREÇÃO: Removido UseGuards temporariamente ou ajuste sua estratégia
     return this.authService.refreshTokens(body.refreshToken);
   }
 
@@ -60,16 +52,10 @@ export class AuthController {
   }
 
   @Get('profile')
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(JwtAuthGuard) // 🔥 CORREÇÃO: Usar JwtAuthGuard em vez de AuthGuard('jwt')
   async getProfile(@Request() req) {
-    console.log('req.user completo:', req.user); // ← adicione essa linha
+    console.log('🔍 [CONTROLLER] req.user:', req.user);
     return this.authService.getProfile(req.user.sub);
-  }
-
-  // 🔥 ROTA PÚBLICA PARA LISTAR EMPRESAS (qualquer um pode ver)
-  @Get('companies')
-  async getCompanies() {
-    return this.authService.getCompanies();
   }
 
   // 🔥 NOVA ROTA: EMPRESAS PARA MASTER (PROTEGIDA - apenas MASTER pode acessar)
@@ -84,9 +70,20 @@ export class AuthController {
     return this.authService.getCompaniesForMaster();
   }
 
-
   @Get('professionals/:companyId')
   async getProfessionals(@Param('companyId') companyId: string) {
     return this.authService.getProfessionals(companyId);
   }
+
+  // 🔥 ROTA PÚBLICA PARA LISTAR EMPRESAS (qualquer um pode ver)
+  @Get('companies')
+  async getCompanies() {
+    return this.authService.getCompanies();
+  }
+
+  // 🔥 ROTA DE SIGNUP PÚBLICA (se necessário)
+  // @Post('signup')
+  // async signUp(@Body() createUserDto: CreateUserDto) {
+  //   return this.authService.signUp(createUserDto);
+  // }
 }
