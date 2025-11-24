@@ -16,13 +16,12 @@ datasource db {
 enum UserRole {
   MASTER
   ADMIN
-  USER
+  EMPLOYER
 }
 
 enum UserStatus {
-  ACTIVE
-  INACTIVE
-  BLOCKED
+  ATIVO
+  INATIVO
 }
 
 enum SubscriptionStatus {
@@ -65,11 +64,21 @@ enum NotificationType {
   LOW_STOCK_ALERT
 }
 
+enum CompanyStatus {
+  ATIVO
+  INATIVO
+}
+
+enum KanbanColumnStatus {
+  PENDING
+  FINISHED
+}
+
 model Company {
-  id     String @id @default(uuid()) @map("id") @db.Uuid
-  name   String @map("nome") @db.VarChar(150)
-  cnpj   String @unique @map("cnpj") @db.VarChar(18)
-  status String @default("ativo") @map("status") @db.VarChar(20)
+  id     String        @id @default(uuid()) @map("id") @db.Uuid
+  status CompanyStatus @default(ATIVO) @map("status")
+  name   String        @map("nome") @db.VarChar(150)
+  cnpj   String        @unique @map("cnpj") @db.VarChar(18)
 
   telefone      String  @map("telefone") @db.VarChar(20)
   email         String  @map("email") @db.VarChar(255)
@@ -88,7 +97,7 @@ model Company {
   users         User[]
   kanbanCols    KanbanColumn[]
   tasks         Task[]
-  settings      CompanyConfig[]
+  // settings      CompanyConfig[]
   notifications Notification[]
   materials     Material[]
   products      Product[]
@@ -127,14 +136,15 @@ model Plan {
 
 model User {
   id               String     @id @default(uuid()) @map("id") @db.Uuid
+  status           UserStatus @default(ATIVO) @map("status")
   name             String     @map("nome") @db.VarChar(150)
   email            String     @unique @map("email") @db.VarChar(255)
+  document         String?    @unique @map("documento") @db.VarChar(20)
   password         String     @map("senha") @db.VarChar(255)
-  status           UserStatus @default(ACTIVE) @map("status")
   role             UserRole   @map("perfil")
   isProfessional   Boolean    @default(false) @map("profissional")
   professionalRole String?    @map("cargo_profissional") @db.VarChar(100)
-  contact          String     @map("contato") @db.VarChar(20)
+  phone            String     @map("telefone") @db.VarChar(20)
 
   createdAt DateTime @default(now()) @map("criado_em")
   updatedAt DateTime @updatedAt @map("atualizado_em")
@@ -145,9 +155,10 @@ model User {
   notifications        UserNotification[]
   createdBudgets       Budget[]           @relation("CreatedBudgets")
   assignedBudgets      Budget[]           @relation("AssignedBudgets")
-  createdKanbanColumns KanbanColumn[]
-  companyId            String             @map("empresa_id") @db.Uuid
-  company              Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdKanbanColumns KanbanColumn[]     @relation("CreatedKanbanColumns")
+  updatedKanbanColumns KanbanColumn[]     @relation("UpdatedKanbanColumns")
+  companyId            String?             @map("contador_id") @db.Uuid
+  company              Company?            @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@index([companyId])
   @@index([email])
@@ -169,7 +180,7 @@ model Subscription {
   createdAt DateTime @default(now()) @map("criado_em")
   updatedAt DateTime @updatedAt @map("atualizado_em")
 
-  companyId String  @unique @map("empresa_id") @db.Uuid
+  companyId String  @unique @map("contador_id") @db.Uuid
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
   planId    String  @map("plano_id") @db.Uuid
   plan      Plan    @relation(fields: [planId], references: [id])
@@ -181,26 +192,33 @@ model Subscription {
 }
 
 model KanbanColumn {
-  id       String  @id @default(uuid()) @map("id") @db.Uuid
-  title    String  @map("titulo") @db.Text
-  order    Int     @default(0) @map("ordem")
-  isActive Boolean @default(true) @map("ativo")
+  id          String              @id @default(uuid()) @map("id") @db.Uuid
+  status      KanbanColumnStatus  @default(PENDING)
+  description String              @db.Text @map("descricao")
+  title       String              @map("titulo") @db.Text
+  order       Int                 @default(1) @map("ordem")
 
-  createdAt DateTime @default(now()) @map("criado_em")
-  updatedAt DateTime @updatedAt @map("atualizado_em")
+  createdAt   DateTime            @default(now()) @map("criado_em")
+  updatedAt   DateTime            @updatedAt @map("atualizado_em")
 
-  companyId   String  @map("empresa_id") @db.Uuid
-  company     Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  createdById String  @map("criado_por_id") @db.Uuid
-  createdBy   User    @relation(fields: [createdById], references: [id])
+  company     Company?             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId   String?              @map("contador_id") @db.Uuid
+
+  createdBy   User?               @relation("CreatedKanbanColumns", fields: [createdById], references: [id])
+  createdById String?             @map("criado_por_id") @db.Uuid
+
+  updatedBy   User?               @relation("UpdatedKanbanColumns", fields: [updatedById], references: [id])
+  updatedById String?             @map("atualizado_por_id") @db.Uuid
+
   tasks       Task[]
+
 
   @@unique([companyId, title], name: "empresa_titulo")
   @@index([companyId])
   @@index([order])
-  @@index([isActive])
   @@map("colunas_kanban")
 }
+
 
 model Task {
   id          String     @id @default(uuid()) @map("id") @db.Uuid
@@ -220,7 +238,7 @@ model Task {
   completedById String? @map("concluido_por_id") @db.Uuid
   completedBy   User?   @relation("CompletedTasks", fields: [completedById], references: [id])
 
-  companyId    String       @map("empresa_id") @db.Uuid
+  companyId    String       @map("contador_id") @db.Uuid
   company      Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
   columnId     String       @map("coluna_id") @db.Uuid
   column       KanbanColumn @relation(fields: [columnId], references: [id], onDelete: Cascade)
@@ -263,7 +281,7 @@ model TaskAddress {
 
   taskId    String  @unique @map("tarefa_id") @db.Uuid
   task      Task    @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  companyId String  @map("empresa_id") @db.Uuid
+  companyId String  @map("contador_id") @db.Uuid
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@index([companyId])
@@ -280,7 +298,7 @@ model TaskImage {
 
   taskId    String  @map("tarefa_id") @db.Uuid
   task      Task    @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  companyId String  @map("empresa_id") @db.Uuid
+  companyId String  @map("contador_id") @db.Uuid
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@index([companyId])
@@ -298,7 +316,7 @@ model TaskAudio {
 
   taskId    String  @map("tarefa_id") @db.Uuid
   task      Task    @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  companyId String  @map("empresa_id") @db.Uuid
+  companyId String  @map("contador_id") @db.Uuid
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@index([companyId])
@@ -316,7 +334,7 @@ model TaskVideo {
 
   taskId    String  @map("tarefa_id") @db.Uuid
   task      Task    @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  companyId String  @map("empresa_id") @db.Uuid
+  companyId String  @map("contador_id") @db.Uuid
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@index([companyId])
@@ -346,7 +364,7 @@ model Notification {
   readAt    DateTime? @map("lido_em")
 
   users     UserNotification[]
-  companyId String             @map("empresa_id") @db.Uuid
+  companyId String             @map("contador_id") @db.Uuid
   company   Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
   taskId    String?            @map("tarefa_id") @db.Uuid
   task      Task?              @relation(fields: [taskId], references: [id])
@@ -500,22 +518,22 @@ model Budget {
   @@map("orcamentos")
 }
 
-model CompanyConfig {
-  id          String   @id @default(uuid()) @map("id") @db.Uuid
-  key         String   @map("chave") @db.VarChar(100)
-  value       Json?    @map("valor")
-  description String?  @map("descricao") @db.VarChar(300)
-  isActive    Boolean  @default(true) @map("ativo")
-  createdAt   DateTime @default(now()) @map("criado_em")
-  updatedAt   DateTime @updatedAt @map("atualizado_em")
-  companyId   String   @map("empresa_id") @db.Uuid
-  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+// model CompanyConfig {
+//   id          String   @id @default(uuid()) @map("id") @db.Uuid
+//   key         String   @map("chave") @db.VarChar(100)
+//   value       Json?    @map("valor")
+//   description String?  @map("descricao") @db.VarChar(300)
+//   isActive    Boolean  @default(true) @map("ativo")
+//   createdAt   DateTime @default(now()) @map("criado_em")
+//   updatedAt   DateTime @updatedAt @map("atualizado_em")
+//   companyId   String   @map("empresa_id") @db.Uuid
+//   company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
-  @@unique([companyId, key])
-  @@index([companyId])
-  @@index([isActive])
-  @@map("configuracoes_empresa")
-}
+//   @@unique([companyId, key])
+//   @@index([companyId])
+//   @@index([isActive])
+//   @@map("configuracoes_empresa")
+// }
 
 model Collection {
   id          String   @id @default(uuid()) @map("id") @db.Uuid

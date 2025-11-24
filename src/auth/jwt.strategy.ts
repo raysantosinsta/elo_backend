@@ -1,19 +1,10 @@
 /* eslint-disable prettier/prettier */
-import { ExtractJwt, Strategy } from 'passport-jwt';
-import { PassportStrategy } from '@nestjs/passport';
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { PassportStrategy } from '@nestjs/passport';
+import { ExtractJwt, Strategy } from 'passport-jwt';
 import { AuthService } from './auth.service';
-
-// Payload que vem do token
-interface JwtPayload {
-  sub: string;
-  email: string;
-  role: string;
-  companyId?: string;
-  iat?: number;
-  exp?: number;
-}
+import { JwtPayload as AuthJwtPayload } from './types';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -31,13 +22,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
       secretOrKey: secret,
-      // Opcional: rejeita token expirado automaticamente (recomendado)
-      // já é o padrão com ignoreExpiration: false
     });
   }
 
-  // ← ESSA É A PARTE QUE ESTAVA CAUSANDO O ERRO 500!
-  async validate(payload: JwtPayload) {
+  async validate(payload: AuthJwtPayload) {
     // Valida se o usuário ainda existe e está ativo
     const user = await this.authService.validateUser(payload);
 

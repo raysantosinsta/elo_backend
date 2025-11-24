@@ -9,61 +9,12 @@ import { PrismaService } from 'src/prisma/prisma.service';
 export class KanbanColumnService {
   constructor(private prisma: PrismaService) {}
 
- async findAll(companyId: string) {
-  const columns = await this.prisma.kanbanColumn.findMany({
-    where: { 
-      companyId,
-      isActive: true 
-    },
-    orderBy: { order: 'asc' },
-    include: {
-      tasks: {
-        include: {
-          assignedTo: {
-            select: {
-              id: true,
-              name: true,
-              email: true
-            }
-          }
-        },
-        orderBy: { createdAt: 'desc' }
-      }
-    }
-  });
-
-  if (columns.length === 0) {
-    const defaults = [
-      'Sem etapa',
-      'Preenchimento Estilo',
-      'Desenvolvimento',
-      'Cad',
-      'Ficha para Engenharia',
-      'Lacre',
-    ];
-
-    // Buscar um usuário da empresa para ser o criador
-    const companyUser = await this.prisma.user.findFirst({
-      where: { companyId },
-      select: { id: true }
-    });
-
-    if (!companyUser) {
-      throw new Error('Nenhum usuário encontrado para criar as colunas padrão');
-    }
-
-    // Correção: remover variável não utilizada
-    await this.prisma.kanbanColumn.createMany({
-      data: defaults.map((title, i) => ({ 
-        title, 
-        order: i,
+  async findAll(companyId: string) {
+    const columns = await this.prisma.kanbanColumn.findMany({
+      where: { 
         companyId,
-        createdById: companyUser.id
-      })),
-    });
-
-    return this.prisma.kanbanColumn.findMany({ 
-      where: { companyId },
+        // REMOVIDO: isActive não existe mais no schema
+      },
       orderBy: { order: 'asc' },
       include: {
         tasks: {
@@ -80,48 +31,98 @@ export class KanbanColumnService {
         }
       }
     });
-  }
 
-  return columns;
-}
+    if (columns.length === 0) {
+      const defaults = [
+        'Sem etapa',
+        'Preenchimento Estilo',
+        'Desenvolvimento',
+        'Cad',
+        'Ficha para Engenharia',
+        'Lacre',
+      ];
+
+      // Buscar um usuário da empresa para ser o criador
+      const companyUser = await this.prisma.user.findFirst({
+        where: { companyId },
+        select: { id: true }
+      });
+
+      if (!companyUser) {
+        throw new Error('Nenhum usuário encontrado para criar as colunas padrão');
+      }
+
+      // 🔥 CORREÇÃO: Adicionar description obrigatória
+      await this.prisma.kanbanColumn.createMany({
+        data: defaults.map((title, i) => ({ 
+          title, 
+          description: `Coluna ${title}`, // Campo obrigatório adicionado
+          order: i,
+          companyId,
+          createdById: companyUser.id
+        })),
+      });
+
+      return this.prisma.kanbanColumn.findMany({ 
+        where: { companyId },
+        orderBy: { order: 'asc' },
+        include: {
+          tasks: {
+            include: {
+              assignedTo: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true
+                }
+              }
+            },
+            orderBy: { createdAt: 'desc' }
+          }
+        }
+      });
+    }
+
+    return columns;
+  }
 
   async updateStatus(id: string, columnId: string | null, companyId: string) {
-  // Verificar se a tarefa pertence à empresa
-  const task = await this.prisma.task.findFirst({
-    where: { 
-      id, 
-      companyId 
-    }
-  });
-
-  if (!task) {
-    throw new Error('Tarefa não encontrada');
-  }
-
-  // Se columnId for fornecido, verificar se a coluna pertence à empresa
-  if (columnId) {
-    const column = await this.prisma.kanbanColumn.findFirst({
+    // Verificar se a tarefa pertence à empresa
+    const task = await this.prisma.task.findFirst({
       where: { 
-        id: columnId, 
+        id, 
         companyId 
       }
     });
 
-    if (!column) {
-      throw new Error('Coluna não encontrada');
+    if (!task) {
+      throw new Error('Tarefa não encontrada');
     }
+
+    // Se columnId for fornecido, verificar se a coluna pertence à empresa
+    if (columnId) {
+      const column = await this.prisma.kanbanColumn.findFirst({
+        where: { 
+          id: columnId, 
+          companyId 
+        }
+      });
+
+      if (!column) {
+        throw new Error('Coluna não encontrada');
+      }
+    }
+
+    // Usar connect/disconnect para relações
+    const updateData = columnId 
+      ? { column: { connect: { id: columnId } } }
+      : { column: { disconnect: true } };
+
+    return this.prisma.task.update({
+      where: { id },
+      data: updateData,
+    });
   }
-
-  // Usar connect/disconnect para relações
-  const updateData = columnId 
-    ? { column: { connect: { id: columnId } } }
-    : { column: { disconnect: true } };
-
-  return this.prisma.task.update({
-    where: { id },
-    data: updateData,
-  });
-}
 
   async create(title: string, companyId: string, createdById: string) {
     const maxOrder = await this.prisma.kanbanColumn.aggregate({
@@ -142,9 +143,11 @@ export class KanbanColumnService {
       throw new Error('Já existe uma coluna com este título');
     }
 
+    // 🔥 CORREÇÃO: Adicionar description obrigatória
     return this.prisma.kanbanColumn.create({
       data: { 
         title, 
+        description: `Coluna ${title}`, // Campo obrigatório
         order, 
         companyId,
         createdById 
@@ -165,7 +168,7 @@ export class KanbanColumnService {
     });
   }
 
-  async update(id: string, title: string, companyId: string) {
+  async update(id: string, title: string, companyId: string, description?: string) {
     // Verificar se a coluna pertence à empresa
     const column = await this.prisma.kanbanColumn.findFirst({
       where: { 
@@ -191,9 +194,15 @@ export class KanbanColumnService {
       throw new Error('Já existe outra coluna com este título');
     }
 
+    // 🔥 CORREÇÃO: Atualizar description também
+    const updateData: { title: string; description?: string } = { title };
+    if (description !== undefined) {
+      updateData.description = description;
+    }
+
     return this.prisma.kanbanColumn.update({
       where: { id },
-      data: { title },
+      data: updateData,
       include: {
         tasks: {
           include: {
@@ -211,113 +220,114 @@ export class KanbanColumnService {
   }
 
   async delete(id: string, companyId: string) {
-  // Verificar se a coluna pertence à empresa
-  const column = await this.prisma.kanbanColumn.findFirst({
-    where: { 
-      id, 
-      companyId 
-    }
-  });
-
-  if (!column) {
-    throw new Error('Coluna não encontrada');
-  }
-
-  // 🔥 CORREÇÃO: Buscar a coluna padrão de forma mais flexível
-  const defaultColumn = await this.prisma.kanbanColumn.findFirst({
-    where: { 
-      OR: [
-        { 
-          title: { 
-            contains: 'sem etapa', 
-            mode: 'insensitive' 
-          }
-        },
-        { 
-          title: { 
-            contains: 'sem coluna', 
-            mode: 'insensitive' 
-          }
-        },
-        { 
-          title: { 
-            contains: 'pendente', 
-            mode: 'insensitive' 
-          }
-        }
-      ],
-      companyId,
-      id: { not: id } // Não pode ser a própria coluna que está sendo deletada
-    },
-    orderBy: { order: 'asc' } // Pegar a primeira coluna padrão encontrada
-  });
-
-  // 🔥 SE não encontrar coluna padrão, criar uma automaticamente
-  let targetColumnId: string | null = null;
-  
-  if (!defaultColumn) {
-    console.log('🔧 Coluna padrão não encontrada, criando automaticamente...');
-    
-    // Buscar um usuário da empresa para ser o criador
-    const companyUser = await this.prisma.user.findFirst({
-      where: { companyId },
-      select: { id: true }
-    });
-
-    if (!companyUser) {
-      throw new Error('Nenhum usuário encontrado para criar a coluna padrão');
-    }
-
-    // Criar coluna "Sem etapa" automaticamente
-    const newDefaultColumn = await this.prisma.kanbanColumn.create({
-      data: {
-        title: 'Sem etapa',
-        order: 0, // Colocar no início
-        companyId,
-        createdById: companyUser.id
+    // Verificar se a coluna pertence à empresa
+    const column = await this.prisma.kanbanColumn.findFirst({
+      where: { 
+        id, 
+        companyId 
       }
     });
-    
-    targetColumnId = newDefaultColumn.id;
-    console.log('✅ Coluna padrão criada automaticamente:', newDefaultColumn.title);
-  } else {
-    targetColumnId = defaultColumn.id;
-    console.log('✅ Coluna padrão encontrada:', defaultColumn.title);
-  }
 
-  // 🔥 CORREÇÃO: Se ainda não tem targetColumnId, usar undefined (sem coluna)
-  if (!targetColumnId) {
-    console.log('⚠️ Nenhuma coluna padrão disponível, definindo tasks como sem coluna');
-    
-    // Atualizar tarefas para ficarem sem coluna (columnId = undefined)
-    await this.prisma.task.updateMany({
+    if (!column) {
+      throw new Error('Coluna não encontrada');
+    }
+
+    // 🔥 CORREÇÃO: Buscar a coluna padrão de forma mais flexível
+    const defaultColumn = await this.prisma.kanbanColumn.findFirst({
       where: { 
-        columnId: id,
-        companyId 
+        OR: [
+          { 
+            title: { 
+              contains: 'sem etapa', 
+              mode: 'insensitive' 
+            }
+          },
+          { 
+            title: { 
+              contains: 'sem coluna', 
+              mode: 'insensitive' 
+            }
+          },
+          { 
+            title: { 
+              contains: 'pendente', 
+              mode: 'insensitive' 
+            }
+          }
+        ],
+        companyId,
+        id: { not: id } // Não pode ser a própria coluna que está sendo deletada
       },
-      data: { columnId: undefined },
+      orderBy: { order: 'asc' } // Pegar a primeira coluna padrão encontrada
     });
-  } else {
-    // Atualizar todas as tarefas da coluna sendo deletada para a coluna padrão
-    await this.prisma.task.updateMany({
-      where: { 
-        columnId: id,
-        companyId 
-      },
-      data: { columnId: targetColumnId },
+
+    // 🔥 SE não encontrar coluna padrão, criar uma automaticamente
+    let targetColumnId: string | null = null;
+    
+    if (!defaultColumn) {
+      console.log('🔧 Coluna padrão não encontrada, criando automaticamente...');
+      
+      // Buscar um usuário da empresa para ser o criador
+      const companyUser = await this.prisma.user.findFirst({
+        where: { companyId },
+        select: { id: true }
+      });
+
+      if (!companyUser) {
+        throw new Error('Nenhum usuário encontrado para criar a coluna padrão');
+      }
+
+      // 🔥 CORREÇÃO: Adicionar description obrigatória
+      const newDefaultColumn = await this.prisma.kanbanColumn.create({
+        data: {
+          title: 'Sem etapa',
+          description: 'Coluna padrão para tarefas sem etapa definida', // Campo obrigatório
+          order: 0, // Colocar no início
+          companyId,
+          createdById: companyUser.id
+        }
+      });
+      
+      targetColumnId = newDefaultColumn.id;
+      console.log('✅ Coluna padrão criada automaticamente:', newDefaultColumn.title);
+    } else {
+      targetColumnId = defaultColumn.id;
+      console.log('✅ Coluna padrão encontrada:', defaultColumn.title);
+    }
+
+    // 🔥 CORREÇÃO: Se ainda não tem targetColumnId, usar undefined (sem coluna)
+    if (!targetColumnId) {
+      console.log('⚠️ Nenhuma coluna padrão disponível, definindo tasks como sem coluna');
+      
+      // Atualizar tarefas para ficarem sem coluna (columnId = undefined)
+      await this.prisma.task.updateMany({
+        where: { 
+          columnId: id,
+          companyId 
+        },
+        data: { columnId: undefined },
+      });
+    } else {
+      // Atualizar todas as tarefas da coluna sendo deletada para a coluna padrão
+      await this.prisma.task.updateMany({
+        where: { 
+          columnId: id,
+          companyId 
+        },
+        data: { columnId: targetColumnId },
+      });
+    }
+
+    // Deletar a coluna
+    const result = await this.prisma.kanbanColumn.delete({ 
+      where: { id } 
     });
+
+    console.log(`✅ Coluna "${column.title}" deletada com sucesso`);
+    console.log(`📊 Tarefas realocadas para: ${targetColumnId ? 'coluna padrão' : 'sem coluna'}`);
+    
+    return result;
   }
-
-  // Deletar a coluna
-  const result = await this.prisma.kanbanColumn.delete({ 
-    where: { id } 
-  });
-
-  console.log(`✅ Coluna "${column.title}" deletada com sucesso`);
-  console.log(`📊 Tarefas realocadas para: ${targetColumnId ? 'coluna padrão' : 'sem coluna'}`);
-  
-  return result;
-}
 
   async reorder(columns: Array<{ id: string; order: number }>, companyId: string) {
     // Verificar se todas as colunas pertencem à empresa
@@ -350,7 +360,7 @@ export class KanbanColumnService {
       where: { 
         id, 
         companyId,
-        isActive: true 
+        // REMOVIDO: isActive não existe mais
       },
       include: {
         tasks: {

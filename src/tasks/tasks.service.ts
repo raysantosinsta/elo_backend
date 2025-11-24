@@ -20,9 +20,6 @@ interface UploadedFile {
   buffer: Buffer;
 }
 
-type MulterFile = UploadedFile & { path: string };
-
-
 @Injectable()
 export class TasksService {
   constructor(
@@ -40,34 +37,30 @@ export class TasksService {
       companyId: string;
       createdById: string;
       priority?: number;
+      scheduledAt?: string | Date;
+      routeId?: string;
     },
     files?: { 
-      images?: UploadedFile[]; // 🔥 USAR UploadedFile em vez de MulterFile
+      images?: UploadedFile[];
       audios?: UploadedFile[];
       videos?: UploadedFile[];
     },
   ) {
     console.log('=== INICIANDO CRIAÇÃO DE TASK ===');
     console.log('Body recebido:', body);
-    console.log('Files recebidos:', files ? {
-      images: files.images?.map(f => ({ 
-        originalname: f.originalname, 
-        size: f.size,
-        mimetype: f.mimetype 
-      })),
-      audios: files.audios?.map(f => ({ 
-        originalname: f.originalname, 
-        size: f.size,
-        mimetype: f.mimetype  
-      })),
-      videos: files.videos?.map(f => ({ 
-        originalname: f.originalname, 
-        size: f.size,
-        mimetype: f.mimetype 
-      }))
-    } : 'No files');
 
-    const { title, description, columnId, dueDate, assignedToId, companyId, createdById, priority } = body;
+    const { 
+      title, 
+      description, 
+      columnId, 
+      dueDate, 
+      assignedToId, 
+      companyId, 
+      createdById, 
+      priority,
+      scheduledAt,
+      routeId
+    } = body;
     
     if (!title?.trim()) throw new BadRequestException('Título é obrigatório');
     if (!companyId) throw new BadRequestException('CompanyId é obrigatório');
@@ -90,7 +83,7 @@ export class TasksService {
       const columnExists = await this.prisma.kanbanColumn.findFirst({
         where: { 
           id: columnId,
-          companyId // A coluna deve pertencer à mesma empresa
+          companyId
         }
       });
       if (!columnExists) throw new NotFoundException('Coluna não encontrada');
@@ -101,10 +94,18 @@ export class TasksService {
       const userExists = await this.prisma.user.findFirst({
         where: { 
           id: assignedToId,
-          companyId // O usuário deve pertencer à mesma empresa
+          companyId
         }
       });
       if (!userExists) throw new NotFoundException('Usuário atribuído não encontrado');
+    }
+
+    // 🔹 Verificar rota (se enviada)
+    if (routeId) {
+      const routeExists = await this.prisma.route.findUnique({
+        where: { id: routeId }
+      });
+      if (!routeExists) throw new NotFoundException('Rota não encontrada');
     }
 
     // 🔹 Criação da task
@@ -112,6 +113,7 @@ export class TasksService {
       title: title.trim(),
       description: description?.trim() || null,
       dueDate: dueDate ? new Date(dueDate) : null,
+      scheduledAt: scheduledAt ? new Date(scheduledAt) : new Date(),
       priority: priority || 1,
       company: { connect: { id: companyId } },
       createdBy: { connect: { id: createdById } },
@@ -125,6 +127,11 @@ export class TasksService {
     // Adicionar usuário atribuído apenas se for fornecido
     if (assignedToId) {
       data.assignedTo = { connect: { id: assignedToId } };
+    }
+
+    // Adicionar rota apenas se for fornecida
+    if (routeId) {
+      data.route = { connect: { id: routeId } };
     }
 
     const task = await this.prisma.task.create({
@@ -145,6 +152,7 @@ export class TasksService {
             email: true
           }
         },
+        route: true,
         company: {
           select: {
             id: true,
@@ -221,6 +229,7 @@ export class TasksService {
                 url: result.fullPath,
                 filename: audioFile.originalname,
                 size: audioFile.size,
+                duration: null, // Pode ser calculado posteriormente
                 taskId,
                 companyId,
               },
@@ -249,6 +258,7 @@ export class TasksService {
                 url: result.fullPath,
                 filename: videoFile.originalname,
                 size: videoFile.size,
+                duration: null, // Pode ser calculado posteriormente
                 taskId,
                 companyId,
               },
@@ -287,6 +297,7 @@ export class TasksService {
             email: true
           }
         },
+        route: true,
         taskImages: true,
         taskAudios: true,
         taskVideos: true,
@@ -313,6 +324,9 @@ export class TasksService {
       assignedToId?: string | null;
       priority?: number;
       completedById?: string | null;
+      scheduledAt?: string | Date;
+      routeId?: string | null;
+      status?: string;
     },
     companyId: string
   ) {
@@ -329,7 +343,9 @@ export class TasksService {
     if (body.title !== undefined) data.title = body.title.trim();
     if (body.description !== undefined) data.description = body.description?.trim() || null;
     if (body.dueDate !== undefined) data.dueDate = body.dueDate ? new Date(body.dueDate) : null;
+    if (body.scheduledAt !== undefined) data.scheduledAt = body.scheduledAt ? new Date(body.scheduledAt) : new Date();
     if (body.priority !== undefined) data.priority = body.priority;
+    if (body.status !== undefined) data.status = body.status;
 
     // Gerenciar coluna
     if (body.columnId !== undefined) {
@@ -359,6 +375,19 @@ export class TasksService {
       }
     }
 
+    // Gerenciar rota
+    if (body.routeId !== undefined) {
+      if (body.routeId === null) {
+        data.route = { disconnect: true };
+      } else {
+        const routeExists = await this.prisma.route.findUnique({
+          where: { id: body.routeId }
+        });
+        if (!routeExists) throw new NotFoundException('Rota não encontrada');
+        data.route = { connect: { id: body.routeId } };
+      }
+    }
+
     // Marcar como concluída
     if (body.completedById !== undefined) {
       if (body.completedById) {
@@ -376,6 +405,13 @@ export class TasksService {
         data.completedBy = { disconnect: true };
         data.status = 'PENDING';
       }
+    }
+
+    // Marcar como falhada
+    if (body.status === 'FAILED') {
+      data.failedAt = new Date();
+    } else if (body.status !== 'FAILED' && existing.status === 'FAILED') {
+      data.failedAt = null;
     }
 
     const updated = await this.prisma.task.update({
@@ -404,9 +440,11 @@ export class TasksService {
             email: true
           }
         },
+        route: true,
         taskImages: true,
         taskAudios: true,
         taskVideos: true,
+        taskAddress: true,
       },
     });
 
@@ -518,7 +556,8 @@ export class TasksService {
             name: true,
             email: true
           }
-        }
+        },
+        route: true
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -530,6 +569,8 @@ export class TasksService {
     limit?: number;
     columnId?: string;
     assignedToId?: string;
+    routeId?: string;
+    status?: string;
     search?: string;
   }) {
     const page = params.page || 1;
@@ -548,6 +589,16 @@ export class TasksService {
     // Filtro por usuário atribuído
     if (params.assignedToId) {
       where.assignedToId = params.assignedToId;
+    }
+
+    // Filtro por rota
+    if (params.routeId) {
+      where.routeId = params.routeId;
+    }
+
+    // Filtro por status
+    if (params.status) {
+      where.status = params.status;
     }
 
     // Busca por título ou descrição
@@ -576,7 +627,8 @@ export class TasksService {
               name: true,
               email: true
             }
-          }
+          },
+          route: true
         },
         orderBy: { createdAt: 'desc' },
         skip,
@@ -608,14 +660,8 @@ export class TasksService {
         dueDate: {
           lt: today,
         },
-        // Incluir apenas tarefas que não estão em coluna de concluído
-        NOT: {
-          column: {
-            title: {
-              contains: 'concluído',
-              mode: 'insensitive'
-            }
-          }
+        status: {
+          in: ['PENDING', 'IN_PROGRESS']
         }
       },
       include: { 
@@ -633,7 +679,8 @@ export class TasksService {
             name: true,
             email: true
           }
-        }
+        },
+        route: true
       },
       orderBy: { dueDate: 'asc' },
     });
@@ -666,7 +713,8 @@ export class TasksService {
             name: true,
             email: true
           }
-        }
+        },
+        route: true
       },
       orderBy: { createdAt: 'desc' },
       take: limit,
@@ -699,7 +747,8 @@ export class TasksService {
             name: true,
             email: true
           }
-        }
+        },
+        route: true
       },
       orderBy: { createdAt: 'desc' },
       take: limit,
@@ -765,7 +814,8 @@ export class TasksService {
             name: true,
             email: true
           }
-        }
+        },
+        route: true
       },
       orderBy: { createdAt: 'desc' },
       take: limit,
@@ -800,7 +850,73 @@ export class TasksService {
             name: true,
             email: true
           }
-        }
+        },
+        route: true
+      },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+  }
+
+  // Método para buscar tasks por rota
+  async findByRoute(routeId: string, companyId: string, limit?: number) {
+    const route = await this.prisma.route.findUnique({
+      where: { id: routeId }
+    });
+    if (!route) throw new NotFoundException('Rota não encontrada');
+
+    return this.prisma.task.findMany({
+      where: {
+        routeId,
+        companyId,
+      },
+      include: { 
+        assignedTo: {
+          select: {
+            id: true,
+            name: true,
+            email: true
+          }
+        }, 
+        column: true,
+        createdBy: {
+          select: {
+            id: true,
+            name: true,
+            email: true
+          }
+        },
+        route: true
+      },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+  }
+
+  // Método para buscar tasks por status
+  async findByStatus(status: string, companyId: string, limit?: number) {
+    return this.prisma.task.findMany({
+      where: {
+        status: status as any,
+        companyId,
+      },
+      include: { 
+        assignedTo: {
+          select: {
+            id: true,
+            name: true,
+            email: true
+          }
+        }, 
+        column: true,
+        createdBy: {
+          select: {
+            id: true,
+            name: true,
+            email: true
+          }
+        },
+        route: true
       },
       orderBy: { createdAt: 'desc' },
       take: limit,
