@@ -327,14 +327,27 @@ export class TasksService {
       scheduledAt?: string | Date;
       routeId?: string | null;
       status?: string;
+      removeImageIds?: string[];
+      removeAudioIds?: string[];
+      removeVideoIds?: string[];
     },
-    companyId: string
+    companyId: string,
+    files?: {
+      images?: UploadedFile[];
+      audios?: UploadedFile[];
+      videos?: UploadedFile[];
+    }
   ) {
     console.log('=== ATUALIZANDO TASK ===', id, body);
 
     // Verificar se a task pertence à company
     const existing = await this.prisma.task.findFirst({
-      where: { id, companyId }
+      where: { id, companyId },
+      include: {
+        taskImages: true,
+        taskAudios: true,
+        taskVideos: true,
+      }
     });
     if (!existing) throw new NotFoundException('Task não encontrada');
 
@@ -448,8 +461,76 @@ export class TasksService {
       },
     });
 
+    // 🔹 Gerenciar remoção de arquivos existentes
+    await this.handleFileRemovals(
+      id,
+      companyId,
+      body.removeImageIds || [],
+      body.removeAudioIds || [],
+      body.removeVideoIds || []
+    );
+
+    // 🔹 Upload de novos arquivos (se fornecidos)
+    if (files) {
+      await this.handleFileUploads(id, companyId, files);
+    }
+
     console.log('✅ Task atualizada:', updated);
     return updated;
+  }
+
+  private async handleFileRemovals(
+    taskId: string,
+    companyId: string,
+    removeImageIds: string[],
+    removeAudioIds: string[],
+    removeVideoIds: string[]
+  ) {
+    const deletePromises: Promise<any>[] = [];
+
+    // Remover imagens
+    for (const imageId of removeImageIds) {
+      const image = await this.prisma.taskImage.findUnique({ where: { id: imageId } });
+      if (image && image.taskId === taskId && image.companyId === companyId) {
+        const path = image.url.replace(/^.*\/\/[^\/]+\//, '');
+        deletePromises.push(
+          Promise.all([
+            this.supabaseService.deleteFile('task-images', path),
+            this.prisma.taskImage.delete({ where: { id: imageId } })
+          ])
+        );
+      }
+    }
+
+    // Remover áudios
+    for (const audioId of removeAudioIds) {
+      const audio = await this.prisma.taskAudio.findUnique({ where: { id: audioId } });
+      if (audio && audio.taskId === taskId && audio.companyId === companyId) {
+        const path = audio.url.replace(/^.*\/\/[^\/]+\//, '');
+        deletePromises.push(
+          Promise.all([
+            this.supabaseService.deleteFile('task-audios', path),
+            this.prisma.taskAudio.delete({ where: { id: audioId } })
+          ])
+        );
+      }
+    }
+
+    // Remover vídeos
+    for (const videoId of removeVideoIds) {
+      const video = await this.prisma.taskVideo.findUnique({ where: { id: videoId } });
+      if (video && video.taskId === taskId && video.companyId === companyId) {
+        const path = video.url.replace(/^.*\/\/[^\/]+\//, '');
+        deletePromises.push(
+          Promise.all([
+            this.supabaseService.deleteFile('task-videos', path),
+            this.prisma.taskVideo.delete({ where: { id: videoId } })
+          ])
+        );
+      }
+    }
+
+    await Promise.all(deletePromises);
   }
 
   async remove(id: string, companyId: string) {

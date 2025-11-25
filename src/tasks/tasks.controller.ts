@@ -50,7 +50,7 @@ export class TasksController {
     @Request() req
   ) {
     try {
-      const companyId = req.user.companyId;
+      const companyId = req.user.companyId; // FIX: Use flat companyId from JWT payload
       return await this.tasksService.updateStatus(id, body.columnId, companyId);
     } catch (error) {
       throw new HttpException(
@@ -79,11 +79,17 @@ export class TasksController {
     try {
       console.log('=== 📥 REQUISIÇÃO RECEBIDA NO BACKEND ===');
       console.log('Body recebido:', body);
+      console.log('req.user.companyId:', req.user.companyId); // DEBUG: Para rastrear o valor do JWT
 
-      const companyId = req.user.companyId;
+      const companyId = req.user.companyId; // FIX: Use flat companyId from JWT payload
+
+      if (!companyId) {
+        throw new HttpException('CompanyId é obrigatório (verifique o token JWT)', HttpStatus.BAD_REQUEST);
+      }
+
       const createdById = req.user.id;
 
-      // Adicionar companyId e createdById ao body
+      // Adicionar companyId e createdById ao body (sem sobrescrever se já existir)
       const taskData = {
         ...body,
         companyId,
@@ -121,7 +127,7 @@ export class TasksController {
     @Query('search') search?: string,
   ) {
     try {
-      const companyId = req.user.companyId;
+      const companyId = req.user.companyId; // FIX: Use flat companyId from JWT payload
 
       // Se tem parâmetros de paginação/filtro, usa findAllPaginated
       if (page || limit || columnId || assignedToId || routeId || status || search) {
@@ -151,7 +157,7 @@ export class TasksController {
   @Get('overdue')
   async findOverdue(@Request() req) {
     try {
-      const companyId = req.user.companyId;
+      const companyId = req.user.companyId; // FIX: Use flat companyId from JWT payload
       return await this.tasksService.findOverdue(companyId);
     } catch (error) {
       throw new HttpException(
@@ -169,7 +175,7 @@ export class TasksController {
     @Query('limit') limit?: number,
   ) {
     try {
-      const companyId = req.user.companyId;
+      const companyId = req.user.companyId; // FIX: Use flat companyId from JWT payload
       return await this.tasksService.findByColumnId(
         columnId,
         companyId,
@@ -191,7 +197,7 @@ export class TasksController {
     @Query('limit') limit?: number,
   ) {
     try {
-      const companyId = req.user.companyId;
+      const companyId = req.user.companyId; // FIX: Use flat companyId from JWT payload
       return await this.tasksService.findByColumnTitle(
         title,
         companyId,
@@ -213,7 +219,7 @@ export class TasksController {
     @Query('limit') limit?: number,
   ) {
     try {
-      const companyId = req.user.companyId;
+      const companyId = req.user.companyId; // FIX: Use flat companyId from JWT payload
       return await this.tasksService.findByAssignedUser(
         userId,
         companyId,
@@ -235,7 +241,7 @@ export class TasksController {
     @Query('limit') limit?: number,
   ) {
     try {
-      const companyId = req.user.companyId;
+      const companyId = req.user.companyId; // FIX: Use flat companyId from JWT payload
       return await this.tasksService.findByCreator(
         userId,
         companyId,
@@ -257,7 +263,7 @@ export class TasksController {
     @Query('limit') limit?: number,
   ) {
     try {
-      const companyId = req.user.companyId;
+      const companyId = req.user.companyId; // FIX: Use flat companyId from JWT payload
       return await this.tasksService.findByRoute(
         routeId,
         companyId,
@@ -279,7 +285,7 @@ export class TasksController {
     @Query('limit') limit?: number,
   ) {
     try {
-      const companyId = req.user.companyId;
+      const companyId = req.user.companyId; // FIX: Use flat companyId from JWT payload
       return await this.tasksService.findByStatus(
         status,
         companyId,
@@ -308,20 +314,47 @@ export class TasksController {
 
   // ✏️ Atualizar task
   @Put(':id')
+  @UseInterceptors(FileFieldsInterceptor([
+    { name: 'images', maxCount: 10 },
+    { name: 'audios', maxCount: 10 },
+    { name: 'videos', maxCount: 10 },
+  ]))
   async update(
     @Param('id') id: string, 
     @Body() body: any,
+    @UploadedFiles() files: {
+      images?: UploadedFile[];
+      audios?: UploadedFile[];
+      videos?: UploadedFile[];
+    },
     @Request() req
   ) {
     try {
       console.log('=== 📥 REQUISIÇÃO DE ATUALIZAÇÃO RECEBIDA ===');
       console.log('Body recebido:', body);
 
-      const companyId = req.user.companyId;
+      const companyId = req.user.companyId; // FIX: Use flat companyId from JWT payload
 
-      // Converter dados se necessário
+      if (!companyId) {
+        throw new HttpException('CompanyId é obrigatório (verifique o token JWT)', HttpStatus.BAD_REQUEST);
+      }
+
+      // Parse dos arrays de IDs removidos (vêm como string JSON no FormData)
+      const removeImageIds = body.removeImageIds ? JSON.parse(body.removeImageIds) : [];
+      const removeAudioIds = body.removeAudioIds ? JSON.parse(body.removeAudioIds) : [];
+      const removeVideoIds = body.removeVideoIds ? JSON.parse(body.removeVideoIds) : [];
+
+      // Remover os campos de remoção do body para não poluir (mas adicionar como arrays)
+      delete body.removeImageIds;
+      delete body.removeAudioIds;
+      delete body.removeVideoIds;
+
+      // Converter dados se necessário e adicionar campos de remoção
       const updateData = {
         ...body,
+        removeImageIds,
+        removeAudioIds,
+        removeVideoIds,
         priority: body.priority ? parseInt(body.priority) : undefined,
         dueDate: body.dueDate || null,
         scheduledAt: body.scheduledAt || new Date(),
@@ -331,7 +364,9 @@ export class TasksController {
         completedById: body.completedById || null,
       };
 
-      return await this.tasksService.update(id, updateData, companyId);
+      console.log('📤 Dados da task para atualização:', updateData);
+
+      return await this.tasksService.update(id, updateData, companyId, files);
     } catch (error) {
       console.error('❌ Erro ao atualizar task:', error);
       throw new HttpException(
@@ -345,7 +380,7 @@ export class TasksController {
   @Delete(':id')
   async remove(@Param('id') id: string, @Request() req) {
     try {
-      const companyId = req.user.companyId;
+      const companyId = req.user.companyId; // FIX: Use flat companyId from JWT payload
       return await this.tasksService.remove(id, companyId);
     } catch (error) {
       throw new HttpException(
@@ -371,7 +406,7 @@ export class TasksController {
     @Request() req
   ) {
     try {
-      const companyId = req.user.companyId;
+      const companyId = req.user.companyId; // FIX: Use flat companyId from JWT payload
       return await this.tasksService.addAddress(id, companyId, addressData);
     } catch (error) {
       throw new HttpException(
@@ -388,7 +423,7 @@ export class TasksController {
     @Request() req
   ) {
     try {
-      const companyId = req.user.companyId;
+      const companyId = req.user.companyId; // FIX: Use flat companyId from JWT payload
       const completedById = req.user.id;
 
       return await this.tasksService.update(
@@ -414,7 +449,7 @@ export class TasksController {
     @Request() req
   ) {
     try {
-      const companyId = req.user.companyId;
+      const companyId = req.user.companyId; // FIX: Use flat companyId from JWT payload
 
       return await this.tasksService.update(
         id, 
@@ -439,7 +474,7 @@ export class TasksController {
     @Request() req
   ) {
     try {
-      const companyId = req.user.companyId;
+      const companyId = req.user.companyId; // FIX: Use flat companyId from JWT payload
 
       return await this.tasksService.update(
         id, 
@@ -463,7 +498,7 @@ export class TasksController {
     @Request() req
   ) {
     try {
-      const companyId = req.user.companyId;
+      const companyId = req.user.companyId; // FIX: Use flat companyId from JWT payload
 
       return await this.tasksService.update(
         id, 

@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 
 @Injectable()
@@ -10,6 +10,12 @@ export class KanbanColumnService {
   constructor(private prisma: PrismaService) {}
 
   async findAll(companyId: string) {
+    if (!companyId) {
+      throw new BadRequestException('CompanyId é obrigatório');
+    }
+
+    console.log('🔍 findAll: companyId:', companyId); // DEBUG
+
     const columns = await this.prisma.kanbanColumn.findMany({
       where: { 
         companyId,
@@ -49,7 +55,7 @@ export class KanbanColumnService {
       });
 
       if (!companyUser) {
-        throw new Error('Nenhum usuário encontrado para criar as colunas padrão');
+        throw new BadRequestException('Nenhum usuário encontrado para criar as colunas padrão');
       }
 
       // 🔥 CORREÇÃO: Adicionar description obrigatória
@@ -87,6 +93,10 @@ export class KanbanColumnService {
   }
 
   async updateStatus(id: string, columnId: string | null, companyId: string) {
+    if (!companyId) {
+      throw new BadRequestException('CompanyId é obrigatório');
+    }
+
     // Verificar se a tarefa pertence à empresa
     const task = await this.prisma.task.findFirst({
       where: { 
@@ -96,7 +106,7 @@ export class KanbanColumnService {
     });
 
     if (!task) {
-      throw new Error('Tarefa não encontrada');
+      throw new BadRequestException('Tarefa não encontrada');
     }
 
     // Se columnId for fornecido, verificar se a coluna pertence à empresa
@@ -109,7 +119,7 @@ export class KanbanColumnService {
       });
 
       if (!column) {
-        throw new Error('Coluna não encontrada');
+        throw new BadRequestException('Coluna não encontrada');
       }
     }
 
@@ -125,6 +135,18 @@ export class KanbanColumnService {
   }
 
   async create(title: string, companyId: string, createdById: string) {
+    if (!title?.trim()) {
+      throw new BadRequestException('Título da coluna é obrigatório');
+    }
+    if (!companyId) {
+      throw new BadRequestException('CompanyId é obrigatório');
+    }
+    if (!createdById) {
+      throw new BadRequestException('CreatedById é obrigatório');
+    }
+
+    console.log('🔧 create: title=', title, 'companyId=', companyId, 'createdById=', createdById); // DEBUG
+
     const maxOrder = await this.prisma.kanbanColumn.aggregate({
       where: { companyId },
       _max: { order: true },
@@ -140,14 +162,14 @@ export class KanbanColumnService {
     });
 
     if (existingColumn) {
-      throw new Error('Já existe uma coluna com este título');
+      throw new BadRequestException('Já existe uma coluna com este título');
     }
 
     // 🔥 CORREÇÃO: Adicionar description obrigatória
     return this.prisma.kanbanColumn.create({
       data: { 
-        title, 
-        description: `Coluna ${title}`, // Campo obrigatório
+        title: title.trim(), 
+        description: `Coluna ${title.trim()}`, // Campo obrigatório
         order, 
         companyId,
         createdById 
@@ -169,6 +191,15 @@ export class KanbanColumnService {
   }
 
   async update(id: string, title: string, companyId: string, description?: string) {
+    if (!title?.trim()) {
+      throw new BadRequestException('Título da coluna é obrigatório');
+    }
+    if (!companyId) {
+      throw new BadRequestException('CompanyId é obrigatório');
+    }
+
+    console.log('🔧 update: id=', id, 'title=', title, 'companyId=', companyId); // DEBUG
+
     // Verificar se a coluna pertence à empresa
     const column = await this.prisma.kanbanColumn.findFirst({
       where: { 
@@ -178,7 +209,7 @@ export class KanbanColumnService {
     });
 
     if (!column) {
-      throw new Error('Coluna não encontrada');
+      throw new BadRequestException('Coluna não encontrada');
     }
 
     // Verificar se já existe outra coluna com o mesmo título na empresa
@@ -191,11 +222,11 @@ export class KanbanColumnService {
     });
 
     if (existingColumn) {
-      throw new Error('Já existe outra coluna com este título');
+      throw new BadRequestException('Já existe outra coluna com este título');
     }
 
     // 🔥 CORREÇÃO: Atualizar description também
-    const updateData: { title: string; description?: string } = { title };
+    const updateData: { title: string; description?: string } = { title: title.trim() };
     if (description !== undefined) {
       updateData.description = description;
     }
@@ -220,6 +251,12 @@ export class KanbanColumnService {
   }
 
   async delete(id: string, companyId: string) {
+    if (!companyId) {
+      throw new BadRequestException('CompanyId é obrigatório');
+    }
+
+    console.log('🗑️ delete: id=', id, 'companyId=', companyId); // DEBUG
+
     // Verificar se a coluna pertence à empresa
     const column = await this.prisma.kanbanColumn.findFirst({
       where: { 
@@ -229,7 +266,7 @@ export class KanbanColumnService {
     });
 
     if (!column) {
-      throw new Error('Coluna não encontrada');
+      throw new BadRequestException('Coluna não encontrada');
     }
 
     // 🔥 CORREÇÃO: Buscar a coluna padrão de forma mais flexível
@@ -274,7 +311,7 @@ export class KanbanColumnService {
       });
 
       if (!companyUser) {
-        throw new Error('Nenhum usuário encontrado para criar a coluna padrão');
+        throw new BadRequestException('Nenhum usuário encontrado para criar a coluna padrão');
       }
 
       // 🔥 CORREÇÃO: Adicionar description obrigatória
@@ -330,6 +367,15 @@ export class KanbanColumnService {
   }
 
   async reorder(columns: Array<{ id: string; order: number }>, companyId: string) {
+    if (!companyId) {
+      throw new BadRequestException('CompanyId é obrigatório');
+    }
+    if (!columns || columns.length === 0) {
+      throw new BadRequestException('Lista de colunas para reordenação é obrigatória');
+    }
+
+    console.log('🔄 reorder: columns=', columns.length, 'companyId=', companyId); // DEBUG
+
     // Verificar se todas as colunas pertencem à empresa
     const columnIds = columns.map(col => col.id);
     const companyColumns = await this.prisma.kanbanColumn.findMany({
@@ -341,7 +387,7 @@ export class KanbanColumnService {
     });
 
     if (companyColumns.length !== columns.length) {
-      throw new Error('Algumas colunas não pertencem à empresa');
+      throw new BadRequestException('Algumas colunas não pertencem à empresa');
     }
 
     // Atualizar a ordem de todas as colunas em uma transação
@@ -356,6 +402,12 @@ export class KanbanColumnService {
   }
 
   async findOne(id: string, companyId: string) {
+    if (!companyId) {
+      throw new BadRequestException('CompanyId é obrigatório');
+    }
+
+    console.log('🔍 findOne: id=', id, 'companyId=', companyId); // DEBUG
+
     return this.prisma.kanbanColumn.findFirst({
       where: { 
         id, 
