@@ -1,0 +1,320 @@
+### Variáveis de ambiente
+@baseUrl = http://localhost:3000
+@contentType = application/json
+
+### IDs para teste (substitua pelos IDs reais do seu banco)
+@userId = 12345678-1234-1234-1234-123456789012
+@companyId = 87654321-4321-4321-4321-210987654321
+@email = usuario.teste@empresa.com
+@document = 123.456.789-00
+
+### 1. CRIAR USUÁRIO
+POST {{baseUrl}}/users
+Content-Type: {{contentType}}
+
+{
+  "name": "João Silva",
+  "email": "{{email}}",
+  "password": "senha123",
+  "document": "{{document}}",
+  "role": "EMPLOYER",
+  "isProfessional": true,
+  "professionalRole": "Gerente de Projetos",
+  "phone": "(11) 99999-9999",
+  "companyId": "{{companyId}}"
+}
+
+### 2. CRIAR USUÁRIO ADMIN
+POST {{baseUrl}}/users
+Content-Type: {{contentType}}
+
+{
+  "name": "Maria Admin",
+  "email": "maria.admin@empresa.com",
+  "password": "senha123",
+  "document": "987.654.321-00",
+  "role": "ADMIN",
+  "isProfessional": true,
+  "professionalRole": "Administradora",
+  "phone": "(11) 98888-8888",
+  "companyId": "{{companyId}}",
+  "status": "ATIVO"
+}
+
+### 3. CRIAR USUÁRIO MASTER
+POST {{baseUrl}}/users
+Content-Type: {{contentType}}
+
+{
+  "name": "Carlos Master",
+  "email": "carlos.master@empresa.com",
+  "password": "senha123",
+  "role": "MASTER",
+  "isProfessional": false,
+  "phone": "(11) 97777-7777",
+  "status": "ATIVO"
+}
+
+### 4. CRIAR USUÁRIO SEM COMPANY (OPCIONAL)
+POST {{baseUrl}}/users
+Content-Type: {{contentType}}
+
+{
+  "name": "Ana Profissional",
+  "email": "ana.profissional@empresa.com",
+  "password": "senha123",
+  "role": "EMPLOYER",
+  "isProfessional": true,
+  "professionalRole": "Designer",
+  "phone": "(11) 96666-6666"
+}
+
+### 5. CRIAR USUÁRIO COM DADOS MÍNIMOS
+POST {{baseUrl}}/users
+Content-Type: {{contentType}}
+
+{
+  "name": "Pedro Minimal",
+  "email": "pedro.minimal@empresa.com",
+  "password": "senha123",
+  "role": "EMPLOYER",
+  "phone": "(11) 95555-5555"
+}
+
+### 6. LISTAR TODOS OS USUÁRIOS (PAGINAÇÃO)
+GET {{baseUrl}}/users?page=1&limit=10
+Content-Type: {{contentType}}
+
+### 7. LISTAR USUÁRIOS COM FILTRO DE COMPANY
+GET {{baseUrl}}/users?companyId={{companyId}}&page=1&limit=5
+Content-Type: {{contentType}}
+
+### 8. LISTAR USUÁRIOS COM FILTRO DE STATUS
+GET {{baseUrl}}/users?status=ATIVO&page=1&limit=5
+Content-Type: {{contentType}}
+
+### 9. LISTAR USUÁRIOS COM FILTRO DE ROLE
+GET {{baseUrl}}/users?role=EMPLOYER&page=1&limit=5
+Content-Type: {{contentType}}
+
+### 10. LISTAR USUÁRIOS COM MÚLTIPLOS FILTROS
+GET {{baseUrl}}/users?companyId={{companyId}}&status=ATIVO&role=EMPLOYER&page=1&limit=10
+Content-Type: {{contentType}}
+
+### 11. BUSCAR USUÁRIO POR ID
+GET {{baseUrl}}/users/{{userId}}
+Content-Type: {{contentType}}
+
+### 12. BUSCAR USUÁRIO POR EMAIL
+GET {{baseUrl}}/users/email/{{email}}
+Content-Type: {{contentType}}
+
+### 13. BUSCAR USUÁRIO POR EMAIL INEXISTENTE
+GET {{baseUrl}}/users/email/email.inexistente@empresa.com
+Content-Type: {{contentType}}
+
+### 14. LISTAR USUÁRIOS POR COMPANY
+GET {{baseUrl}}/users/company/{{companyId}}
+Content-Type: {{contentType}}
+
+### 15. LISTAR USUÁRIOS POR ROLE
+GET {{baseUrl}}/users/role/EMPLOYER
+Content-Type: {{contentType}}
+
+### 16. LISTAR USUÁRIOS POR ROLE ADMIN
+GET {{baseUrl}}/users/role/ADMIN
+Content-Type: {{contentType}}
+
+### 17. LISTAR USUÁRIOS POR ROLE MASTER
+GET {{baseUrl}}/users/role/MASTER
+Content-Type: {{contentType}}
+
+### 18. ATUALIZAR USUÁRIO COMPLETO
+PATCH {{baseUrl}}/users/{{userId}}
+Content-Type: {{contentType}}
+
+{
+  "name": "João Silva Atualizado",
+  "email": "joao.atualizado@empresa.com",
+  "professionalRole": "Gerente Sênior",
+  "phone": "(11) 94444-4444",
+  "status": "ATIVO"
+}
+
+### 19. ATUALIZAR APENAS TELEFONE
+PATCH {{baseUrl}}/users/{{userId}}
+Content-Type: {{contentType}}
+
+{
+  "phone": "(11) 93333-3333"
+}
+
+### 20. ATUALIZAR APENAS CARGO PROFISSIONAL
+PATCH {{baseUrl}}/users/{{userId}}
+Content-Type: {{contentType}}
+
+{
+  "professionalRole": "Coordenador de Projetos"
+}
+
+### 21. ATUALIZAR SENHA
+PATCH {{baseUrl}}/users/{{userId}}
+Content-Type: {{contentType}}
+
+{
+  "password": "novaSenha123"
+}
+
+### 22. ATUALIZAR ROLE
+PATCH {{baseUrl}}/users/{{userId}}
+Content-Type: {{contentType}}
+
+{
+  "role": "ADMIN"
+}
+
+### 23. ATUALIZAR STATUS
+PATCH {{baseUrl}}/users/{{userId}}
+Content-Type: {{contentType}}
+
+{
+  "status": "INATIVO"
+}
+
+### 24. ATUALIZAR MÚLTIPLOS CAMPOS
+PATCH {{baseUrl}}/users/{{userId}}
+Content-Type: {{contentType}}
+
+{
+  "name": "João Silva Modificado",
+  "phone": "(11) 92222-2222",
+  "professionalRole": "Diretor",
+  "isProfessional": true
+}
+
+### 25. DESATIVAR USUÁRIO
+PATCH {{baseUrl}}/users/{{userId}}/deactivate
+Content-Type: {{contentType}}
+
+### 26. ATIVAR USUÁRIO
+PATCH {{baseUrl}}/users/{{userId}}/activate
+Content-Type: {{contentType}}
+
+### 27. EXCLUIR USUÁRIO
+DELETE {{baseUrl}}/users/{{userId}}
+Content-Type: {{contentType}}
+
+### 28. TESTES DE VALIDAÇÃO - EMAIL INVÁLIDO
+POST {{baseUrl}}/users
+Content-Type: {{contentType}}
+
+{
+  "name": "Teste Email Inválido",
+  "email": "email-invalido",
+  "password": "senha123",
+  "role": "EMPLOYER",
+  "phone": "(11) 99999-9999"
+}
+
+### 29. TESTES DE VALIDAÇÃO - CAMPOS OBRIGATÓRIOS FALTANDO
+POST {{baseUrl}}/users
+Content-Type: {{contentType}}
+
+{
+  "email": "teste@empresa.com",
+  "password": "senha123"
+}
+
+### 30. TESTES DE VALIDAÇÃO - ROLE INVÁLIDA
+POST {{baseUrl}}/users
+Content-Type: {{contentType}}
+
+{
+  "name": "Teste Role Inválida",
+  "email": "teste.role@empresa.com",
+  "password": "senha123",
+  "role": "INVALID_ROLE",
+  "phone": "(11) 99999-9999"
+}
+
+### 31. TESTES DE VALIDAÇÃO - STATUS INVÁLIDO
+POST {{baseUrl}}/users
+Content-Type: {{contentType}}
+
+{
+  "name": "Teste Status Inválido",
+  "email": "teste.status@empresa.com",
+  "password": "senha123",
+  "role": "EMPLOYER",
+  "phone": "(11) 99999-9999",
+  "status": "INVALID_STATUS"
+}
+
+### 32. TESTES DE VALIDAÇÃO - EMAIL DUPLICADO
+POST {{baseUrl}}/users
+Content-Type: {{contentType}}
+
+{
+  "name": "Usuário Duplicado",
+  "email": "{{email}}",
+  "password": "senha123",
+  "role": "EMPLOYER",
+  "phone": "(11) 91111-1111"
+}
+
+### 33. TESTES DE VALIDAÇÃO - DOCUMENTO DUPLICADO
+POST {{baseUrl}}/users
+Content-Type: {{contentType}}
+
+{
+  "name": "Documento Duplicado",
+  "email": "documento.duplicado@empresa.com",
+  "password": "senha123",
+  "document": "{{document}}",
+  "role": "EMPLOYER",
+  "phone": "(11) 91111-1111"
+}
+
+### 34. BUSCAR USUÁRIO COM ID INVÁLIDO (UUID)
+GET {{baseUrl}}/users/123-invalido
+Content-Type: {{contentType}}
+
+### 35. BUSCAR USUÁRIO INEXISTENTE
+GET {{baseUrl}}/users/00000000-0000-0000-0000-000000000000
+Content-Type: {{contentType}}
+
+### 36. ATUALIZAR USUÁRIO INEXISTENTE
+PATCH {{baseUrl}}/users/00000000-0000-0000-0000-000000000000
+Content-Type: {{contentType}}
+
+{
+  "name": "Usuário Inexistente"
+}
+
+### 37. EXCLUIR USUÁRIO INEXISTENTE
+DELETE {{baseUrl}}/users/00000000-0000-0000-0000-000000000000
+Content-Type: {{contentType}}
+
+### 38. ATUALIZAR COM EMAIL DUPLICADO
+PATCH {{baseUrl}}/users/{{userId}}
+Content-Type: {{contentType}}
+
+{
+  "email": "maria.admin@empresa.com"
+}
+
+### 39. ATUALIZAR COM DOCUMENTO DUPLICADO
+PATCH {{baseUrl}}/users/{{userId}}
+Content-Type: {{contentType}}
+
+{
+  "document": "987.654.321-00"
+}
+
+### 40. LISTAR COM PAGINAÇÃO PERSONALIZADA
+GET {{baseUrl}}/users?page=2&limit=3
+Content-Type: {{contentType}}
+
+### 41. HEALTH CHECK DA API
+GET {{baseUrl}}/users
+Content-Type: {{contentType}}
