@@ -179,9 +179,8 @@ export class AuthService {
       throw new UnauthorizedException('Usuário inativo');
     }
 
-    // 🔥 ATUALIZADO: Comparação direta de senha (sem bcrypt)
     console.log('🔑 [BACKEND] Comparing passwords directly...');
-    const isPasswordValid = password === user.password; // 🔥 COMPARAÇÃO DIRETA
+    const isPasswordValid = password === user.password; 
     console.log('✅ [BACKEND] Password valid:', isPasswordValid);
 
     if (!isPasswordValid) {
@@ -233,7 +232,7 @@ export class AuthService {
         },
       });
 
-      // 🔥 CORREÇÃO: Verificar status atualizado
+      // Verificar status atualizado
       if (!user || user.status !== 'ATIVO') {
         throw new UnauthorizedException();
       }
