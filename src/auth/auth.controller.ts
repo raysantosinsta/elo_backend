@@ -22,7 +22,7 @@ import { JwtAuthGuard } from './jwt-auth.guard';
 export class AuthController {
   constructor(
     private authService: AuthService,
-  ) { } // 🔥 REMOVIDO: JwtService não é necessário no controller
+  ) { }
 
   // Nova rota protegida para criação de usuários por administradores
   @Post('admin/signup')
@@ -41,7 +41,6 @@ export class AuthController {
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   async refreshTokens(@Body() body: { refreshToken: string }) {
-    // 🔥 CORREÇÃO: Removido UseGuards temporariamente ou ajuste sua estratégia
     return this.authService.refreshTokens(body.refreshToken);
   }
 
@@ -52,7 +51,7 @@ export class AuthController {
   }
 
   @Get('profile')
-  @UseGuards(JwtAuthGuard) // 🔥 CORREÇÃO: Usar JwtAuthGuard em vez de AuthGuard('jwt')
+  @UseGuards(JwtAuthGuard)
   async getProfile(@Request() req) {
     console.log('🔍 [CONTROLLER] req.user:', req.user);
     return this.authService.getProfile(req.user.sub);
@@ -75,11 +74,24 @@ export class AuthController {
     return this.authService.getProfessionals(companyId);
   }
 
+  // ✅ NOVA ROTA: SOFT DELETE DE USUÁRIO
+  // @Delete('users/:id')
+  // @HttpCode(HttpStatus.OK)
+  // @UseGuards(JwtAuthGuard)
+  // async softDeleteUser(
+  //   @Param('id') userId: string,
+  //   @Request() req: any, // ✅ Use @Request() em vez de @Req()
+  // ) {
+  //   return this.authService.softDeleteUser(userId, req.user);
+  // }
+
+
+
   // 🔥 ROTA PÚBLICA PARA LISTAR EMPRESAS (qualquer um pode ver)
-  @Get('companies')
-  async getCompanies() {
-    return this.authService.getCompanies();
-  }
+  // @Get('companies')
+  // async getCompanies() {
+  //   return this.authService.getCompanies();
+  // }
 
   // 🔥 ROTA DE SIGNUP PÚBLICA (se necessário)
   // @Post('signup')

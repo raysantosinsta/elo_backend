@@ -324,7 +324,10 @@ export class AuthService {
     };
 
     const [accessToken, refreshToken] = await Promise.all([
-      this.jwtService.signAsync(payload),
+      this.jwtService.signAsync(payload, {
+        secret: process.env.JWT_SECRET,
+        expiresIn: '30m',
+      }),
       this.jwtService.signAsync(payload, {
         secret: process.env.JWT_REFRESH_SECRET,
         expiresIn: '7d',
@@ -359,9 +362,7 @@ export class AuthService {
 
     return user;
   }
-
-  // Serviços de company
-
+  //TODO:  ver se realmnte precisa desses dois metodos separados
   async getCompanies() {
     const companies = await this.prisma.company.findMany({
       select: {
@@ -449,4 +450,70 @@ export class AuthService {
 
     return user;
   }
+
+  // async softDeleteUser(userId: string, requestingUser: UserProfile): Promise<{ message: string }> {
+  //   // 🔒 VALIDAÇÃO DE PERMISSÃO - apenas MASTER ou ADMIN podem deletar usuários
+  //   if (!['MASTER', 'ADMIN'].includes(requestingUser.role)) {
+  //     throw new UnauthorizedException('Você não tem permissão para deletar usuários. Apenas MASTER e ADMIN podem realizar esta ação.');
+  //   }
+
+  //   try {
+  //     // Verificar se o usuário existe
+  //     const userToDelete = await this.prisma.user.findUnique({
+  //       where: { id: userId },
+  //       select: {
+  //         id: true,
+  //         email: true,
+  //         role: true,
+  //         companyId: true,
+  //         status: true,
+  //       },
+  //     });
+
+  //     if (!userToDelete) {
+  //       throw new NotFoundException('Usuário não encontrado');
+  //     }
+
+  //     // Verificar se o usuário já está inativo
+  //     if (userToDelete.status === 'INATIVO') {
+  //       throw new BadRequestException('Usuário já está desativado');
+  //     }
+
+  //     // 🔒 VALIDAÇÃO ADICIONAL: 
+  //     // - ADMIN só pode deletar usuários da mesma empresa
+  //     // - MASTER pode deletar qualquer usuário
+  //     if (requestingUser.role === 'ADMIN' && userToDelete.companyId !== requestingUser.companyId) {
+  //       throw new UnauthorizedException('Você só pode deletar usuários da sua própria empresa');
+  //     }
+
+  //     // 🔒 IMPEDIR QUE UM USUÁRIO DELETE A SI MESMO
+  //     if (userToDelete.id === requestingUser.id) {
+  //       throw new BadRequestException('Você não pode deletar sua própria conta');
+  //     }
+
+  //     // 🔒 IMPEDIR QUE ADMIN DELETE OUTRO ADMIN OU MASTER
+  //     if (requestingUser.role === 'ADMIN' && ['ADMIN', 'MASTER'].includes(userToDelete.role)) {
+  //       throw new UnauthorizedException('Você não tem permissão para deletar usuários com perfil ADMIN ou MASTER');
+  //     }
+
+  //     // Soft delete: marcar como INATIVO em vez de deletar
+  //     await this.prisma.user.update({
+  //       where: { id: userId },
+  //       data: {
+  //         status: 'INATIVO',
+  //         updatedAt: new Date(),
+  //       },
+  //     });
+
+  //     return { message: 'Usuário desativado com sucesso' };
+  //   } catch (error) {
+  //     const prismaError = error as PrismaError;
+
+  //     if (prismaError.code === 'P2025') {
+  //       throw new NotFoundException('Usuário não encontrado');
+  //     }
+
+  //     throw error;
+  //   }
+  // }
 }
