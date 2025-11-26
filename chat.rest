@@ -1,0 +1,29 @@
+### 1. Criar um novo Chat
+# Este endpoint cria um chat novo. Substitua os valores no body conforme necessário.
+POST http://localhost:3000/chats
+Content-Type: application/json
+
+{
+  "companyId": "0bc71c65-b37b-4037-ba6d-df47e51fab71"
+}
+
+### 2. Buscar um Chat por ID
+# Substitua :id pelo ID real do chat criado acima.
+GET http://localhost:3000/chats/9e8a448e-b0e7-4b8f-a79f-135289a3269d
+
+### 3. Criar uma Mensagem de Chat
+# Este endpoint cria uma mensagem. Certifique-se de ter um chatId válido.
+POST http://localhost:3000/chat-messages
+Content-Type: application/json
+
+{
+  "chatId": "9e8a448e-b0e7-4b8f-a79f-135289a3269d",
+  "senderId": "818fd6fe-07c2-452d-8e45-15a3b2b08873",
+  "message": "Olá! Esta é uma mensagem de teste."
+}
+
+### 4. Buscar Mensagens de um Chat
+# Substitua :chatId pelo ID do chat para listar mensagens.
+GET http://localhost:3000/chat-messages/chat/9e8a448e-b0e7-4b8f-a79f-135289a3269d
+
+# eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI4MThmZDZmZS0wN2MyLTQ1MmQtOGU0NS0xNWEzYjJiMDg4NzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOm51bGwsImlhdCI6MTc2NDE4MTgwOCwiZXhwIjoxNzY0MTgzNjA4fQ.6RoNlcHniNw0bZuvUYtxuyUxCaUzQi2-NH6VQL2GW84

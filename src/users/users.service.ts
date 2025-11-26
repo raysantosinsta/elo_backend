@@ -279,4 +279,20 @@ async activate(id: string): Promise<UserResponseDto> {
 
     return users.map(user => this.toResponseDto(user));
   }
+  async searchUsers(query: string): Promise<UserResponseDto[]> {
+  if (!query || query.trim() === "") return [];
+
+  const users = await this.prisma.user.findMany({
+    where: {
+      OR: [
+        { name: { contains: query, mode: 'insensitive' } },
+        { email: { contains: query, mode: 'insensitive' } },
+      ],
+    },
+    orderBy: { name: 'asc' },
+  });
+
+  return users.map(u => this.toResponseDto(u));
+}
+
 }

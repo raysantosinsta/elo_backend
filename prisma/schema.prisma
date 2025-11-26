@@ -108,6 +108,7 @@ model Company {
   taskAudios    TaskAudio[]
   taskVideos    TaskVideo[]
   taskAddresses TaskAddress[]
+  chats         Chat[] 
 
   @@index([cnpj])
   @@index([status])
@@ -157,6 +158,10 @@ model User {
   assignedBudgets      Budget[]           @relation("AssignedBudgets")
   createdKanbanColumns KanbanColumn[]     @relation("CreatedKanbanColumns")
   updatedKanbanColumns KanbanColumn[]     @relation("UpdatedKanbanColumns")
+  sentMessages         ChatMessage[]      @relation("UserSentMessages")
+  mentionedInMessages  ChatMessage[]      @relation("MentionedProfessional")
+
+
   companyId            String?             @map("contador_id") @db.Uuid
   company              Company?            @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
@@ -559,3 +564,35 @@ model Collection {
   @@index([createdAt])
   @@map("colecoes")
 }
+
+model Chat {
+  id         String         @id @default(uuid()) @map("id") @db.Uuid
+  companyId  String?        @map("empresa_id") @db.Uuid
+  createdAt  DateTime       @default(now()) @map("criado_em")
+
+  company    Company?       @relation(fields: [companyId], references: [id])
+  messages   ChatMessage[]
+
+  @@index([companyId])
+  @@map("chats")
+}
+
+model ChatMessage {
+  id        String   @id @default(uuid()) @map("id") @db.Uuid
+  chatId    String?  @map("chat_id") @db.Uuid
+  senderId  String   @map("remetente_id") @db.Uuid
+  message   String   @map("mensagem") @db.Text
+  mentionedProfessionalId String? @map("profissional_mencionado_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("criado_em")
+
+  sender                User   @relation("UserSentMessages", fields: [senderId], references: [id])
+  chat                  Chat?  @relation(fields: [chatId], references: [id])
+  mentionedProfessional User?  @relation("MentionedProfessional", fields: [mentionedProfessionalId], references: [id])
+
+  @@index([chatId])
+  @@index([senderId])
+  @@index([mentionedProfessionalId])
+  @@index([createdAt])
+  @@map("mensagens_chat")
+}
+

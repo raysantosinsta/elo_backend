@@ -620,7 +620,10 @@ export class TasksService {
   }
 
   async findAll(companyId: string) {
-    return this.prisma.task.findMany({
+  try {
+    console.log(`🔍 Buscando todas as tasks para company: ${companyId}`);
+    
+    const tasks = await this.prisma.task.findMany({
       where: { companyId },
       include: { 
         assignedTo: {
@@ -642,18 +645,28 @@ export class TasksService {
       },
       orderBy: { createdAt: 'desc' },
     });
+
+    console.log(`✅ Encontradas ${tasks.length} tasks para company ${companyId}`);
+    return tasks;
+    
+  } catch (error) {
+    console.error('❌ Erro ao buscar tasks:', error);
+    // Retornar array vazio em caso de erro
+    return [];
   }
+}
 
   async findAllPaginated(params: {
-    companyId: string;
-    page?: number;
-    limit?: number;
-    columnId?: string;
-    assignedToId?: string;
-    routeId?: string;
-    status?: string;
-    search?: string;
-  }) {
+  companyId: string;
+  page?: number;
+  limit?: number;
+  columnId?: string;
+  assignedToId?: string;
+  routeId?: string;
+  status?: string;
+  search?: string;
+}) {
+  try {
     const page = params.page || 1;
     const limit = params.limit || 10;
     const skip = (page - 1) * limit;
@@ -690,6 +703,8 @@ export class TasksService {
       ];
     }
 
+    console.log(`🔍 Buscando tasks paginadas:`, where);
+
     const [tasks, total] = await Promise.all([
       this.prisma.task.findMany({
         where,
@@ -718,6 +733,8 @@ export class TasksService {
       this.prisma.task.count({ where }),
     ]);
 
+    console.log(`✅ Tasks paginadas encontradas: ${tasks.length} de ${total} total`);
+
     return {
       tasks,
       pagination: {
@@ -729,7 +746,23 @@ export class TasksService {
         hasPrev: page > 1,
       },
     };
+    
+  } catch (error) {
+    console.error('❌ Erro ao buscar tasks paginadas:', error);
+    // Retornar estrutura vazia em caso de erro
+    return {
+      tasks: [],
+      pagination: {
+        page: params.page || 1,
+        limit: params.limit || 10,
+        total: 0,
+        totalPages: 0,
+        hasNext: false,
+        hasPrev: false,
+      },
+    };
   }
+}
 
   async findOverdue(companyId: string) {
     const today = new Date();

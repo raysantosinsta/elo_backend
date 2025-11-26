@@ -1,4 +1,6 @@
-// kanban-column.controller.ts
+/* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import {
   Controller,
   Get,
@@ -21,8 +23,34 @@ export class KanbanColumnController {
 
   @Get()
   async findAll(@Request() req) {
-    const companyId = req.user.companyId;
-    return this.kanbanColumnService.findAll(companyId);
+    try {
+      const companyId = req.user.companyId;
+      console.log('📥 Requisição para /kanban-columns - companyId:', companyId);
+      
+      if (!companyId) {
+        return {
+          success: false,
+          message: 'CompanyId não encontrado no token',
+          columns: []
+        };
+      }
+
+      const columns = await this.kanbanColumnService.findAll(companyId);
+      
+      return {
+        success: true,
+        message: `Encontradas ${columns.length} colunas`,
+        columns
+      };
+      
+    } catch (error) {
+      console.error('❌ Erro no controller de colunas:', error);
+      return {
+        success: false,
+        message: error.message || 'Erro ao buscar colunas',
+        columns: []
+      };
+    }
   }
 
   @Get(':id')

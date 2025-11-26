@@ -10,16 +10,17 @@ export class KanbanColumnService {
   constructor(private prisma: PrismaService) {}
 
   async findAll(companyId: string) {
-    if (!companyId) {
-      throw new BadRequestException('CompanyId é obrigatório');
-    }
+  if (!companyId) {
+    throw new BadRequestException('CompanyId é obrigatório');
+  }
 
-    console.log('🔍 findAll: companyId:', companyId); // DEBUG
+  console.log('🔍 Buscando colunas para company:', companyId);
 
+  try {
+    // Primeiro, buscar colunas existentes
     const columns = await this.prisma.kanbanColumn.findMany({
       where: { 
         companyId,
-        // REMOVIDO: isActive não existe mais no schema
       },
       orderBy: { order: 'asc' },
       include: {
@@ -38,14 +39,19 @@ export class KanbanColumnService {
       }
     });
 
+    console.log(`✅ Colunas encontradas: ${columns.length}`);
+
+    // Se não há colunas, criar as padrões
     if (columns.length === 0) {
-      const defaults = [
-        'Sem etapa',
-        'Preenchimento Estilo',
-        'Desenvolvimento',
-        'Cad',
-        'Ficha para Engenharia',
-        'Lacre',
+      console.log('📝 Criando colunas padrão...');
+      
+      const defaultColumns = [
+        { title: 'Sem etapa', description: 'Tarefas sem etapa definida' },
+        { title: 'Preenchimento Estilo', description: 'Etapa de preenchimento de estilo' },
+        { title: 'Desenvolvimento', description: 'Etapa de desenvolvimento' },
+        { title: 'Cad', description: 'Etapa de CAD' },
+        { title: 'Ficha para Engenharia', description: 'Ficha técnica para engenharia' },
+        { title: 'Lacre', description: 'Etapa final - Lacre' },
       ];
 
       // Buscar um usuário da empresa para ser o criador
@@ -55,42 +61,50 @@ export class KanbanColumnService {
       });
 
       if (!companyUser) {
-        throw new BadRequestException('Nenhum usuário encontrado para criar as colunas padrão');
+        console.warn('⚠️ Nenhum usuário encontrado para criar colunas padrão');
+        // Retornar array vazio se não tem usuário
+        return [];
       }
 
-      // 🔥 CORREÇÃO: Adicionar description obrigatória
-      await this.prisma.kanbanColumn.createMany({
-        data: defaults.map((title, i) => ({ 
-          title, 
-          description: `Coluna ${title}`, // Campo obrigatório adicionado
-          order: i,
-          companyId,
-          createdById: companyUser.id
-        })),
-      });
-
-      return this.prisma.kanbanColumn.findMany({ 
-        where: { companyId },
-        orderBy: { order: 'asc' },
-        include: {
-          tasks: {
-            include: {
-              assignedTo: {
-                select: {
-                  id: true,
-                  name: true,
-                  email: true
+      // Criar colunas padrão
+      const createPromises = defaultColumns.map((col, index) => 
+        this.prisma.kanbanColumn.create({
+          data: { 
+            title: col.title, 
+            description: col.description,
+            order: index,
+            companyId,
+            createdById: companyUser.id
+          },
+          include: {
+            tasks: {
+              include: {
+                assignedTo: {
+                  select: {
+                    id: true,
+                    name: true,
+                    email: true
+                  }
                 }
               }
-            },
-            orderBy: { createdAt: 'desc' }
+            }
           }
-        }
-      });
+        })
+      );
+
+      const newColumns = await Promise.all(createPromises);
+      console.log(`✅ ${newColumns.length} colunas padrão criadas`);
+      return newColumns;
     }
 
     return columns;
+    
+  } catch (error) {
+    console.error('❌ Erro ao buscar colunas:', error);
+    // Em caso de erro, retornar array vazio
+    return [];
   }
+}
 
   async updateStatus(id: string, columnId: string | null, companyId: string) {
     if (!companyId) {
@@ -135,6 +149,7 @@ export class KanbanColumnService {
   }
 
   async create(title: string, companyId: string, createdById: string) {
+  try {
     if (!title?.trim()) {
       throw new BadRequestException('Título da coluna é obrigatório');
     }
@@ -145,7 +160,7 @@ export class KanbanColumnService {
       throw new BadRequestException('CreatedById é obrigatório');
     }
 
-    console.log('🔧 create: title=', title, 'companyId=', companyId, 'createdById=', createdById); // DEBUG
+    console.log('🔧 Criando coluna:', { title, companyId, createdById });
 
     const maxOrder = await this.prisma.kanbanColumn.aggregate({
       where: { companyId },
@@ -156,7 +171,7 @@ export class KanbanColumnService {
     // Verificar se já existe uma coluna com o mesmo título na empresa
     const existingColumn = await this.prisma.kanbanColumn.findFirst({
       where: { 
-        title, 
+        title: title.trim(), 
         companyId 
       }
     });
@@ -165,11 +180,10 @@ export class KanbanColumnService {
       throw new BadRequestException('Já existe uma coluna com este título');
     }
 
-    // 🔥 CORREÇÃO: Adicionar description obrigatória
-    return this.prisma.kanbanColumn.create({
+    const newColumn = await this.prisma.kanbanColumn.create({
       data: { 
         title: title.trim(), 
-        description: `Coluna ${title.trim()}`, // Campo obrigatório
+        description: `Coluna ${title.trim()}`,
         order, 
         companyId,
         createdById 
@@ -188,7 +202,15 @@ export class KanbanColumnService {
         }
       }
     });
+
+    console.log('✅ Coluna criada com sucesso:', newColumn.title);
+    return newColumn;
+    
+  } catch (error) {
+    console.error('❌ Erro ao criar coluna:', error);
+    throw error;
   }
+}
 
   async update(id: string, title: string, companyId: string, description?: string) {
     if (!title?.trim()) {

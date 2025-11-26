@@ -80,4 +80,12 @@ export class UsersController {
   remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
     return this.usersService.remove(id);
   }
+
+  @Get('search')
+searchUsers(
+  @Query('query') query: string,
+) {
+  return this.usersService.searchUsers(query);
+}
+
 }

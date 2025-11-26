@@ -1,8 +1,8 @@
 -- CreateEnum
-CREATE TYPE "UserRole" AS ENUM ('MASTER', 'ADMIN', 'USER');
+CREATE TYPE "UserRole" AS ENUM ('MASTER', 'ADMIN', 'EMPLOYER');
 
 -- CreateEnum
-CREATE TYPE "UserStatus" AS ENUM ('ACTIVE', 'INACTIVE', 'BLOCKED');
+CREATE TYPE "UserStatus" AS ENUM ('ATIVO', 'INATIVO');
 
 -- CreateEnum
 CREATE TYPE "SubscriptionStatus" AS ENUM ('ACTIVE', 'INACTIVE', 'CANCELED', 'EXPIRED');
@@ -20,14 +20,17 @@ CREATE TYPE "PlanPeriod" AS ENUM ('MONTHLY', 'YEARLY');
 CREATE TYPE "NotificationType" AS ENUM ('TASK_ASSIGNED', 'TASK_COMPLETED', 'BUDGET_APPROVED', 'BUDGET_PENDING_APPROVAL', 'BUDGET_REJECTED', 'SYSTEM_ALERT', 'PAYMENT_REMINDER', 'TASK_OVERDUE', 'NEW_MESSAGE', 'COLLECTION_LAUNCHED', 'LOW_STOCK_ALERT');
 
 -- CreateEnum
-CREATE TYPE "QuantidadeTipo" AS ENUM ('QTDE', 'MEDIA');
+CREATE TYPE "CompanyStatus" AS ENUM ('ATIVO', 'INATIVO');
+
+-- CreateEnum
+CREATE TYPE "KanbanColumnStatus" AS ENUM ('PENDING', 'FINISHED');
 
 -- CreateTable
 CREATE TABLE "empresas" (
     "id" UUID NOT NULL,
+    "status" "CompanyStatus" NOT NULL DEFAULT 'ATIVO',
     "nome" VARCHAR(150) NOT NULL,
     "cnpj" VARCHAR(18) NOT NULL,
-    "status" VARCHAR(20) NOT NULL DEFAULT 'ativo',
     "telefone" VARCHAR(20) NOT NULL,
     "email" VARCHAR(255) NOT NULL,
     "endereco" VARCHAR(300) NOT NULL,
@@ -63,17 +66,18 @@ CREATE TABLE "planos" (
 -- CreateTable
 CREATE TABLE "usuarios" (
     "id" UUID NOT NULL,
+    "status" "UserStatus" NOT NULL DEFAULT 'ATIVO',
     "nome" VARCHAR(150) NOT NULL,
     "email" VARCHAR(255) NOT NULL,
+    "documento" VARCHAR(20),
     "senha" VARCHAR(255) NOT NULL,
-    "status" "UserStatus" NOT NULL DEFAULT 'ACTIVE',
     "perfil" "UserRole" NOT NULL,
     "profissional" BOOLEAN NOT NULL DEFAULT false,
     "cargo_profissional" VARCHAR(100),
-    "contato" VARCHAR(20) NOT NULL,
+    "telefone" VARCHAR(20) NOT NULL,
     "criado_em" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "atualizado_em" TIMESTAMP(3) NOT NULL,
-    "empresa_id" UUID NOT NULL,
+    "contador_id" UUID,
 
     CONSTRAINT "usuarios_pkey" PRIMARY KEY ("id")
 );
@@ -89,7 +93,7 @@ CREATE TABLE "assinaturas" (
     "fim_teste" TIMESTAMP(3),
     "criado_em" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "atualizado_em" TIMESTAMP(3) NOT NULL,
-    "empresa_id" UUID NOT NULL,
+    "contador_id" UUID NOT NULL,
     "plano_id" UUID NOT NULL,
 
     CONSTRAINT "assinaturas_pkey" PRIMARY KEY ("id")
@@ -98,13 +102,15 @@ CREATE TABLE "assinaturas" (
 -- CreateTable
 CREATE TABLE "colunas_kanban" (
     "id" UUID NOT NULL,
+    "status" "KanbanColumnStatus" NOT NULL DEFAULT 'PENDING',
+    "descricao" TEXT NOT NULL,
     "titulo" TEXT NOT NULL,
-    "ordem" INTEGER NOT NULL DEFAULT 0,
-    "ativo" BOOLEAN NOT NULL DEFAULT true,
+    "ordem" INTEGER NOT NULL DEFAULT 1,
     "criado_em" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "atualizado_em" TIMESTAMP(3) NOT NULL,
-    "empresa_id" UUID NOT NULL,
-    "criado_por_id" UUID NOT NULL,
+    "contador_id" UUID,
+    "criado_por_id" UUID,
+    "atualizado_por_id" UUID,
 
     CONSTRAINT "colunas_kanban_pkey" PRIMARY KEY ("id")
 );
@@ -124,7 +130,7 @@ CREATE TABLE "tarefas" (
     "atualizado_em" TIMESTAMP(3) NOT NULL,
     "criado_por_id" UUID,
     "concluido_por_id" UUID,
-    "empresa_id" UUID NOT NULL,
+    "contador_id" UUID NOT NULL,
     "coluna_id" UUID NOT NULL,
     "atribuido_para_id" UUID,
     "rota_id" UUID,
@@ -145,7 +151,7 @@ CREATE TABLE "enderecos_tarefas" (
     "criado_em" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "atualizado_em" TIMESTAMP(3) NOT NULL,
     "tarefa_id" UUID NOT NULL,
-    "empresa_id" UUID NOT NULL,
+    "contador_id" UUID NOT NULL,
 
     CONSTRAINT "enderecos_tarefas_pkey" PRIMARY KEY ("id")
 );
@@ -158,7 +164,7 @@ CREATE TABLE "imagens_tarefas" (
     "tamanho" INTEGER,
     "criado_em" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "tarefa_id" UUID NOT NULL,
-    "empresa_id" UUID NOT NULL,
+    "contador_id" UUID NOT NULL,
 
     CONSTRAINT "imagens_tarefas_pkey" PRIMARY KEY ("id")
 );
@@ -172,7 +178,7 @@ CREATE TABLE "audios_tarefas" (
     "tamanho" INTEGER,
     "criado_em" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "tarefa_id" UUID NOT NULL,
-    "empresa_id" UUID NOT NULL,
+    "contador_id" UUID NOT NULL,
 
     CONSTRAINT "audios_tarefas_pkey" PRIMARY KEY ("id")
 );
@@ -186,7 +192,7 @@ CREATE TABLE "videos_tarefas" (
     "tamanho" INTEGER,
     "criado_em" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "tarefa_id" UUID NOT NULL,
-    "empresa_id" UUID NOT NULL,
+    "contador_id" UUID NOT NULL,
 
     CONSTRAINT "videos_tarefas_pkey" PRIMARY KEY ("id")
 );
@@ -210,7 +216,7 @@ CREATE TABLE "notificacoes" (
     "lida" BOOLEAN NOT NULL DEFAULT false,
     "criado_em" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "lido_em" TIMESTAMP(3),
-    "empresa_id" UUID NOT NULL,
+    "contador_id" UUID NOT NULL,
     "tarefa_id" UUID,
 
     CONSTRAINT "notificacoes_pkey" PRIMARY KEY ("id")
@@ -274,7 +280,7 @@ CREATE TABLE "produtos_materiais" (
     "produto_id" UUID NOT NULL,
     "material_id" UUID NOT NULL,
     "quantidade" DECIMAL(10,4) NOT NULL,
-    "tipo_quantidade" "QuantidadeTipo" NOT NULL,
+    "tipo_quantidade" VARCHAR(20) NOT NULL,
     "valor_unitario" DECIMAL(10,4) NOT NULL,
     "custo_unitario" DECIMAL(10,4) NOT NULL,
     "criado_em" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -313,20 +319,6 @@ CREATE TABLE "orcamentos" (
 );
 
 -- CreateTable
-CREATE TABLE "configuracoes_empresa" (
-    "id" UUID NOT NULL,
-    "chave" VARCHAR(100) NOT NULL,
-    "valor" JSONB,
-    "descricao" VARCHAR(300),
-    "ativo" BOOLEAN NOT NULL DEFAULT true,
-    "criado_em" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "atualizado_em" TIMESTAMP(3) NOT NULL,
-    "empresa_id" UUID NOT NULL,
-
-    CONSTRAINT "configuracoes_empresa_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
 CREATE TABLE "colecoes" (
     "id" UUID NOT NULL,
     "nome" VARCHAR(100) NOT NULL,
@@ -342,6 +334,27 @@ CREATE TABLE "colecoes" (
     "produto_id" UUID,
 
     CONSTRAINT "colecoes_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "chats" (
+    "id" UUID NOT NULL,
+    "empresa_id" UUID,
+    "criado_em" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "chats_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "mensagens_chat" (
+    "id" UUID NOT NULL,
+    "chat_id" UUID,
+    "remetente_id" UUID NOT NULL,
+    "mensagem" TEXT NOT NULL,
+    "profissional_mencionado_id" UUID,
+    "criado_em" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "mensagens_chat_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateIndex
@@ -366,7 +379,10 @@ CREATE INDEX "planos_preco_idx" ON "planos"("preco");
 CREATE UNIQUE INDEX "usuarios_email_key" ON "usuarios"("email");
 
 -- CreateIndex
-CREATE INDEX "usuarios_empresa_id_idx" ON "usuarios"("empresa_id");
+CREATE UNIQUE INDEX "usuarios_documento_key" ON "usuarios"("documento");
+
+-- CreateIndex
+CREATE INDEX "usuarios_contador_id_idx" ON "usuarios"("contador_id");
 
 -- CreateIndex
 CREATE INDEX "usuarios_email_idx" ON "usuarios"("email");
@@ -381,7 +397,7 @@ CREATE INDEX "usuarios_status_idx" ON "usuarios"("status");
 CREATE INDEX "usuarios_criado_em_idx" ON "usuarios"("criado_em");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "assinaturas_empresa_id_key" ON "assinaturas"("empresa_id");
+CREATE UNIQUE INDEX "assinaturas_contador_id_key" ON "assinaturas"("contador_id");
 
 -- CreateIndex
 CREATE INDEX "assinaturas_status_idx" ON "assinaturas"("status");
@@ -393,19 +409,16 @@ CREATE INDEX "assinaturas_data_renovacao_idx" ON "assinaturas"("data_renovacao")
 CREATE INDEX "assinaturas_fim_teste_idx" ON "assinaturas"("fim_teste");
 
 -- CreateIndex
-CREATE INDEX "colunas_kanban_empresa_id_idx" ON "colunas_kanban"("empresa_id");
+CREATE INDEX "colunas_kanban_contador_id_idx" ON "colunas_kanban"("contador_id");
 
 -- CreateIndex
 CREATE INDEX "colunas_kanban_ordem_idx" ON "colunas_kanban"("ordem");
 
 -- CreateIndex
-CREATE INDEX "colunas_kanban_ativo_idx" ON "colunas_kanban"("ativo");
+CREATE UNIQUE INDEX "colunas_kanban_contador_id_titulo_key" ON "colunas_kanban"("contador_id", "titulo");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "colunas_kanban_empresa_id_titulo_key" ON "colunas_kanban"("empresa_id", "titulo");
-
--- CreateIndex
-CREATE INDEX "tarefas_empresa_id_idx" ON "tarefas"("empresa_id");
+CREATE INDEX "tarefas_contador_id_idx" ON "tarefas"("contador_id");
 
 -- CreateIndex
 CREATE INDEX "tarefas_atribuido_para_id_idx" ON "tarefas"("atribuido_para_id");
@@ -423,7 +436,7 @@ CREATE INDEX "tarefas_prioridade_idx" ON "tarefas"("prioridade");
 CREATE INDEX "tarefas_criado_em_idx" ON "tarefas"("criado_em");
 
 -- CreateIndex
-CREATE INDEX "tarefas_empresa_id_status_idx" ON "tarefas"("empresa_id", "status");
+CREATE INDEX "tarefas_contador_id_status_idx" ON "tarefas"("contador_id", "status");
 
 -- CreateIndex
 CREATE INDEX "tarefas_prazo_status_idx" ON "tarefas"("prazo", "status");
@@ -438,31 +451,31 @@ CREATE INDEX "tarefas_rota_id_idx" ON "tarefas"("rota_id");
 CREATE UNIQUE INDEX "enderecos_tarefas_tarefa_id_key" ON "enderecos_tarefas"("tarefa_id");
 
 -- CreateIndex
-CREATE INDEX "enderecos_tarefas_empresa_id_idx" ON "enderecos_tarefas"("empresa_id");
+CREATE INDEX "enderecos_tarefas_contador_id_idx" ON "enderecos_tarefas"("contador_id");
 
 -- CreateIndex
 CREATE INDEX "enderecos_tarefas_tarefa_id_idx" ON "enderecos_tarefas"("tarefa_id");
 
 -- CreateIndex
-CREATE INDEX "imagens_tarefas_empresa_id_idx" ON "imagens_tarefas"("empresa_id");
+CREATE INDEX "imagens_tarefas_contador_id_idx" ON "imagens_tarefas"("contador_id");
 
 -- CreateIndex
 CREATE INDEX "imagens_tarefas_tarefa_id_idx" ON "imagens_tarefas"("tarefa_id");
 
 -- CreateIndex
-CREATE INDEX "audios_tarefas_empresa_id_idx" ON "audios_tarefas"("empresa_id");
+CREATE INDEX "audios_tarefas_contador_id_idx" ON "audios_tarefas"("contador_id");
 
 -- CreateIndex
 CREATE INDEX "audios_tarefas_tarefa_id_idx" ON "audios_tarefas"("tarefa_id");
 
 -- CreateIndex
-CREATE INDEX "videos_tarefas_empresa_id_idx" ON "videos_tarefas"("empresa_id");
+CREATE INDEX "videos_tarefas_contador_id_idx" ON "videos_tarefas"("contador_id");
 
 -- CreateIndex
 CREATE INDEX "videos_tarefas_tarefa_id_idx" ON "videos_tarefas"("tarefa_id");
 
 -- CreateIndex
-CREATE INDEX "notificacoes_empresa_id_idx" ON "notificacoes"("empresa_id");
+CREATE INDEX "notificacoes_contador_id_idx" ON "notificacoes"("contador_id");
 
 -- CreateIndex
 CREATE INDEX "notificacoes_tipo_idx" ON "notificacoes"("tipo");
@@ -543,15 +556,6 @@ CREATE INDEX "orcamentos_criado_em_idx" ON "orcamentos"("criado_em");
 CREATE INDEX "orcamentos_validade_idx" ON "orcamentos"("validade");
 
 -- CreateIndex
-CREATE INDEX "configuracoes_empresa_empresa_id_idx" ON "configuracoes_empresa"("empresa_id");
-
--- CreateIndex
-CREATE INDEX "configuracoes_empresa_ativo_idx" ON "configuracoes_empresa"("ativo");
-
--- CreateIndex
-CREATE UNIQUE INDEX "configuracoes_empresa_empresa_id_chave_key" ON "configuracoes_empresa"("empresa_id", "chave");
-
--- CreateIndex
 CREATE UNIQUE INDEX "colecoes_referencia_key" ON "colecoes"("referencia");
 
 -- CreateIndex
@@ -569,20 +573,38 @@ CREATE INDEX "colecoes_lancamento_idx" ON "colecoes"("lancamento");
 -- CreateIndex
 CREATE INDEX "colecoes_criado_em_idx" ON "colecoes"("criado_em");
 
--- AddForeignKey
-ALTER TABLE "usuarios" ADD CONSTRAINT "usuarios_empresa_id_fkey" FOREIGN KEY ("empresa_id") REFERENCES "empresas"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+-- CreateIndex
+CREATE INDEX "chats_empresa_id_idx" ON "chats"("empresa_id");
+
+-- CreateIndex
+CREATE INDEX "mensagens_chat_chat_id_idx" ON "mensagens_chat"("chat_id");
+
+-- CreateIndex
+CREATE INDEX "mensagens_chat_remetente_id_idx" ON "mensagens_chat"("remetente_id");
+
+-- CreateIndex
+CREATE INDEX "mensagens_chat_profissional_mencionado_id_idx" ON "mensagens_chat"("profissional_mencionado_id");
+
+-- CreateIndex
+CREATE INDEX "mensagens_chat_criado_em_idx" ON "mensagens_chat"("criado_em");
 
 -- AddForeignKey
-ALTER TABLE "assinaturas" ADD CONSTRAINT "assinaturas_empresa_id_fkey" FOREIGN KEY ("empresa_id") REFERENCES "empresas"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "usuarios" ADD CONSTRAINT "usuarios_contador_id_fkey" FOREIGN KEY ("contador_id") REFERENCES "empresas"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "assinaturas" ADD CONSTRAINT "assinaturas_contador_id_fkey" FOREIGN KEY ("contador_id") REFERENCES "empresas"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "assinaturas" ADD CONSTRAINT "assinaturas_plano_id_fkey" FOREIGN KEY ("plano_id") REFERENCES "planos"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "colunas_kanban" ADD CONSTRAINT "colunas_kanban_empresa_id_fkey" FOREIGN KEY ("empresa_id") REFERENCES "empresas"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "colunas_kanban" ADD CONSTRAINT "colunas_kanban_contador_id_fkey" FOREIGN KEY ("contador_id") REFERENCES "empresas"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "colunas_kanban" ADD CONSTRAINT "colunas_kanban_criado_por_id_fkey" FOREIGN KEY ("criado_por_id") REFERENCES "usuarios"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "colunas_kanban" ADD CONSTRAINT "colunas_kanban_criado_por_id_fkey" FOREIGN KEY ("criado_por_id") REFERENCES "usuarios"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "colunas_kanban" ADD CONSTRAINT "colunas_kanban_atualizado_por_id_fkey" FOREIGN KEY ("atualizado_por_id") REFERENCES "usuarios"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "tarefas" ADD CONSTRAINT "tarefas_criado_por_id_fkey" FOREIGN KEY ("criado_por_id") REFERENCES "usuarios"("id") ON DELETE SET NULL ON UPDATE CASCADE;
@@ -591,7 +613,7 @@ ALTER TABLE "tarefas" ADD CONSTRAINT "tarefas_criado_por_id_fkey" FOREIGN KEY ("
 ALTER TABLE "tarefas" ADD CONSTRAINT "tarefas_concluido_por_id_fkey" FOREIGN KEY ("concluido_por_id") REFERENCES "usuarios"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "tarefas" ADD CONSTRAINT "tarefas_empresa_id_fkey" FOREIGN KEY ("empresa_id") REFERENCES "empresas"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "tarefas" ADD CONSTRAINT "tarefas_contador_id_fkey" FOREIGN KEY ("contador_id") REFERENCES "empresas"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "tarefas" ADD CONSTRAINT "tarefas_coluna_id_fkey" FOREIGN KEY ("coluna_id") REFERENCES "colunas_kanban"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -606,28 +628,28 @@ ALTER TABLE "tarefas" ADD CONSTRAINT "tarefas_rota_id_fkey" FOREIGN KEY ("rota_i
 ALTER TABLE "enderecos_tarefas" ADD CONSTRAINT "enderecos_tarefas_tarefa_id_fkey" FOREIGN KEY ("tarefa_id") REFERENCES "tarefas"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "enderecos_tarefas" ADD CONSTRAINT "enderecos_tarefas_empresa_id_fkey" FOREIGN KEY ("empresa_id") REFERENCES "empresas"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "enderecos_tarefas" ADD CONSTRAINT "enderecos_tarefas_contador_id_fkey" FOREIGN KEY ("contador_id") REFERENCES "empresas"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "imagens_tarefas" ADD CONSTRAINT "imagens_tarefas_tarefa_id_fkey" FOREIGN KEY ("tarefa_id") REFERENCES "tarefas"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "imagens_tarefas" ADD CONSTRAINT "imagens_tarefas_empresa_id_fkey" FOREIGN KEY ("empresa_id") REFERENCES "empresas"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "imagens_tarefas" ADD CONSTRAINT "imagens_tarefas_contador_id_fkey" FOREIGN KEY ("contador_id") REFERENCES "empresas"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "audios_tarefas" ADD CONSTRAINT "audios_tarefas_tarefa_id_fkey" FOREIGN KEY ("tarefa_id") REFERENCES "tarefas"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "audios_tarefas" ADD CONSTRAINT "audios_tarefas_empresa_id_fkey" FOREIGN KEY ("empresa_id") REFERENCES "empresas"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "audios_tarefas" ADD CONSTRAINT "audios_tarefas_contador_id_fkey" FOREIGN KEY ("contador_id") REFERENCES "empresas"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "videos_tarefas" ADD CONSTRAINT "videos_tarefas_tarefa_id_fkey" FOREIGN KEY ("tarefa_id") REFERENCES "tarefas"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "videos_tarefas" ADD CONSTRAINT "videos_tarefas_empresa_id_fkey" FOREIGN KEY ("empresa_id") REFERENCES "empresas"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "videos_tarefas" ADD CONSTRAINT "videos_tarefas_contador_id_fkey" FOREIGN KEY ("contador_id") REFERENCES "empresas"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "notificacoes" ADD CONSTRAINT "notificacoes_empresa_id_fkey" FOREIGN KEY ("empresa_id") REFERENCES "empresas"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "notificacoes" ADD CONSTRAINT "notificacoes_contador_id_fkey" FOREIGN KEY ("contador_id") REFERENCES "empresas"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "notificacoes" ADD CONSTRAINT "notificacoes_tarefa_id_fkey" FOREIGN KEY ("tarefa_id") REFERENCES "tarefas"("id") ON DELETE SET NULL ON UPDATE CASCADE;
@@ -663,10 +685,20 @@ ALTER TABLE "orcamentos" ADD CONSTRAINT "orcamentos_atribuido_para_id_fkey" FORE
 ALTER TABLE "orcamentos" ADD CONSTRAINT "orcamentos_tarefa_id_fkey" FOREIGN KEY ("tarefa_id") REFERENCES "tarefas"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "configuracoes_empresa" ADD CONSTRAINT "configuracoes_empresa_empresa_id_fkey" FOREIGN KEY ("empresa_id") REFERENCES "empresas"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
 ALTER TABLE "colecoes" ADD CONSTRAINT "colecoes_empresa_id_fkey" FOREIGN KEY ("empresa_id") REFERENCES "empresas"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "colecoes" ADD CONSTRAINT "colecoes_produto_id_fkey" FOREIGN KEY ("produto_id") REFERENCES "produtos"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "chats" ADD CONSTRAINT "chats_empresa_id_fkey" FOREIGN KEY ("empresa_id") REFERENCES "empresas"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "mensagens_chat" ADD CONSTRAINT "mensagens_chat_remetente_id_fkey" FOREIGN KEY ("remetente_id") REFERENCES "usuarios"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "mensagens_chat" ADD CONSTRAINT "mensagens_chat_chat_id_fkey" FOREIGN KEY ("chat_id") REFERENCES "chats"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "mensagens_chat" ADD CONSTRAINT "mensagens_chat_profissional_mencionado_id_fkey" FOREIGN KEY ("profissional_mencionado_id") REFERENCES "usuarios"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+

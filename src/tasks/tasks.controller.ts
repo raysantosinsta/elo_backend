@@ -1,4 +1,5 @@
 /* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable prettier/prettier */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
@@ -45,7 +46,7 @@ export class TasksController {
   // 🔄 Atualizar status da task (mover entre colunas)
   @Patch(':id/status')
   async updateStatus(
-    @Param('id') id: string, 
+    @Param('id') id: string,
     @Body() body: { columnId: string | null },
     @Request() req
   ) {
@@ -127,11 +128,14 @@ export class TasksController {
     @Query('search') search?: string,
   ) {
     try {
-      const companyId = req.user.companyId; // FIX: Use flat companyId from JWT payload
+      const companyId = req.user.companyId;
+
+      console.log('🔍 Buscando tasks para company:', companyId);
+      console.log('📋 Filtros:', { page, limit, columnId, assignedToId, routeId, status, search });
 
       // Se tem parâmetros de paginação/filtro, usa findAllPaginated
       if (page || limit || columnId || assignedToId || routeId || status || search) {
-        return await this.tasksService.findAllPaginated({
+        const result = await this.tasksService.findAllPaginated({
           companyId,
           page: Number(page),
           limit: Number(limit),
@@ -141,11 +145,28 @@ export class TasksController {
           status,
           search,
         });
+
+        console.log(`✅ Tasks encontradas (com filtros): ${result.tasks.length}`);
+        return result;
       }
 
       // Se não tem parâmetros, retorna todas da empresa
-      return await this.tasksService.findAll(companyId);
+      const tasks = await this.tasksService.findAll(companyId);
+      console.log(`✅ Tasks encontradas (todas): ${tasks.length}`);
+
+      // Retornar array vazio se não há tasks, em vez de lançar erro
+      return tasks || [];
+
     } catch (error) {
+      console.error('❌ Erro ao buscar tarefas:', error);
+
+      // Se for erro de "não encontrado", retornar array vazio
+      if (error.message?.includes('não encontrada') || error.message?.includes('not found')) {
+        console.log('ℹ️ Nenhuma task encontrada, retornando array vazio');
+        return [];
+      }
+
+      // Para outros erros, lançar exceção
       throw new HttpException(
         error.message || 'Erro ao buscar tarefas',
         HttpStatus.BAD_REQUEST,
@@ -320,7 +341,7 @@ export class TasksController {
     { name: 'videos', maxCount: 10 },
   ]))
   async update(
-    @Param('id') id: string, 
+    @Param('id') id: string,
     @Body() body: any,
     @UploadedFiles() files: {
       images?: UploadedFile[];
@@ -427,11 +448,11 @@ export class TasksController {
       const completedById = req.user.id;
 
       return await this.tasksService.update(
-        id, 
-        { 
+        id,
+        {
           completedById,
           status: 'COMPLETED'
-        }, 
+        },
         companyId
       );
     } catch (error) {
@@ -452,11 +473,11 @@ export class TasksController {
       const companyId = req.user.companyId; // FIX: Use flat companyId from JWT payload
 
       return await this.tasksService.update(
-        id, 
-        { 
+        id,
+        {
           completedById: null,
           status: 'PENDING'
-        }, 
+        },
         companyId
       );
     } catch (error) {
@@ -477,10 +498,10 @@ export class TasksController {
       const companyId = req.user.companyId; // FIX: Use flat companyId from JWT payload
 
       return await this.tasksService.update(
-        id, 
-        { 
+        id,
+        {
           status: 'FAILED'
-        }, 
+        },
         companyId
       );
     } catch (error) {
@@ -501,10 +522,10 @@ export class TasksController {
       const companyId = req.user.companyId; // FIX: Use flat companyId from JWT payload
 
       return await this.tasksService.update(
-        id, 
-        { 
+        id,
+        {
           status: 'IN_PROGRESS'
-        }, 
+        },
         companyId
       );
     } catch (error) {
