@@ -6,6 +6,8 @@ export class ChatMessageResponseDto {
   message!: string;
   mentionedProfessionalId?: string;
   createdAt!: Date;
+  sender?: any; // User simplificado
+  mentionedProfessional?: any; // User simplificado
 
   constructor(partial: Partial<ChatMessageResponseDto>) {
     Object.assign(this, partial);

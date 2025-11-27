@@ -1,26 +1,30 @@
 /* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import {
-  Controller,
-  Get,
-  Post,
   Body,
-  Patch,
-  Param,
-  Delete,
-  Query,
-  ParseUUIDPipe,
+  Controller,
   DefaultValuePipe,
+  Delete,
+  Get,
+  Param,
   ParseIntPipe,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Query
 } from '@nestjs/common';
-import { UsersService } from './users.service';
+import { UserRole, UserStatus } from '@prisma/client';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserResponseDto } from './dto/user-response.dto';
-import { UserRole, UserStatus } from '@prisma/client';
+import { UsersService } from './users.service';
 
 @Controller('users')
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(private readonly usersService: UsersService) { }
 
   @Post()
   create(@Body() createUserDto: CreateUserDto): Promise<UserResponseDto> {
@@ -81,11 +85,13 @@ export class UsersController {
     return this.usersService.remove(id);
   }
 
+  // users.controller.ts
   @Get('search')
-searchUsers(
-  @Query('query') query: string,
-) {
-  return this.usersService.searchUsers(query);
-}
+  searchUsers(
+    @Query('query') query: string,
+    @Query('companyId') companyId?: string, // Sem validação
+  ) {
+    return this.usersService.searchUsers(query, companyId);
+  }
 
 }

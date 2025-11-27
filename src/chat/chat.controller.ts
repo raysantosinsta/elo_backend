@@ -1,5 +1,5 @@
 /* eslint-disable prettier/prettier */
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { ChatService } from './chat.service';
 import { CreateChatDto } from './dto/create-chat.dto';
 
@@ -16,5 +16,10 @@ export class ChatController {
   findOne(@Param('id') id: string) {
     return this.service.findOne(id);
   }
-}
 
+  // Novo endpoint: listar chats por companyId
+  @Get()
+  findAll(@Query('companyId') companyId: string) {
+    return this.service.findAll(companyId);
+  }
+}
