@@ -10,7 +10,13 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 
-@WebSocketGateway({ cors: { origin: '*' }, namespace: '/ws' })
+@WebSocketGateway({
+  cors: { origin: '*' },
+  namespace: '/ws',
+  // 🔥 CORREÇÃO: Adicionar pings para manter a conexão ativa e detectar desconexões.
+  pingInterval: 25000, // Envia um ping a cada 25 segundos
+  pingTimeout: 60000,  // Considera desconectado se não houver resposta em 60 segundos
+})
 export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer() server: Server;
 

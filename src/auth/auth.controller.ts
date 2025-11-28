@@ -17,8 +17,10 @@ import { AuthService } from './auth.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { LoginUserDto } from './dto/login-user.dto';
 import { JwtAuthGuard } from './jwt-auth.guard';
+import { Public } from 'src/chat/public.decorator';
 
 @Controller('auth')
+@UseGuards(JwtAuthGuard) // 🔥 Aplicar o guard a TODAS as rotas do controller
 export class AuthController {
   constructor(
     private authService: AuthService,
@@ -26,24 +28,26 @@ export class AuthController {
 
   // Nova rota protegida para criação de usuários por administradores
   @Post('admin/signup')
-  @UseGuards(JwtAuthGuard)
   async adminSignUp(@Body() createUserDto: CreateUserDto, @Request() req) {
     // Passa o usuário autenticado para o service
     return this.authService.signUp(createUserDto, req.user);
   }
 
+  @Public() // 🔥 Marcar esta rota como pública
   @Post('login')
   @HttpCode(HttpStatus.OK)
   async login(@Body() loginUserDto: LoginUserDto) {
     return this.authService.login(loginUserDto);
   }
 
+  @Public() // 🔥 Marcar esta rota como pública
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   async refreshTokens(@Body() body: { refreshToken: string }) {
     return this.authService.refreshTokens(body.refreshToken);
   }
 
+  @Public() // 🔥 Marcar esta rota como pública
   @Post('verify-token')
   async verifyToken(@Body() body: { token: string }) {
     const result = await this.authService.verifyToken(body.token);
@@ -51,7 +55,6 @@ export class AuthController {
   }
 
   @Get('profile')
-  @UseGuards(JwtAuthGuard)
   async getProfile(@Request() req) {
     console.log('🔍 [CONTROLLER] req.user:', req.user);
     return this.authService.getProfile(req.user.sub);
@@ -59,7 +62,6 @@ export class AuthController {
 
   // 🔥 NOVA ROTA: EMPRESAS PARA MASTER (PROTEGIDA - apenas MASTER pode acessar)
   @Get('companies/master')
-  @UseGuards(JwtAuthGuard)
   async getCompaniesForMaster(@Request() req) {
     // Verificar se o usuário é MASTER
     if (req.user.role !== 'MASTER') {
@@ -69,6 +71,7 @@ export class AuthController {
     return this.authService.getCompaniesForMaster();
   }
 
+  @Public() // 🔥 Marcar esta rota como pública
   @Get('professionals/:companyId')
   async getProfessionals(@Param('companyId') companyId: string) {
     return this.authService.getProfessionals(companyId);

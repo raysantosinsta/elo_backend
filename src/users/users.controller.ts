@@ -21,6 +21,7 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserResponseDto } from './dto/user-response.dto';
 import { UsersService } from './users.service';
+import { Request } from '@nestjs/common';
 
 @Controller('users')
 export class UsersController {
@@ -42,9 +43,26 @@ export class UsersController {
     return this.usersService.findAll(page, limit, companyId, status, role);
   }
 
-  @Get(':id')
-  findOne(@Param('id', ParseUUIDPipe) id: string): Promise<UserResponseDto> {
-    return this.usersService.findOne(id);
+  // CORREÇÃO: Mover rotas estáticas ('search', 'mentions') antes de rotas dinâmicas (':id')
+  // para evitar que 'mentions' seja capturado como um 'id'.
+  @Get('search')
+  searchUsers(
+    @Query('query') query: string,
+    @Query('companyId') companyId?: string,
+  ) {
+    console.log('🔍 Search endpoint chamado:', { query, companyId });
+    return this.usersService.searchUsers(query, companyId);
+  }
+
+  @Get('mentions')
+  searchMentions(
+    @Query('query') query: string,
+    @Query('companyId') companyId?: string,
+  ) {
+    console.log('🔍 Mentions endpoint chamado:', { query, companyId });
+    // Simplificado para usar os decoradores @Query() que são mais limpos e seguros.
+    // A validação do companyId já é feita no service.
+    return this.usersService.searchUsers(query, companyId);
   }
 
   @Get('email/:email')
@@ -60,6 +78,11 @@ export class UsersController {
   @Get('role/:role')
   findByRole(@Param('role') role: UserRole): Promise<UserResponseDto[]> {
     return this.usersService.findByRole(role);
+  }
+  
+  @Get(':id')
+  findOne(@Param('id', ParseUUIDPipe) id: string): Promise<UserResponseDto> {
+    return this.usersService.findOne(id);
   }
 
   @Patch(':id')
@@ -84,14 +107,4 @@ export class UsersController {
   remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
     return this.usersService.remove(id);
   }
-
-  // users.controller.ts
-  @Get('search')
-  searchUsers(
-    @Query('query') query: string,
-    @Query('companyId') companyId?: string, // Sem validação
-  ) {
-    return this.usersService.searchUsers(query, companyId);
-  }
-
 }

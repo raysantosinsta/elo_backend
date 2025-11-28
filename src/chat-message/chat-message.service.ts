@@ -1,10 +1,12 @@
 /* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { Injectable } from "@nestjs/common";
 import { ChatGateway } from "src/chat/chat.gateway";
 import { PrismaService } from "src/prisma/prisma.service";
 import { WhatsappService } from "src/whatsapp/whatsapp.service";
 import { CreateChatMessageDto } from "./dto/create-chat-message.dto";
 import { ChatMessageResponseDto } from "./dto/chat-message-response.dto";
+import { UserStatus } from "@prisma/client";
 
 @Injectable()
 export class ChatMessageService {
@@ -16,20 +18,31 @@ export class ChatMessageService {
 
   async create(dto: CreateChatMessageDto): Promise<ChatMessageResponseDto> {
     let mentionedProfessionalId: string | undefined;
-    
+    let mentionToReplace: string | undefined;
+
     // Extrair e processar menções
     const mention = this.extractMention(dto.message);
     if (mention) {
+      console.log(`🔍 Menção detectada na mensagem: @${mention.mentionedName}`);
+
       // Buscar usuário pelo nome mencionado
       const mentionedUser = await this.prisma.user.findFirst({
         where: {
-          name: { contains: mention.mentionedName, mode: 'insensitive' },
+          name: { equals: mention.mentionedName, mode: 'insensitive' },
           isProfessional: true,
+          status: UserStatus.ATIVO, // 🔥 IMPORTANTE: Só usuários ativos
         },
       });
 
       if (mentionedUser) {
+        console.log(`✅ Usuário mencionado encontrado: ${mentionedUser.name} (ID: ${mentionedUser.id})`);
         mentionedProfessionalId = mentionedUser.id;
+        mentionToReplace = mention.fullMention;
+
+        // Substituir @Nome por @Nome no texto para manter a formatação
+        if (mentionToReplace) {
+          dto.message = dto.message.replace(mentionToReplace, `@${mentionedUser.name}`);
+        }
 
         // Enviar notificação via WhatsApp se o usuário tiver telefone
         if (mentionedUser.phone) {
@@ -38,15 +51,26 @@ export class ChatMessageService {
           });
 
           if (sender) {
-            await this.whatsapp.sendTextMessage(
-              mentionedUser.phone,
-              `📩 Você foi mencionado por ${sender.name}:\n\n"${dto.message}"\n\nChat: ${dto.chatId}`
-            ).catch(error => {
-              console.error('Erro ao enviar WhatsApp:', error);
-            });
+            try {
+              await this.whatsapp.sendTextMessage(
+                mentionedUser.phone,
+                `📩 Você foi mencionado por ${sender.name}:\n\n"${dto.message}"\n\nChat: ${dto.chatId}`
+              );
+              console.log(`✅ WhatsApp enviado com sucesso para ${mentionedUser.phone}`);
+            } catch (error) {
+              console.error(`❌ Falha ao enviar WhatsApp para ${mentionedUser.phone}:`, error.response?.data || error.message);
+            }
+          } else {
+            console.log(`❌ Sender não encontrado para notificação WhatsApp: ${dto.senderId}`);
           }
+        } else {
+          console.log(`⚠️ Usuário mencionado sem telefone: ${mentionedUser.name}`);
         }
+      } else {
+        console.log(`❌ Nenhum usuário profissional encontrado para menção: @${mention.mentionedName}`);
       }
+    } else {
+      console.log(`📝 Nenhuma menção detectada na mensagem: "${dto.message}"`);
     }
 
     // Criar a mensagem no banco de dados
@@ -105,6 +129,13 @@ export class ChatMessageService {
 
     const response = new ChatMessageResponseDto(createdForDto);
 
+    // Log final para confirmar o resultado da menção
+    if (mentionedProfessionalId) {
+      console.log(`🎉 Menção processada com sucesso! ID do mencionado: ${mentionedProfessionalId}`);
+    } else {
+      console.log(`📭 Mensagem criada sem menção processada.`);
+    }
+
     // NOTIFICAÇÕES EM TEMPO REAL
 
     // 1. Notificar todos no chat sobre a nova mensagem (se houver chatId)
@@ -134,13 +165,18 @@ export class ChatMessageService {
 
       if (prof) {
         // Enviar WhatsApp para menção via DTO
-        if (prof.phone) {
-          await this.whatsapp.sendTextMessage(
-            prof.phone,
-            `📩 Você foi mencionado por ${created.sender.name}:\n\n"${dto.message}"`
-          ).catch(error => {
-            console.error('Erro ao enviar WhatsApp para menção DTO:', error);
-          });
+        try {
+          if (prof.phone) {
+            await this.whatsapp.sendTextMessage(
+              prof.phone,
+              `📩 Você foi mencionado por ${created.sender.name}:\n\n"${dto.message}"`
+            );
+          }
+        } catch (error) {
+          console.error('❌ Falha ao enviar notificação via WhatsApp para menção DTO:', error);
+          if (error.response?.status === 401) {
+            console.error('➡️ Causa provável: WHATSAPP_ACCESS_TOKEN ou WHATSAPP_PHONE_NUMBER_ID não estão configurados corretamente no ambiente.');
+          }
         }
 
         // Notificar via WebSocket
@@ -256,29 +292,35 @@ export class ChatMessageService {
     return transformedMessages;
   }
 
-  // Método para extrair menções do texto
-  private extractMention(message: string): { mentionedName: string } | null {
-    const mentionRegex = /@([^@\s]+)/g;
-    const matches = message.match(mentionRegex);
+  private extractMention(message: string): { mentionedName: string; fullMention: string } | null {
+    // Regex corrigida: captura @ seguido por um ou mais caracteres de nome (incluindo espaços),
+    // garantindo que não termine com espaço.
+    // O `*?` torna o quantificador "não guloso" (non-greedy), fazendo com que ele pare na primeira correspondência válida.
+    // Isso evita que ele capture palavras extras após o nome, como em "@Joao cobrar".
+    const mentionRegex = /@([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s]*?[a-zA-ZÀ-ÿ]|[a-zA-ZÀ-ÿ]+)(?=\s|$|[,.;:!?])/g;
+    const matches = [...message.matchAll(mentionRegex)];
 
     if (!matches || matches.length === 0) {
       return null;
     }
 
-    // Pegar a primeira menção (pode expandir para múltiplas menções futuramente)
-    const mention = matches[0];
-    const mentionedName = mention.substring(1); // Remover o @
+    // Usar a última menção (mais recente)
+    const lastMatch = matches[matches.length - 1];
+    const fullMention = lastMatch[0];
+    const mentionedName = lastMatch[1].trim();
 
-    return { mentionedName };
+    console.log(`🔍 Menção detectada: "${fullMention}" → Nome: "${mentionedName}"`);
+
+    return { mentionedName, fullMention };
   }
 
   // Método adicional: buscar mensagens com menções para um usuário
   async findMentionsForUser(userId: string): Promise<ChatMessageResponseDto[]> {
     const messages = await this.prisma.chatMessage.findMany({
-      where: { 
+      where: {
         OR: [
           { mentionedProfessionalId: userId },
-          { 
+          {
             message: {
               contains: `@`, // Busca por mensagens que contenham @
             }
@@ -317,7 +359,7 @@ export class ChatMessageService {
     const filteredMessages = messages.filter(message => {
       // Se tem mentionedProfessionalId, já está claro
       if (message.mentionedProfessionalId === userId) return true;
-      
+
       // Se não tem, verificar se o nome do usuário está mencionado no texto
       if (user && message.message.includes(`@${user.name}`)) {
         return true;

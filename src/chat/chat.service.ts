@@ -18,13 +18,14 @@ export class ChatService {
     return new ChatResponseDto(chat);
   }
 
-  async findOne(id: string): Promise<ChatResponseDto> {
+  async findOne(id: string, userCompanyId: string): Promise<ChatResponseDto> {
     const chat = await this.prisma.chat.findUnique({
       where: { id },
       include: { messages: true },
     });
 
-    if (!chat) {
+    // 🔥 Validação de segurança: o chat existe E pertence à empresa do usuário?
+    if (!chat || chat.companyId !== userCompanyId) {
       throw new Error('Chat não encontrado');
     }
 
@@ -32,7 +33,7 @@ export class ChatService {
   }
 
   // Novo método: listar chats por companyId (com mensagens incluídas para preview e contagem)
-  async findAll(companyId?: string): Promise<ChatResponseDto[]> {
+  async findAll(companyId: string): Promise<ChatResponseDto[]> {
     if (!companyId) {
       throw new Error('companyId é obrigatório para listar chats');
     }

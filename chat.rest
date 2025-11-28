@@ -1,3 +1,9 @@
+### PRÉ-REQUISITOS PARA TESTES
+# 1. Rode o seed para criar dados: User "João Silva" (senderId), "Maria Profissional" (isProfessional: true, phone: +5511888888888), Company e Chat.
+# 2. Use IDs reais: chatId = "9229aea4-7276-4b8c-94d4-887c7cff1113", senderId = "818fd6fe-07c2-452d-8e45-15a3b2b08873".
+# 3. Para menção: Use "@Maria" na message (busca por name contains 'Maria').
+# 4. Autenticação (opcional): Adicione -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." em chamadas POST se necessário.
+
 ### 1. Criar um novo Chat
 # Este endpoint cria um chat novo. Substitua os valores no body conforme necessário.
 POST http://localhost:3000/chats
@@ -9,21 +15,33 @@ Content-Type: application/json
 
 ### 2. Buscar um Chat por ID
 # Substitua :id pelo ID real do chat criado acima.
-GET http://localhost:3000/chats/9e8a448e-b0e7-4b8f-a79f-135289a3269d
+GET http://localhost:3000/chats/9229aea4-7276-4b8c-94d4-887c7cff1113
 
-### 3. Criar uma Mensagem de Chat
-# Este endpoint cria uma mensagem. Certifique-se de ter um chatId válido.
+### 3. Criar uma Mensagem de Chat (Sem Menção)
+# Este endpoint cria uma mensagem simples. Certifique-se de ter um chatId válido.
 POST http://localhost:3000/chat-messages
 Content-Type: application/json
 
 {
-  "chatId": "9e8a448e-b0e7-4b8f-a79f-135289a3269d",
+  "chatId": "9229aea4-7276-4b8c-94d4-887c7cff1113",
   "senderId": "818fd6fe-07c2-452d-8e45-15a3b2b08873",
   "message": "Olá! Esta é uma mensagem de teste."
 }
 
 ### 4. Buscar Mensagens de um Chat
 # Substitua :chatId pelo ID do chat para listar mensagens.
-GET http://localhost:3000/chat-messages/chat/9e8a448e-b0e7-4b8f-a79f-135289a3269d
+GET http://localhost:3000/chat-messages/chat/9229aea4-7276-4b8c-94d4-887c7cff1113
+
+### 5. Criar uma Mensagem de Chat com Menção a Usuário
+# Este endpoint cria uma mensagem com menção (@Maria). Aciona busca por usuário profissional, WhatsApp simulado e notificação WebSocket.
+# Certifique-se de ter um User com name="Maria Profissional", isProfessional=true e phone.
+POST http://localhost:3000/chat-messages
+Content-Type: application/json
+
+{
+  "chatId": "9229aea4-7276-4b8c-94d4-887c7cff1113",
+  "senderId": "818fd6fe-07c2-452d-8e45-15a3b2b08873",
+  "message": "Ei @joao, bbbbbbbbbbbbbbbbbbooooooooooooooooooooooa noite!"
+}
 
 # eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI4MThmZDZmZS0wN2MyLTQ1MmQtOGU0NS0xNWEzYjJiMDg4NzMiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOm51bGwsImlhdCI6MTc2NDE4MTgwOCwiZXhwIjoxNzY0MTgzNjA4fQ.6RoNlcHniNw0bZuvUYtxuyUxCaUzQi2-NH6VQL2GW84
