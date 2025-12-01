@@ -1,10 +1,14 @@
 /* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+// src/auth/jwt.strategy.ts
+import { ExtractJwt, Strategy, StrategyOptions } from 'passport-jwt';
+import { PassportStrategy } from '@nestjs/passport';
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { PassportStrategy } from '@nestjs/passport';
-import { ExtractJwt, Strategy } from 'passport-jwt';
 import { AuthService } from './auth.service';
-import { JwtPayload as AuthJwtPayload } from './types';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -13,30 +17,38 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     private configService: ConfigService,
   ) {
     const secret = configService.get<string>('JWT_SECRET');
-
     if (!secret) {
-      throw new Error('JWT_SECRET não está definido nas variáveis de ambiente');
+      throw new Error('JWT_SECRET is not defined in environment variables');
     }
 
-    super({
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+    const options: StrategyOptions = {
+      jwtFromRequest: ExtractJwt.fromExtractors([
+        (request: any) => {
+          // Tenta extrair do cookie
+          let token = request?.cookies?.access_token || null;
+          // Se não encontrar no cookie, tenta extrair do header Authorization
+          if (!token && request.headers.authorization) {
+            token = request.headers.authorization.replace('Bearer ', '');
+          }
+          return token;
+        },
+        ExtractJwt.fromAuthHeaderAsBearerToken(),
+      ]),
       ignoreExpiration: false,
       secretOrKey: secret,
-    });
+    };
+    super(options);
   }
 
-  async validate(payload: AuthJwtPayload) {
-    // Valida se o usuário ainda existe e está ativo
+  async validate(payload: any) {
     const user = await this.authService.validateUser(payload);
-
     if (!user) {
-      throw new UnauthorizedException('Token inválido ou usuário inativo');
+      throw new UnauthorizedException('Usuário inativo ou não encontrado');
     }
 
-    // O que retornar aqui vira req.user no controller!
     return {
-      sub: user.id,          // ← OBRIGATÓRIO: tem que ter o sub (id)
-      id: user.id,           // alguns gostam de ter os dois
+      sub: user.id,
+      id: user.id,
       email: user.email,
       name: user.name,
       role: user.role,

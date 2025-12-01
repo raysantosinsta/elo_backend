@@ -10,12 +10,14 @@ import {
   Param,
   Post,
   Request,
-  UnauthorizedException
+  UnauthorizedException,
+  UseGuards
 } from '@nestjs/common';
 import { Public } from 'src/chat/public.decorator';
 import { AuthService } from './auth.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { LoginUserDto } from './dto/login-user.dto';
+import { JwtAuthGuard } from './jwt-auth.guard';
 
 @Controller('auth')
 export class AuthController {
@@ -51,9 +53,10 @@ export class AuthController {
     return result;
   }
 
+  @UseGuards(JwtAuthGuard)  // ← ESSA LINHA É OBRIGATÓRIA
   @Get('profile')
-  async getProfile(@Request() req) {
-    console.log('🔍 [CONTROLLER] req.user:', req.user);
+  async getProfile(@Request() req: any) {
+    console.log('req.user no profile:', req.user); // agora vai aparecer!
     return this.authService.getProfile(req.user.sub);
   }
 
