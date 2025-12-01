@@ -2,25 +2,22 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 // auth/auth.controller.ts
 import {
-  Controller,
-  Post,
   Body,
-  UseGuards,
+  Controller,
+  Get,
   HttpCode,
   HttpStatus,
-  Get,
-  Request,
   Param,
-  UnauthorizedException,
+  Post,
+  Request,
+  UnauthorizedException
 } from '@nestjs/common';
+import { Public } from 'src/chat/public.decorator';
 import { AuthService } from './auth.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { LoginUserDto } from './dto/login-user.dto';
-import { JwtAuthGuard } from './jwt-auth.guard';
-import { Public } from 'src/chat/public.decorator';
 
 @Controller('auth')
-@UseGuards(JwtAuthGuard) // 🔥 Aplicar o guard a TODAS as rotas do controller
 export class AuthController {
   constructor(
     private authService: AuthService,
