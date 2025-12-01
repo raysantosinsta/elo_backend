@@ -333,7 +333,6 @@ export class TasksController {
     }
   }
 
-  // ✏️ Atualizar task
   @Put(':id')
   @UseInterceptors(FileFieldsInterceptor([
     { name: 'images', maxCount: 10 },
@@ -348,53 +347,28 @@ export class TasksController {
       audios?: UploadedFile[];
       videos?: UploadedFile[];
     },
-    @Request() req
+    @Request() req,
   ) {
-    try {
-      console.log('=== 📥 REQUISIÇÃO DE ATUALIZAÇÃO RECEBIDA ===');
-      console.log('Body recebido:', body);
+    const companyId = req.user.companyId;
+    const updaterId = req.user.id; // ← quem está fazendo a atualização
 
-      const companyId = req.user.companyId; // FIX: Use flat companyId from JWT payload
+    const removeImageIds = body.removeImageIds ? JSON.parse(body.removeImageIds) : [];
+    const removeAudioIds = body.removeAudioIds ? JSON.parse(body.removeAudioIds) : [];
+    const removeVideoIds = body.removeVideoIds ? JSON.parse(body.removeVideoIds) : [];
 
-      if (!companyId) {
-        throw new HttpException('CompanyId é obrigatório (verifique o token JWT)', HttpStatus.BAD_REQUEST);
-      }
+    delete body.removeImageIds;
+    delete body.removeAudioIds;
+    delete body.removeVideoIds;
 
-      // Parse dos arrays de IDs removidos (vêm como string JSON no FormData)
-      const removeImageIds = body.removeImageIds ? JSON.parse(body.removeImageIds) : [];
-      const removeAudioIds = body.removeAudioIds ? JSON.parse(body.removeAudioIds) : [];
-      const removeVideoIds = body.removeVideoIds ? JSON.parse(body.removeVideoIds) : [];
+    const updateData = {
+      ...body,
+      removeImageIds,
+      removeAudioIds,
+      removeVideoIds,
+      priority: body.priority ? parseInt(body.priority) : undefined,
+    };
 
-      // Remover os campos de remoção do body para não poluir (mas adicionar como arrays)
-      delete body.removeImageIds;
-      delete body.removeAudioIds;
-      delete body.removeVideoIds;
-
-      // Converter dados se necessário e adicionar campos de remoção
-      const updateData = {
-        ...body,
-        removeImageIds,
-        removeAudioIds,
-        removeVideoIds,
-        priority: body.priority ? parseInt(body.priority) : undefined,
-        dueDate: body.dueDate || null,
-        scheduledAt: body.scheduledAt || new Date(),
-        assignedToId: body.assignedToId || null,
-        columnId: body.columnId || null,
-        routeId: body.routeId || null,
-        completedById: body.completedById || null,
-      };
-
-      console.log('📤 Dados da task para atualização:', updateData);
-
-      return await this.tasksService.update(id, updateData, companyId, files);
-    } catch (error) {
-      console.error('❌ Erro ao atualizar task:', error);
-      throw new HttpException(
-        error.message || 'Erro ao atualizar tarefa',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
+    return this.tasksService.update(id, updateData, companyId, updaterId, files);
   }
 
   // 🗑️ Deletar task
@@ -437,102 +411,69 @@ export class TasksController {
     }
   }
 
-  // ✅ Marcar task como concluída
   @Patch(':id/complete')
-  async completeTask(
-    @Param('id') id: string,
-    @Request() req
-  ) {
-    try {
-      const companyId = req.user.companyId; // FIX: Use flat companyId from JWT payload
-      const completedById = req.user.id;
+  async completeTask(@Param('id') id: string, @Request() req) {
+    const companyId = req.user.companyId;
+    const updaterId = req.user.id;
 
-      return await this.tasksService.update(
-        id,
-        {
-          completedById,
-          status: 'COMPLETED'
-        },
-        companyId
-      );
-    } catch (error) {
-      throw new HttpException(
-        error.message || 'Erro ao marcar tarefa como concluída',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
+    return this.tasksService.update(
+      id,
+      { completedById: updaterId, status: 'COMPLETED' },
+      companyId,
+      updaterId,
+      undefined,
+    );
   }
 
-  // 🔄 Reabrir task (remover conclusão)
+  // Reabrir tarefa (desmarcar conclusão)
   @Patch(':id/reopen')
-  async reopenTask(
-    @Param('id') id: string,
-    @Request() req
-  ) {
-    try {
-      const companyId = req.user.companyId; // FIX: Use flat companyId from JWT payload
+  async reopenTask(@Param('id') id: string, @Request() req) {
+    const companyId = req.user.companyId;
+    const updaterId = req.user.id;
 
-      return await this.tasksService.update(
-        id,
-        {
-          completedById: null,
-          status: 'PENDING'
-        },
-        companyId
-      );
-    } catch (error) {
-      throw new HttpException(
-        error.message || 'Erro ao reabrir tarefa',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
+    return this.tasksService.update(
+      id,
+      {
+        completedById: null,
+        status: 'PENDING',
+      },
+      companyId,
+      updaterId,
+      undefined,
+    );
   }
 
-  // ⚠️ Marcar task como falhada
+  // Marcar como falhada
   @Patch(':id/fail')
-  async failTask(
-    @Param('id') id: string,
-    @Request() req
-  ) {
-    try {
-      const companyId = req.user.companyId; // FIX: Use flat companyId from JWT payload
+  async failTask(@Param('id') id: string, @Request() req) {
+    const companyId = req.user.companyId;
+    const updaterId = req.user.id;
 
-      return await this.tasksService.update(
-        id,
-        {
-          status: 'FAILED'
-        },
-        companyId
-      );
-    } catch (error) {
-      throw new HttpException(
-        error.message || 'Erro ao marcar tarefa como falhada',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
+    return this.tasksService.update(
+      id,
+      {
+        status: 'FAILED',
+      },
+      companyId,
+      updaterId,
+      undefined,
+    );
   }
 
-  // ▶️ Marcar task como em progresso
+  // Iniciar tarefa (colocar em progresso)
   @Patch(':id/start')
-  async startTask(
-    @Param('id') id: string,
-    @Request() req
-  ) {
-    try {
-      const companyId = req.user.companyId; // FIX: Use flat companyId from JWT payload
+  async startTask(@Param('id') id: string, @Request() req) {
+    const companyId = req.user.companyId;
+    const updaterId = req.user.id;
 
-      return await this.tasksService.update(
-        id,
-        {
-          status: 'IN_PROGRESS'
-        },
-        companyId
-      );
-    } catch (error) {
-      throw new HttpException(
-        error.message || 'Erro ao iniciar tarefa',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
+    return this.tasksService.update(
+      id,
+      {
+        status: 'IN_PROGRESS',
+      },
+      companyId,
+      updaterId,
+      undefined,
+    );
   }
 }

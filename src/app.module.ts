@@ -10,6 +10,8 @@ import { UsersModule } from './users/users.module';
 import { ChatModule } from './chat/chat.module';
 import { ChatMessageModule } from './chat-message/chat-message.module';
 import { WhatsappModule } from './whatsapp/whatsapp.module';
+import { NotificationUserModule } from './notification-user/notification-user.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
@@ -23,7 +25,9 @@ import { WhatsappModule } from './whatsapp/whatsapp.module';
     ChatModule,
     ChatMessageModule,
     WhatsappModule,
-    // outros módulos
+    NotificationUserModule,
+    NotificationsModule,
   ],
+  providers: [],
 })
 export class AppModule {}

@@ -1,13 +1,16 @@
 /* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unused-expressions */
+/* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable no-useless-escape */
-/* eslint-disable prettier/prettier */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
+
 import {
   Injectable,
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
+import { NotificationUserGateway } from 'src/notification-user/notification-user.gateway';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { SupabaseService } from 'src/supabase/supabase.service';
 
@@ -25,7 +28,37 @@ export class TasksService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly supabaseService: SupabaseService,
+    private readonly websocketGateway: NotificationUserGateway,
   ) {}
+
+  private async sendTaskAssignedNotification(task: any, assignedUserId: string, creatorName: string) {
+    const notificationPayload = {
+      title: 'Nova tarefa atribuída',
+      message: `"${task.title}" foi atribuída a você por ${creatorName}`,
+      type: 'TASK_ASSIGNED',
+      taskId: task.id,
+      createdAt: new Date().toISOString(),
+    };
+
+    this.websocketGateway.sendNotificationToUser(assignedUserId, notificationPayload);
+
+    const notification = await this.prisma.notification.create({
+      data: {
+        title: notificationPayload.title,
+        message: notificationPayload.message,
+        type: 'TASK_ASSIGNED',
+        companyId: task.companyId,
+        taskId: task.id,
+      },
+    });
+
+    await this.prisma.userNotification.create({
+      data: {
+        userId: assignedUserId,
+        notificationId: notification.id,
+      },
+    });
+  }
 
   async create(
     body: {
@@ -40,75 +73,50 @@ export class TasksService {
       scheduledAt?: string | Date;
       routeId?: string;
     },
-    files?: { 
+    files?: {
       images?: UploadedFile[];
       audios?: UploadedFile[];
       videos?: UploadedFile[];
     },
   ) {
-    console.log('=== INICIANDO CRIAÇÃO DE TASK ===');
-    console.log('Body recebido:', body);
-
-    const { 
-      title, 
-      description, 
-      columnId, 
-      dueDate, 
-      assignedToId, 
-      companyId, 
-      createdById, 
+    const {
+      title,
+      description,
+      columnId,
+      dueDate,
+      assignedToId,
+      companyId,
+      createdById,
       priority,
       scheduledAt,
-      routeId
+      routeId,
     } = body;
-    
+
     if (!title?.trim()) throw new BadRequestException('Título é obrigatório');
     if (!companyId) throw new BadRequestException('CompanyId é obrigatório');
     if (!createdById) throw new BadRequestException('CreatedById é obrigatório');
 
-    // 🔹 Verificar se a company existe
-    const companyExists = await this.prisma.company.findUnique({
-      where: { id: companyId },
-    });
+    const companyExists = await this.prisma.company.findUnique({ where: { id: companyId } });
     if (!companyExists) throw new NotFoundException('Empresa não encontrada');
 
-    // 🔹 Verificar se o usuário criador existe
-    const creatorExists = await this.prisma.user.findUnique({
-      where: { id: createdById },
-    });
+    const creatorExists = await this.prisma.user.findUnique({ where: { id: createdById } });
     if (!creatorExists) throw new NotFoundException('Usuário criador não encontrado');
 
-    // 🔹 Verificar coluna (se enviada)
     if (columnId) {
-      const columnExists = await this.prisma.kanbanColumn.findFirst({
-        where: { 
-          id: columnId,
-          companyId
-        }
-      });
+      const columnExists = await this.prisma.kanbanColumn.findFirst({ where: { id: columnId, companyId } });
       if (!columnExists) throw new NotFoundException('Coluna não encontrada');
     }
 
-    // 🔹 Verificar usuário atribuído (se enviado)
     if (assignedToId) {
-      const userExists = await this.prisma.user.findFirst({
-        where: { 
-          id: assignedToId,
-          companyId
-        }
-      });
+      const userExists = await this.prisma.user.findFirst({ where: { id: assignedToId, companyId } });
       if (!userExists) throw new NotFoundException('Usuário atribuído não encontrado');
     }
 
-    // 🔹 Verificar rota (se enviada)
     if (routeId) {
-      const routeExists = await this.prisma.route.findUnique({
-        where: { id: routeId }
-      });
+      const routeExists = await this.prisma.route.findUnique({ where: { id: routeId } });
       if (!routeExists) throw new NotFoundException('Rota não encontrada');
     }
 
-    // 🔹 Criação da task
     const data: any = {
       title: title.trim(),
       description: description?.trim() || null,
@@ -119,202 +127,31 @@ export class TasksService {
       createdBy: { connect: { id: createdById } },
     };
 
-    // Adicionar coluna apenas se for fornecida
-    if (columnId) {
-      data.column = { connect: { id: columnId } };
-    }
-
-    // Adicionar usuário atribuído apenas se for fornecido
-    if (assignedToId) {
-      data.assignedTo = { connect: { id: assignedToId } };
-    }
-
-    // Adicionar rota apenas se for fornecida
-    if (routeId) {
-      data.route = { connect: { id: routeId } };
-    }
+    if (columnId) data.column = { connect: { id: columnId } };
+    if (assignedToId) data.assignedTo = { connect: { id: assignedToId } };
+    if (routeId) data.route = { connect: { id: routeId } };
 
     const task = await this.prisma.task.create({
       data,
-      include: { 
-        assignedTo: {
-          select: {
-            id: true,
-            name: true,
-            email: true
-          }
-        },
-        column: true,
-        createdBy: {
-          select: {
-            id: true,
-            name: true,
-            email: true
-          }
-        },
-        route: true,
-        company: {
-          select: {
-            id: true,
-            name: true
-          }
-        }
+      include: {
+        assignedTo: { select: { id: true, name: true } },
+        createdBy: { select: { id: true, name: true } },
+        company: { select: { id: true } },
       },
     });
 
-    // 🔹 Uploads de arquivos (após criar a task)
     if (files) {
       await this.handleFileUploads(task.id, companyId, files);
     }
 
-    console.log('✅ Task criada com sucesso:', task);
+    if (task.assignedToId && creatorExists) {
+      await this.sendTaskAssignedNotification(task, task.assignedToId, creatorExists.name);
+    }
+
     return this.findOne(task.id);
   }
 
-  private async handleFileUploads(
-    taskId: string, 
-    companyId: string, 
-    files: { 
-      images?: UploadedFile[];
-      audios?: UploadedFile[];
-      videos?: UploadedFile[];
-    }
-  ) {
-    const uploadPromises: Promise<any>[] = [];
-
-    // Upload de imagens
-    if (files.images) {
-      for (const imageFile of files.images) {
-        const ext = imageFile.originalname.split('.').pop();
-        const path = `tasks/${taskId}/images/${Date.now()}-${Math.random().toString(36).substring(7)}.${ext}`;
-        
-        uploadPromises.push(
-          this.supabaseService.uploadFile('task-images', path, imageFile.buffer, {
-            contentType: imageFile.mimetype,
-            metadata: {
-              originalName: imageFile.originalname,
-              size: imageFile.size
-            }
-          }).then(async (result) => {
-            return this.prisma.taskImage.create({
-              data: {
-                url: result.fullPath,
-                filename: imageFile.originalname,
-                size: imageFile.size,
-                taskId,
-                companyId,
-              },
-            });
-          })
-        );
-      }
-    }
-
-    // Upload de audios
-    if (files.audios) {
-      for (const audioFile of files.audios) {
-        const ext = audioFile.originalname.split('.').pop();
-        const path = `tasks/${taskId}/audios/${Date.now()}-${Math.random().toString(36).substring(7)}.${ext}`;
-        
-        uploadPromises.push(
-          this.supabaseService.uploadFile('task-audios', path, audioFile.buffer, {
-            contentType: audioFile.mimetype,
-            metadata: {
-              originalName: audioFile.originalname,
-              size: audioFile.size
-            }
-          }).then(async (result) => {
-            return this.prisma.taskAudio.create({
-              data: {
-                url: result.fullPath,
-                filename: audioFile.originalname,
-                size: audioFile.size,
-                duration: null, // Pode ser calculado posteriormente
-                taskId,
-                companyId,
-              },
-            });
-          })
-        );
-      }
-    }
-
-    // Upload de vídeos
-    if (files.videos) {
-      for (const videoFile of files.videos) {
-        const ext = videoFile.originalname.split('.').pop();
-        const path = `tasks/${taskId}/videos/${Date.now()}-${Math.random().toString(36).substring(7)}.${ext}`;
-        
-        uploadPromises.push(
-          this.supabaseService.uploadFile('task-videos', path, videoFile.buffer, {
-            contentType: videoFile.mimetype,
-            metadata: {
-              originalName: videoFile.originalname,
-              size: videoFile.size
-            }
-          }).then(async (result) => {
-            return this.prisma.taskVideo.create({
-              data: {
-                url: result.fullPath,
-                filename: videoFile.originalname,
-                size: videoFile.size,
-                duration: null, // Pode ser calculado posteriormente
-                taskId,
-                companyId,
-              },
-            });
-          })
-        );
-      }
-    }
-
-    await Promise.all(uploadPromises);
-  }
-
-  async findOne(id: string) {
-    const task = await this.prisma.task.findUnique({
-      where: { id },
-      include: { 
-        assignedTo: {
-          select: {
-            id: true,
-            name: true,
-            email: true
-          }
-        },
-        column: true,
-        createdBy: {
-          select: {
-            id: true,
-            name: true,
-            email: true
-          }
-        },
-        completedBy: {
-          select: {
-            id: true,
-            name: true,
-            email: true
-          }
-        },
-        route: true,
-        taskImages: true,
-        taskAudios: true,
-        taskVideos: true,
-        taskAddress: true,
-        company: {
-          select: {
-            id: true,
-            name: true
-          }
-        }
-      },
-    });
-    if (!task) throw new NotFoundException('Task não encontrada');
-    return task;
-  }
-
-  async update(
+ async update(
     id: string,
     body: {
       title?: string;
@@ -332,24 +169,21 @@ export class TasksService {
       removeVideoIds?: string[];
     },
     companyId: string,
+    updaterId: string, // ← quem está atualizando
     files?: {
       images?: UploadedFile[];
       audios?: UploadedFile[];
       videos?: UploadedFile[];
-    }
+    },
   ) {
-    console.log('=== ATUALIZANDO TASK ===', id, body);
-
-    // Verificar se a task pertence à company
     const existing = await this.prisma.task.findFirst({
       where: { id, companyId },
-      include: {
-        taskImages: true,
-        taskAudios: true,
-        taskVideos: true,
-      }
+      include: { assignedTo: true, createdBy: true },
     });
     if (!existing) throw new NotFoundException('Task não encontrada');
+
+    const oldAssignedToId = existing.assignedToId;
+    const newAssignedToId = body.assignedToId ?? existing.assignedToId;
 
     const data: any = {};
 
@@ -360,56 +194,26 @@ export class TasksService {
     if (body.priority !== undefined) data.priority = body.priority;
     if (body.status !== undefined) data.status = body.status;
 
-    // Gerenciar coluna
     if (body.columnId !== undefined) {
-      if (body.columnId === null) {
-        data.column = { disconnect: true };
-      } else {
-        // Verificar se a coluna pertence à mesma empresa
-        const columnExists = await this.prisma.kanbanColumn.findFirst({
-          where: { id: body.columnId, companyId }
-        });
-        if (!columnExists) throw new NotFoundException('Coluna não encontrada');
-        data.column = { connect: { id: body.columnId } };
-      }
+      body.columnId === null
+        ? (data.column = { disconnect: true })
+        : (data.column = { connect: { id: body.columnId } });
     }
 
-    // Gerenciar usuário atribuído
     if (body.assignedToId !== undefined) {
-      if (body.assignedToId === null) {
-        data.assignedTo = { disconnect: true };
-      } else {
-        // Verificar se o usuário pertence à mesma empresa
-        const userExists = await this.prisma.user.findFirst({
-          where: { id: body.assignedToId, companyId }
-        });
-        if (!userExists) throw new NotFoundException('Usuário não encontrado');
-        data.assignedTo = { connect: { id: body.assignedToId } };
-      }
+      body.assignedToId === null
+        ? (data.assignedTo = { disconnect: true })
+        : (data.assignedTo = { connect: { id: body.assignedToId } });
     }
 
-    // Gerenciar rota
     if (body.routeId !== undefined) {
-      if (body.routeId === null) {
-        data.route = { disconnect: true };
-      } else {
-        const routeExists = await this.prisma.route.findUnique({
-          where: { id: body.routeId }
-        });
-        if (!routeExists) throw new NotFoundException('Rota não encontrada');
-        data.route = { connect: { id: body.routeId } };
-      }
+      body.routeId === null
+        ? (data.route = { disconnect: true })
+        : (data.route = { connect: { id: body.routeId } });
     }
 
-    // Marcar como concluída
     if (body.completedById !== undefined) {
       if (body.completedById) {
-        // Verificar se o usuário pertence à mesma empresa
-        const userExists = await this.prisma.user.findFirst({
-          where: { id: body.completedById, companyId }
-        });
-        if (!userExists) throw new NotFoundException('Usuário não encontrado');
-        
         data.completedAt = new Date();
         data.completedBy = { connect: { id: body.completedById } };
         data.status = 'COMPLETED';
@@ -420,63 +224,118 @@ export class TasksService {
       }
     }
 
-    // Marcar como falhada
-    if (body.status === 'FAILED') {
-      data.failedAt = new Date();
-    } else if (body.status !== 'FAILED' && existing.status === 'FAILED') {
-      data.failedAt = null;
-    }
+    if (body.status === 'FAILED') data.failedAt = new Date();
+    else if (body.status !== 'FAILED' && existing.status === 'FAILED') data.failedAt = null;
 
     const updated = await this.prisma.task.update({
       where: { id },
       data,
-      include: { 
-        assignedTo: {
-          select: {
-            id: true,
-            name: true,
-            email: true
-          }
-        },
-        column: true,
-        createdBy: {
-          select: {
-            id: true,
-            name: true,
-            email: true
-          }
-        },
-        completedBy: {
-          select: {
-            id: true,
-            name: true,
-            email: true
-          }
-        },
-        route: true,
-        taskImages: true,
-        taskAudios: true,
-        taskVideos: true,
-        taskAddress: true,
+      include: {
+        assignedTo: { select: { id: true, name: true } },
+        createdBy: { select: { id: true, name: true } },
+        company: { select: { id: true } },
       },
     });
 
-    // 🔹 Gerenciar remoção de arquivos existentes
-    await this.handleFileRemovals(
-      id,
-      companyId,
-      body.removeImageIds || [],
-      body.removeAudioIds || [],
-      body.removeVideoIds || []
-    );
+    await this.handleFileRemovals(id, companyId, body.removeImageIds || [], body.removeAudioIds || [], body.removeVideoIds || []);
+    if (files) await this.handleFileUploads(id, companyId, files);
 
-    // 🔹 Upload de novos arquivos (se fornecidos)
-    if (files) {
-      await this.handleFileUploads(id, companyId, files);
+    // Notificação quando muda o responsável
+    if (newAssignedToId && newAssignedToId !== oldAssignedToId) {
+      const updater = await this.prisma.user.findUnique({ where: { id: updaterId } });
+      const updaterName = updater?.name || 'Alguém';
+      await this.sendTaskAssignedNotification(updated, newAssignedToId, updaterName);
     }
 
-    console.log('✅ Task atualizada:', updated);
     return updated;
+  }
+
+  private async handleFileUploads(
+    taskId: string,
+    companyId: string,
+    files: {
+      images?: UploadedFile[];
+      audios?: UploadedFile[];
+      videos?: UploadedFile[];
+    },
+  ) {
+    const uploadPromises: Promise<any>[] = [];
+
+    if (files.images) {
+      for (const imageFile of files.images) {
+        const ext = imageFile.originalname.split('.').pop();
+        const path = `tasks/${taskId}/images/${Date.now()}-${Math.random().toString(36).substring(7)}.${ext}`;
+
+        uploadPromises.push(
+          this.supabaseService.uploadFile('task-images', path, imageFile.buffer, {
+            contentType: imageFile.mimetype,
+            metadata: { originalName: imageFile.originalname, size: imageFile.size },
+          }).then(async (result) => {
+            return this.prisma.taskImage.create({
+              data: {
+                url: result.fullPath,
+                filename: imageFile.originalname,
+                size: imageFile.size,
+                taskId,
+                companyId,
+              },
+            });
+          }),
+        );
+      }
+    }
+
+    if (files.audios) {
+      for (const audioFile of files.audios) {
+        const ext = audioFile.originalname.split('.').pop();
+        const path = `tasks/${taskId}/audios/${Date.now()}-${Math.random().toString(36).substring(7)}.${ext}`;
+
+        uploadPromises.push(
+          this.supabaseService.uploadFile('task-audios', path, audioFile.buffer, {
+            contentType: audioFile.mimetype,
+            metadata: { originalName: audioFile.originalname, size: audioFile.size },
+          }).then(async (result) => {
+            return this.prisma.taskAudio.create({
+              data: {
+                url: result.fullPath,
+                filename: audioFile.originalname,
+                size: audioFile.size,
+                duration: null,
+                taskId,
+                companyId,
+              },
+            });
+          }),
+        );
+      }
+    }
+
+    if (files.videos) {
+      for (const videoFile of files.videos) {
+        const ext = videoFile.originalname.split('.').pop();
+        const path = `tasks/${taskId}/videos/${Date.now()}-${Math.random().toString(36).substring(7)}.${ext}`;
+
+        uploadPromises.push(
+          this.supabaseService.uploadFile('task-videos', path, videoFile.buffer, {
+            contentType: videoFile.mimetype,
+            metadata: { originalName: videoFile.originalname, size: videoFile.size },
+          }).then(async (result) => {
+            return this.prisma.taskVideo.create({
+              data: {
+                url: result.fullPath,
+                filename: videoFile.originalname,
+                size: videoFile.size,
+                duration: null,
+                taskId,
+                companyId,
+              },
+            });
+          }),
+        );
+      }
+    }
+
+    await Promise.all(uploadPromises);
   }
 
   private async handleFileRemovals(
@@ -484,11 +343,10 @@ export class TasksService {
     companyId: string,
     removeImageIds: string[],
     removeAudioIds: string[],
-    removeVideoIds: string[]
+    removeVideoIds: string[],
   ) {
     const deletePromises: Promise<any>[] = [];
 
-    // Remover imagens
     for (const imageId of removeImageIds) {
       const image = await this.prisma.taskImage.findUnique({ where: { id: imageId } });
       if (image && image.taskId === taskId && image.companyId === companyId) {
@@ -496,13 +354,12 @@ export class TasksService {
         deletePromises.push(
           Promise.all([
             this.supabaseService.deleteFile('task-images', path),
-            this.prisma.taskImage.delete({ where: { id: imageId } })
-          ])
+            this.prisma.taskImage.delete({ where: { id: imageId } }),
+          ]),
         );
       }
     }
 
-    // Remover áudios
     for (const audioId of removeAudioIds) {
       const audio = await this.prisma.taskAudio.findUnique({ where: { id: audioId } });
       if (audio && audio.taskId === taskId && audio.companyId === companyId) {
@@ -510,13 +367,12 @@ export class TasksService {
         deletePromises.push(
           Promise.all([
             this.supabaseService.deleteFile('task-audios', path),
-            this.prisma.taskAudio.delete({ where: { id: audioId } })
-          ])
+            this.prisma.taskAudio.delete({ where: { id: audioId } }),
+          ]),
         );
       }
     }
 
-    // Remover vídeos
     for (const videoId of removeVideoIds) {
       const video = await this.prisma.taskVideo.findUnique({ where: { id: videoId } });
       if (video && video.taskId === taskId && video.companyId === companyId) {
@@ -524,8 +380,8 @@ export class TasksService {
         deletePromises.push(
           Promise.all([
             this.supabaseService.deleteFile('task-videos', path),
-            this.prisma.taskVideo.delete({ where: { id: videoId } })
-          ])
+            this.prisma.taskVideo.delete({ where: { id: videoId } }),
+          ]),
         );
       }
     }
@@ -533,63 +389,65 @@ export class TasksService {
     await Promise.all(deletePromises);
   }
 
-  async remove(id: string, companyId: string) {
-    console.log('=== EXCLUINDO TASK ===', id);
+  async findOne(id: string) {
+    const task = await this.prisma.task.findUnique({
+      where: { id },
+      include: {
+        assignedTo: { select: { id: true, name: true, email: true } },
+        column: true,
+        createdBy: { select: { id: true, name: true, email: true } },
+        completedBy: { select: { id: true, name: true, email: true } },
+        route: true,
+        taskImages: true,
+        taskAudios: true,
+        taskVideos: true,
+        taskAddress: true,
+        company: { select: { id: true, name: true } },
+      },
+    });
+    if (!task) throw new NotFoundException('Task não encontrada');
+    return task;
+  }
 
-    // Verificar se a task pertence à company
+  async remove(id: string, companyId: string) {
     const task = await this.prisma.task.findFirst({
       where: { id, companyId },
-      include: { taskImages: true, taskAudios: true, taskVideos: true }
+      include: { taskImages: true, taskAudios: true, taskVideos: true },
     });
 
     if (!task) throw new NotFoundException('Task não encontrada');
 
-    // 🔹 Deletar arquivos do Supabase
     const deletePromises: Promise<any>[] = [];
 
-    // Deletar imagens
     for (const image of task.taskImages) {
       const path = image.url.replace(/^.*\/\/[^\/]+\//, '');
       deletePromises.push(this.supabaseService.deleteFile('task-images', path));
     }
 
-    // Deletar áudios
     for (const audio of task.taskAudios) {
       const path = audio.url.replace(/^.*\/\/[^\/]+\//, '');
       deletePromises.push(this.supabaseService.deleteFile('task-audios', path));
     }
 
-    // Deletar vídeos
     for (const video of task.taskVideos) {
       const path = video.url.replace(/^.*\/\/[^\/]+\//, '');
       deletePromises.push(this.supabaseService.deleteFile('task-videos', path));
     }
 
     await Promise.all(deletePromises);
-
-    // 🔹 Deletar a task (cascade vai deletar os registros relacionados)
     await this.prisma.task.delete({ where: { id } });
-    
-    console.log('✅ Task deletada com sucesso');
   }
 
   async updateStatus(id: string, columnId: string | null, companyId: string) {
-    // Verificar se a task pertence à company
-    const task = await this.prisma.task.findFirst({
-      where: { id, companyId }
-    });
+    const task = await this.prisma.task.findFirst({ where: { id, companyId } });
     if (!task) throw new NotFoundException('Task não encontrada');
 
-    // Se columnId for fornecido, verificar se a coluna pertence à mesma company
     if (columnId) {
-      const column = await this.prisma.kanbanColumn.findFirst({
-        where: { id: columnId, companyId }
-      });
+      const column = await this.prisma.kanbanColumn.findFirst({ where: { id: columnId, companyId } });
       if (!column) throw new NotFoundException('Coluna não encontrada');
     }
 
     const updateData: any = {};
-    
     if (columnId === null) {
       updateData.column = { disconnect: true };
     } else if (columnId) {
@@ -599,170 +457,94 @@ export class TasksService {
     return this.prisma.task.update({
       where: { id },
       data: updateData,
-      include: { 
-        assignedTo: {
-          select: {
-            id: true,
-            name: true,
-            email: true
-          }
-        }, 
+      include: {
+        assignedTo: { select: { id: true, name: true, email: true } },
         column: true,
-        createdBy: {
-          select: {
-            id: true,
-            name: true,
-            email: true
-          }
-        }
+        createdBy: { select: { id: true, name: true, email: true } },
       },
     });
   }
 
   async findAll(companyId: string) {
-  try {
-    console.log(`🔍 Buscando todas as tasks para company: ${companyId}`);
-    
-    const tasks = await this.prisma.task.findMany({
-      where: { companyId },
-      include: { 
-        assignedTo: {
-          select: {
-            id: true,
-            name: true,
-            email: true
-          }
-        }, 
-        column: true,
-        createdBy: {
-          select: {
-            id: true,
-            name: true,
-            email: true
-          }
-        },
-        route: true
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    console.log(`✅ Encontradas ${tasks.length} tasks para company ${companyId}`);
-    return tasks;
-    
-  } catch (error) {
-    console.error('❌ Erro ao buscar tasks:', error);
-    // Retornar array vazio em caso de erro
-    return [];
-  }
-}
-
-  async findAllPaginated(params: {
-  companyId: string;
-  page?: number;
-  limit?: number;
-  columnId?: string;
-  assignedToId?: string;
-  routeId?: string;
-  status?: string;
-  search?: string;
-}) {
-  try {
-    const page = params.page || 1;
-    const limit = params.limit || 10;
-    const skip = (page - 1) * limit;
-
-    const where: any = {
-      companyId: params.companyId,
-    };
-
-    // Filtro por coluna
-    if (params.columnId) {
-      where.columnId = params.columnId;
-    }
-
-    // Filtro por usuário atribuído
-    if (params.assignedToId) {
-      where.assignedToId = params.assignedToId;
-    }
-
-    // Filtro por rota
-    if (params.routeId) {
-      where.routeId = params.routeId;
-    }
-
-    // Filtro por status
-    if (params.status) {
-      where.status = params.status;
-    }
-
-    // Busca por título ou descrição
-    if (params.search) {
-      where.OR = [
-        { title: { contains: params.search, mode: 'insensitive' } },
-        { description: { contains: params.search, mode: 'insensitive' } },
-      ];
-    }
-
-    console.log(`🔍 Buscando tasks paginadas:`, where);
-
-    const [tasks, total] = await Promise.all([
-      this.prisma.task.findMany({
-        where,
-        include: { 
-          assignedTo: {
-            select: {
-              id: true,
-              name: true,
-              email: true
-            }
-          },
+    try {
+      return await this.prisma.task.findMany({
+        where: { companyId },
+        include: {
+          assignedTo: { select: { id: true, name: true, email: true } },
           column: true,
-          createdBy: {
-            select: {
-              id: true,
-              name: true,
-              email: true
-            }
-          },
-          route: true
+          createdBy: { select: { id: true, name: true, email: true } },
+          route: true,
         },
         orderBy: { createdAt: 'desc' },
-        skip,
-        take: limit,
-      }),
-      this.prisma.task.count({ where }),
-    ]);
-
-    console.log(`✅ Tasks paginadas encontradas: ${tasks.length} de ${total} total`);
-
-    return {
-      tasks,
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
-        hasNext: page < Math.ceil(total / limit),
-        hasPrev: page > 1,
-      },
-    };
-    
-  } catch (error) {
-    console.error('❌ Erro ao buscar tasks paginadas:', error);
-    // Retornar estrutura vazia em caso de erro
-    return {
-      tasks: [],
-      pagination: {
-        page: params.page || 1,
-        limit: params.limit || 10,
-        total: 0,
-        totalPages: 0,
-        hasNext: false,
-        hasPrev: false,
-      },
-    };
+      });
+    } catch (error) {
+      return [];
+    }
   }
-}
+
+  async findAllPaginated(params: {
+    companyId: string;
+    page?: number;
+    limit?: number;
+    columnId?: string;
+    assignedToId?: string;
+    routeId?: string;
+    status?: string;
+    search?: string;
+  }) {
+    try {
+      const page = params.page || 1;
+      const limit = params.limit || 10;
+      const skip = (page - 1) * limit;
+
+      const where: any = { companyId: params.companyId };
+
+      if (params.columnId) where.columnId = params.columnId;
+      if (params.assignedToId) where.assignedToId = params.assignedToId;
+      if (params.routeId) where.routeId = params.routeId;
+      if (params.status) where.status = params.status;
+
+      if (params.search) {
+        where.OR = [
+          { title: { contains: params.search, mode: 'insensitive' } },
+          { description: { contains: params.search, mode: 'insensitive' } },
+        ];
+      }
+
+      const [tasks, total] = await Promise.all([
+        this.prisma.task.findMany({
+          where,
+          include: {
+            assignedTo: { select: { id: true, name: true, email: true } },
+            column: true,
+            createdBy: { select: { id: true, name: true, email: true } },
+            route: true,
+          },
+          orderBy: { createdAt: 'desc' },
+          skip,
+          take: limit,
+        }),
+        this.prisma.task.count({ where }),
+      ]);
+
+      return {
+        tasks,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+          hasNext: page < Math.ceil(total / limit),
+          hasPrev: page > 1,
+        },
+      };
+    } catch (error) {
+      return {
+        tasks: [],
+        pagination: { page: params.page || 1, limit: params.limit || 10, total: 0, totalPages: 0, hasNext: false, hasPrev: false },
+      };
+    }
+  }
 
   async findOverdue(companyId: string) {
     const today = new Date();
@@ -771,64 +553,30 @@ export class TasksService {
     return this.prisma.task.findMany({
       where: {
         companyId,
-        dueDate: {
-          lt: today,
-        },
-        status: {
-          in: ['PENDING', 'IN_PROGRESS']
-        }
+        dueDate: { lt: today },
+        status: { in: ['PENDING', 'IN_PROGRESS'] },
       },
-      include: { 
-        assignedTo: {
-          select: {
-            id: true,
-            name: true,
-            email: true
-          }
-        }, 
+      include: {
+        assignedTo: { select: { id: true, name: true, email: true } },
         column: true,
-        createdBy: {
-          select: {
-            id: true,
-            name: true,
-            email: true
-          }
-        },
-        route: true
+        createdBy: { select: { id: true, name: true, email: true } },
+        route: true,
       },
       orderBy: { dueDate: 'asc' },
     });
   }
 
   async findByColumnId(columnId: string, companyId: string, limit?: number) {
-    // Verificar se a coluna pertence à empresa
-    const column = await this.prisma.kanbanColumn.findFirst({
-      where: { id: columnId, companyId }
-    });
+    const column = await this.prisma.kanbanColumn.findFirst({ where: { id: columnId, companyId } });
     if (!column) throw new NotFoundException('Coluna não encontrada');
 
     return this.prisma.task.findMany({
-      where: { 
-        columnId,
-        companyId 
-      },
-      include: { 
-        assignedTo: {
-          select: {
-            id: true,
-            name: true,
-            email: true
-          }
-        }, 
+      where: { columnId, companyId },
+      include: {
+        assignedTo: { select: { id: true, name: true, email: true } },
         column: true,
-        createdBy: {
-          select: {
-            id: true,
-            name: true,
-            email: true
-          }
-        },
-        route: true
+        createdBy: { select: { id: true, name: true, email: true } },
+        route: true,
       },
       orderBy: { createdAt: 'desc' },
       take: limit,
@@ -839,39 +587,21 @@ export class TasksService {
     return this.prisma.task.findMany({
       where: {
         companyId,
-        column: {
-          title: {
-            contains: columnTitle,
-            mode: 'insensitive'
-          }
-        }
+        column: { title: { contains: columnTitle, mode: 'insensitive' } },
       },
-      include: { 
-        assignedTo: {
-          select: {
-            id: true,
-            name: true,
-            email: true
-          }
-        }, 
+      include: {
+        assignedTo: { select: { id: true, name: true, email: true } },
         column: true,
-        createdBy: {
-          select: {
-            id: true,
-            name: true,
-            email: true
-          }
-        },
-        route: true
+        createdBy: { select: { id: true, name: true, email: true } },
+        route: true,
       },
       orderBy: { createdAt: 'desc' },
       take: limit,
     });
   }
 
-  // Método para adicionar endereço à task
   async addAddress(
-    taskId: string, 
+    taskId: string,
     companyId: string,
     addressData: {
       rua: string;
@@ -881,156 +611,77 @@ export class TasksService {
       cidade: string;
       estado: string;
       cep: string;
-    }
+    },
   ) {
-    // Verificar se a task pertence à company
-    const task = await this.prisma.task.findFirst({
-      where: { id: taskId, companyId }
-    });
+    const task = await this.prisma.task.findFirst({ where: { id: taskId, companyId } });
     if (!task) throw new NotFoundException('Task não encontrada');
 
     return this.prisma.taskAddress.upsert({
       where: { taskId },
       update: addressData,
-      create: {
-        ...addressData,
-        taskId,
-        companyId,
-      },
+      create: { ...addressData, taskId, companyId },
     });
   }
 
-  // Método para buscar tasks por usuário atribuído
   async findByAssignedUser(userId: string, companyId: string, limit?: number) {
-    // Verificar se o usuário pertence à empresa
-    const user = await this.prisma.user.findFirst({
-      where: { id: userId, companyId }
-    });
+    const user = await this.prisma.user.findFirst({ where: { id: userId, companyId } });
     if (!user) throw new NotFoundException('Usuário não encontrado');
 
     return this.prisma.task.findMany({
-      where: {
-        assignedToId: userId,
-        companyId,
-      },
-      include: { 
-        assignedTo: {
-          select: {
-            id: true,
-            name: true,
-            email: true
-          }
-        }, 
+      where: { assignedToId: userId, companyId },
+      include: {
+        assignedTo: { select: { id: true, name: true, email: true } },
         column: true,
-        createdBy: {
-          select: {
-            id: true,
-            name: true,
-            email: true
-          }
-        },
-        route: true
+        createdBy: { select: { id: true, name: true, email: true } },
+        route: true,
       },
       orderBy: { createdAt: 'desc' },
       take: limit,
     });
   }
 
-  // Método para buscar tasks criadas por um usuário
   async findByCreator(userId: string, companyId: string, limit?: number) {
-    // Verificar se o usuário pertence à empresa
-    const user = await this.prisma.user.findFirst({
-      where: { id: userId, companyId }
-    });
+    const user = await this.prisma.user.findFirst({ where: { id: userId, companyId } });
     if (!user) throw new NotFoundException('Usuário não encontrado');
 
     return this.prisma.task.findMany({
-      where: {
-        createdById: userId,
-        companyId,
-      },
-      include: { 
-        assignedTo: {
-          select: {
-            id: true,
-            name: true,
-            email: true
-          }
-        }, 
+      where: { createdById: userId, companyId },
+      include: {
+        assignedTo: { select: { id: true, name: true, email: true } },
         column: true,
-        createdBy: {
-          select: {
-            id: true,
-            name: true,
-            email: true
-          }
-        },
-        route: true
+        createdBy: { select: { id: true, name: true, email: true } },
+        route: true,
       },
       orderBy: { createdAt: 'desc' },
       take: limit,
     });
   }
 
-  // Método para buscar tasks por rota
   async findByRoute(routeId: string, companyId: string, limit?: number) {
-    const route = await this.prisma.route.findUnique({
-      where: { id: routeId }
-    });
+    const route = await this.prisma.route.findUnique({ where: { id: routeId } });
     if (!route) throw new NotFoundException('Rota não encontrada');
 
     return this.prisma.task.findMany({
-      where: {
-        routeId,
-        companyId,
-      },
-      include: { 
-        assignedTo: {
-          select: {
-            id: true,
-            name: true,
-            email: true
-          }
-        }, 
+      where: { routeId, companyId },
+      include: {
+        assignedTo: { select: { id: true, name: true, email: true } },
         column: true,
-        createdBy: {
-          select: {
-            id: true,
-            name: true,
-            email: true
-          }
-        },
-        route: true
+        createdBy: { select: { id: true, name: true, email: true } },
+        route: true,
       },
       orderBy: { createdAt: 'desc' },
       take: limit,
     });
   }
 
-  // Método para buscar tasks por status
   async findByStatus(status: string, companyId: string, limit?: number) {
     return this.prisma.task.findMany({
-      where: {
-        status: status as any,
-        companyId,
-      },
-      include: { 
-        assignedTo: {
-          select: {
-            id: true,
-            name: true,
-            email: true
-          }
-        }, 
+      where: { status: status as any, companyId },
+      include: {
+        assignedTo: { select: { id: true, name: true, email: true } },
         column: true,
-        createdBy: {
-          select: {
-            id: true,
-            name: true,
-            email: true
-          }
-        },
-        route: true
+        createdBy: { select: { id: true, name: true, email: true } },
+        route: true,
       },
       orderBy: { createdAt: 'desc' },
       take: limit,
