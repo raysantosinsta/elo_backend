@@ -1,4 +1,5 @@
 /* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { Injectable } from "@nestjs/common";
 import { ChatGateway } from "src/chat/chat.gateway";
@@ -30,7 +31,7 @@ export class ChatMessageService {
         where: {
           name: { equals: mention.mentionedName, mode: 'insensitive' },
           isProfessional: true,
-          status: UserStatus.ATIVO, // 🔥 IMPORTANTE: Só usuários ativos
+          status: UserStatus.ACTIVE, // 🔥 IMPORTANTE: Só usuários ativos
         },
       });
 

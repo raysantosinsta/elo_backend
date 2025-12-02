@@ -1,5 +1,4 @@
 /* eslint-disable prettier/prettier */
-
 import { CompanyStatus, UserRole, UserStatus } from "@prisma/client";
 
 // auth/types/index.ts
@@ -9,10 +8,12 @@ export interface UserProfile {
   name: string;
   role: UserRole;
   status: UserStatus;
-  companyId: string | null; // 🔥 CORREÇÃO: Pode ser null
+  companyId: string | null;
   document?: string | null;
   phone: string;
-  company?: { // 🔥 CORREÇÃO: Opcional e pode ser null
+  isProfessional: boolean; // 🔥 ADICIONE ESTA LINHA
+  professionalRole?: string | null; // 🔥 ADICIONE ESTA LINHA
+  company?: {
     id: string;
     name: string;
     status: CompanyStatus;
@@ -24,7 +25,7 @@ export interface JwtPayload {
   sub: string;
   email: string;
   role: UserRole;
-  companyId: string | null; // 🔥 CORREÇÃO: Pode ser null
+  companyId: string | null;
 }
 
 export interface UserTokens {

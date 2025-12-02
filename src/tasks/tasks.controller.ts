@@ -21,10 +21,13 @@ import {
   UseInterceptors,
   UseGuards,
   Request,
+  DefaultValuePipe,
+  ParseIntPipe,
 } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { TasksService } from './tasks.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { TaskStatus } from '@prisma/client';
 
 // Interface para arquivos
 interface UploadedFile {
@@ -43,25 +46,6 @@ export class TasksController {
     private readonly tasksService: TasksService,
   ) { }
 
-  @Get()
-async findAll(@Request() req) {
-  try {
-    const companyId = req.user.companyId;
-    console.log('🔍 Buscando tasks para company:', companyId);
-    
-    const tasks = await this.tasksService.findAll(companyId);
-    console.log(`✅ Tasks encontradas: ${tasks.length}`);
-    
-    // Retorna diretamente o array
-    return tasks || [];
-    
-  } catch (error) {
-    console.error('❌ Erro ao buscar tarefas:', error);
-    // Retorna array vazio em caso de erro
-    return [];
-  }
-}
-
   // 🔄 Atualizar status da task (mover entre colunas)
   @Patch(':id/status')
   async updateStatus(
@@ -70,7 +54,7 @@ async findAll(@Request() req) {
     @Request() req
   ) {
     try {
-      const companyId = req.user.companyId; // FIX: Use flat companyId from JWT payload
+      const companyId = req.user.companyId;
       return await this.tasksService.updateStatus(id, body.columnId, companyId);
     } catch (error) {
       throw new HttpException(
@@ -99,17 +83,15 @@ async findAll(@Request() req) {
     try {
       console.log('=== 📥 REQUISIÇÃO RECEBIDA NO BACKEND ===');
       console.log('Body recebido:', body);
-      console.log('req.user.companyId:', req.user.companyId); // DEBUG: Para rastrear o valor do JWT
 
-      const companyId = req.user.companyId; // FIX: Use flat companyId from JWT payload
+      const companyId = req.user.companyId;
+      const createdById = req.user.id;
 
       if (!companyId) {
         throw new HttpException('CompanyId é obrigatório (verifique o token JWT)', HttpStatus.BAD_REQUEST);
       }
 
-      const createdById = req.user.id;
-
-      // Adicionar companyId e createdById ao body (sem sobrescrever se já existir)
+      // Converter valores para tipos corretos
       const taskData = {
         ...body,
         companyId,
@@ -120,6 +102,8 @@ async findAll(@Request() req) {
         assignedToId: body.assignedToId || null,
         columnId: body.columnId || null,
         routeId: body.routeId || null,
+        // Adicionar coluna de ordem se fornecida
+        columnOrder: body.columnOrder ? parseInt(body.columnOrder) : 0,
       };
 
       console.log('📤 Dados da task para criação:', taskData);
@@ -138,12 +122,12 @@ async findAll(@Request() req) {
   @Get()
   async findAllPaginated(
     @Request() req,
-    @Query('page') page: number = 1,
-    @Query('limit') limit: number = 10,
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number = 1,
+    @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number = 10,
     @Query('columnId') columnId?: string,
     @Query('assignedToId') assignedToId?: string,
     @Query('routeId') routeId?: string,
-    @Query('status') status?: string,
+    @Query('status') status?: TaskStatus,
     @Query('search') search?: string,
   ) {
     try {
@@ -152,44 +136,53 @@ async findAll(@Request() req) {
       console.log('🔍 Buscando tasks para company:', companyId);
       console.log('📋 Filtros:', { page, limit, columnId, assignedToId, routeId, status, search });
 
-      // Se tem parâmetros de paginação/filtro, usa findAllPaginated
-      if (page || limit || columnId || assignedToId || routeId || status || search) {
-        const result = await this.tasksService.findAllPaginated({
-          companyId,
-          page: Number(page),
-          limit: Number(limit),
-          columnId,
-          assignedToId,
-          routeId,
-          status,
-          search,
-        });
+      const result = await this.tasksService.findAllPaginated({
+        companyId,
+        page: Number(page),
+        limit: Number(limit),
+        columnId,
+        assignedToId,
+        routeId,
+        status,
+        search,
+      });
 
-        console.log(`✅ Tasks encontradas (com filtros): ${result.tasks.length}`);
-        return result;
-      }
-
-      // Se não tem parâmetros, retorna todas da empresa
-      const tasks = await this.tasksService.findAll(companyId);
-      console.log(`✅ Tasks encontradas (todas): ${tasks.length}`);
-
-      // Retornar array vazio se não há tasks, em vez de lançar erro
-      return tasks || [];
+      console.log(`✅ Tasks encontradas: ${result.tasks.length} de ${result.pagination.total}`);
+      return result;
 
     } catch (error) {
       console.error('❌ Erro ao buscar tarefas:', error);
 
-      // Se for erro de "não encontrado", retornar array vazio
-      if (error.message?.includes('não encontrada') || error.message?.includes('not found')) {
-        console.log('ℹ️ Nenhuma task encontrada, retornando array vazio');
-        return [];
-      }
+      // Retornar resultado vazio em caso de erro
+      return {
+        tasks: [],
+        pagination: {
+          page: page,
+          limit: limit,
+          total: 0,
+          totalPages: 0,
+          hasNext: false,
+          hasPrev: false,
+        },
+      };
+    }
+  }
 
-      // Para outros erros, lançar exceção
-      throw new HttpException(
-        error.message || 'Erro ao buscar tarefas',
-        HttpStatus.BAD_REQUEST,
-      );
+  // 📊 Buscar todas as tasks (sem paginação)
+  @Get('all')
+  async findAll(@Request() req) {
+    try {
+      const companyId = req.user.companyId;
+      console.log('🔍 Buscando todas tasks para company:', companyId);
+      
+      const tasks = await this.tasksService.findAll(companyId);
+      console.log(`✅ Tasks encontradas: ${tasks.length}`);
+      
+      return tasks || [];
+      
+    } catch (error) {
+      console.error('❌ Erro ao buscar tarefas:', error);
+      return [];
     }
   }
 
@@ -197,7 +190,7 @@ async findAll(@Request() req) {
   @Get('overdue')
   async findOverdue(@Request() req) {
     try {
-      const companyId = req.user.companyId; // FIX: Use flat companyId from JWT payload
+      const companyId = req.user.companyId;
       return await this.tasksService.findOverdue(companyId);
     } catch (error) {
       throw new HttpException(
@@ -215,7 +208,7 @@ async findAll(@Request() req) {
     @Query('limit') limit?: number,
   ) {
     try {
-      const companyId = req.user.companyId; // FIX: Use flat companyId from JWT payload
+      const companyId = req.user.companyId;
       return await this.tasksService.findByColumnId(
         columnId,
         companyId,
@@ -237,7 +230,7 @@ async findAll(@Request() req) {
     @Query('limit') limit?: number,
   ) {
     try {
-      const companyId = req.user.companyId; // FIX: Use flat companyId from JWT payload
+      const companyId = req.user.companyId;
       return await this.tasksService.findByColumnTitle(
         title,
         companyId,
@@ -259,7 +252,7 @@ async findAll(@Request() req) {
     @Query('limit') limit?: number,
   ) {
     try {
-      const companyId = req.user.companyId; // FIX: Use flat companyId from JWT payload
+      const companyId = req.user.companyId;
       return await this.tasksService.findByAssignedUser(
         userId,
         companyId,
@@ -281,7 +274,7 @@ async findAll(@Request() req) {
     @Query('limit') limit?: number,
   ) {
     try {
-      const companyId = req.user.companyId; // FIX: Use flat companyId from JWT payload
+      const companyId = req.user.companyId;
       return await this.tasksService.findByCreator(
         userId,
         companyId,
@@ -303,7 +296,7 @@ async findAll(@Request() req) {
     @Query('limit') limit?: number,
   ) {
     try {
-      const companyId = req.user.companyId; // FIX: Use flat companyId from JWT payload
+      const companyId = req.user.companyId;
       return await this.tasksService.findByRoute(
         routeId,
         companyId,
@@ -321,11 +314,11 @@ async findAll(@Request() req) {
   @Get('status/:status')
   async findByStatus(
     @Request() req,
-    @Param('status') status: string,
+    @Param('status') status: TaskStatus,
     @Query('limit') limit?: number,
   ) {
     try {
-      const companyId = req.user.companyId; // FIX: Use flat companyId from JWT payload
+      const companyId = req.user.companyId;
       return await this.tasksService.findByStatus(
         status,
         companyId,
@@ -352,6 +345,7 @@ async findAll(@Request() req) {
     }
   }
 
+  // ✏️ Atualizar task
   @Put(':id')
   @UseInterceptors(FileFieldsInterceptor([
     { name: 'images', maxCount: 10 },
@@ -369,7 +363,7 @@ async findAll(@Request() req) {
     @Request() req,
   ) {
     const companyId = req.user.companyId;
-    const updaterId = req.user.id; // ← quem está fazendo a atualização
+    const updaterId = req.user.id;
 
     const removeImageIds = body.removeImageIds ? JSON.parse(body.removeImageIds) : [];
     const removeAudioIds = body.removeAudioIds ? JSON.parse(body.removeAudioIds) : [];
@@ -385,6 +379,7 @@ async findAll(@Request() req) {
       removeAudioIds,
       removeVideoIds,
       priority: body.priority ? parseInt(body.priority) : undefined,
+      columnOrder: body.columnOrder ? parseInt(body.columnOrder) : undefined,
     };
 
     return this.tasksService.update(id, updateData, companyId, updaterId, files);
@@ -394,7 +389,7 @@ async findAll(@Request() req) {
   @Delete(':id')
   async remove(@Param('id') id: string, @Request() req) {
     try {
-      const companyId = req.user.companyId; // FIX: Use flat companyId from JWT payload
+      const companyId = req.user.companyId;
       return await this.tasksService.remove(id, companyId);
     } catch (error) {
       throw new HttpException(
@@ -420,7 +415,7 @@ async findAll(@Request() req) {
     @Request() req
   ) {
     try {
-      const companyId = req.user.companyId; // FIX: Use flat companyId from JWT payload
+      const companyId = req.user.companyId;
       return await this.tasksService.addAddress(id, companyId, addressData);
     } catch (error) {
       throw new HttpException(
@@ -430,6 +425,7 @@ async findAll(@Request() req) {
     }
   }
 
+  // ✅ Completar tarefa
   @Patch(':id/complete')
   async completeTask(@Param('id') id: string, @Request() req) {
     const companyId = req.user.companyId;
@@ -437,14 +433,18 @@ async findAll(@Request() req) {
 
     return this.tasksService.update(
       id,
-      { completedById: updaterId, status: 'COMPLETED' },
+      { 
+        completedById: updaterId, 
+        completedAt: new Date(),
+        status: TaskStatus.COMPLETED 
+      },
       companyId,
       updaterId,
       undefined,
     );
   }
 
-  // Reabrir tarefa (desmarcar conclusão)
+  // 🔄 Reabrir tarefa (desmarcar conclusão)
   @Patch(':id/reopen')
   async reopenTask(@Param('id') id: string, @Request() req) {
     const companyId = req.user.companyId;
@@ -454,7 +454,8 @@ async findAll(@Request() req) {
       id,
       {
         completedById: null,
-        status: 'PENDING',
+        completedAt: null,
+        status: TaskStatus.PENDING,
       },
       companyId,
       updaterId,
@@ -462,7 +463,7 @@ async findAll(@Request() req) {
     );
   }
 
-  // Marcar como falhada
+  // ❌ Marcar como falhada
   @Patch(':id/fail')
   async failTask(@Param('id') id: string, @Request() req) {
     const companyId = req.user.companyId;
@@ -471,7 +472,8 @@ async findAll(@Request() req) {
     return this.tasksService.update(
       id,
       {
-        status: 'FAILED',
+        failedAt: new Date(),
+        status: TaskStatus.FAILED,
       },
       companyId,
       updaterId,
@@ -479,7 +481,7 @@ async findAll(@Request() req) {
     );
   }
 
-  // Iniciar tarefa (colocar em progresso)
+  // 🚀 Iniciar tarefa (colocar em progresso)
   @Patch(':id/start')
   async startTask(@Param('id') id: string, @Request() req) {
     const companyId = req.user.companyId;
@@ -488,7 +490,7 @@ async findAll(@Request() req) {
     return this.tasksService.update(
       id,
       {
-        status: 'IN_PROGRESS',
+        status: TaskStatus.IN_PROGRESS,
       },
       companyId,
       updaterId,

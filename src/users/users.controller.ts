@@ -21,7 +21,6 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserResponseDto } from './dto/user-response.dto';
 import { UsersService } from './users.service';
-import { Request } from '@nestjs/common';
 
 @Controller('users')
 export class UsersController {
@@ -43,14 +42,11 @@ export class UsersController {
     return this.usersService.findAll(page, limit, companyId, status, role);
   }
 
-  // CORREÇÃO: Mover rotas estáticas ('search', 'mentions') antes de rotas dinâmicas (':id')
-  // para evitar que 'mentions' seja capturado como um 'id'.
   @Get('search')
   searchUsers(
     @Query('query') query: string,
     @Query('companyId') companyId?: string,
   ) {
-    console.log('🔍 Search endpoint chamado:', { query, companyId });
     return this.usersService.searchUsers(query, companyId);
   }
 
@@ -59,9 +55,6 @@ export class UsersController {
     @Query('query') query: string,
     @Query('companyId') companyId?: string,
   ) {
-    console.log('🔍 Mentions endpoint chamado:', { query, companyId });
-    // Simplificado para usar os decoradores @Query() que são mais limpos e seguros.
-    // A validação do companyId já é feita no service.
     return this.usersService.searchUsers(query, companyId);
   }
 
@@ -71,8 +64,11 @@ export class UsersController {
   }
 
   @Get('company/:companyId')
-  findByCompany(@Param('companyId', ParseUUIDPipe) companyId: string): Promise<UserResponseDto[]> {
-    return this.usersService.findByCompany(companyId);
+  findByCompany(
+    @Param('companyId', ParseUUIDPipe) companyId: string,
+    @Query('includeWithoutCompany', new DefaultValuePipe(false)) includeWithoutCompany: boolean = false
+  ): Promise<UserResponseDto[]> {
+    return this.usersService.findByCompany(companyId, includeWithoutCompany);
   }
 
   @Get('role/:role')

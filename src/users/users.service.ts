@@ -1,8 +1,9 @@
 /* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/ban-ts-comment */
 /* eslint-disable prefer-const */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -46,6 +47,17 @@ export class UsersService {
       }
     }
 
+    // Verificar companyId se fornecido
+    if (createUserDto.companyId) {
+      const companyExists = await this.prisma.company.findUnique({
+        where: { id: createUserDto.companyId },
+      });
+
+      if (!companyExists) {
+        throw new BadRequestException('Empresa não encontrada');
+      }
+    }
+
     // Hash da senha
     const hashedPassword = await this.hashPassword(createUserDto.password);
 
@@ -53,7 +65,8 @@ export class UsersService {
       data: {
         ...createUserDto,
         password: hashedPassword,
-        status: createUserDto.status || UserStatus.ATIVO,
+        // CORREÇÃO: Usar UserStatus.ACTIVE (em inglês conforme schema)
+        status: createUserDto.status || UserStatus.ACTIVE,
         isProfessional: createUserDto.isProfessional || false,
       },
     });
@@ -76,11 +89,30 @@ export class UsersService {
   }> {
     const skip = (page - 1) * limit;
 
-    const where = {
-      ...(companyId && { companyId }),
-      ...(status && { status }),
-      ...(role && { role }),
-    };
+    // CORREÇÃO: Construir where considerando que companyId pode ser null
+    const where: Prisma.UserWhereInput = {};
+    
+    if (companyId) {
+      if (companyId === 'null' || companyId === 'undefined') {
+        where.companyId = null;
+      } else {
+        // Validar se é um UUID válido
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+        if (uuidRegex.test(companyId)) {
+          where.companyId = companyId;
+        } else {
+          throw new BadRequestException('ID da empresa inválido');
+        }
+      }
+    }
+    
+    if (status) {
+      where.status = status;
+    }
+    
+    if (role) {
+      where.role = role;
+    }
 
     const [users, total] = await Promise.all([
       this.prisma.user.findMany({
@@ -170,13 +202,27 @@ export class UsersService {
       }
     }
 
+    // Verificar companyId se fornecido
+    if (updateUserDto.companyId && updateUserDto.companyId !== existingUser.companyId) {
+      if (updateUserDto.companyId === 'null' || updateUserDto.companyId === 'undefined') { // @ts-ignore
+        updateUserDto.companyId = null;
+      } else {
+        const companyExists = await this.prisma.company.findUnique({
+          where: { id: updateUserDto.companyId },
+        });
+
+        if (!companyExists) {
+          throw new BadRequestException('Empresa não encontrada');
+        }
+      }
+    }
+
     // Hash da senha se for fornecida
     let updateData = { ...updateUserDto };
     if (updateUserDto.password) {
       updateData.password = await this.hashPassword(updateUserDto.password);
     }
 
-    // 🔥 ATUALIZADO: Incluir company na resposta
     const user = await this.prisma.user.update({
       where: { id },
       data: updateData,
@@ -218,10 +264,10 @@ export class UsersService {
       throw new NotFoundException(`Usuário com ID ${id} não encontrado`);
     }
 
-    // 🔥 ATUALIZADO: Incluir company na resposta
+    // CORREÇÃO: Usar UserStatus.INACTIVE (em inglês conforme schema)
     const updatedUser = await this.prisma.user.update({
       where: { id },
-      data: { status: UserStatus.INATIVO },
+      data: { status: UserStatus.INACTIVE },
       include: {
         company: {
           select: {
@@ -245,10 +291,10 @@ export class UsersService {
       throw new NotFoundException(`Usuário com ID ${id} não encontrado`);
     }
 
-    // 🔥 ATUALIZADO: Incluir company na resposta
+    // CORREÇÃO: Usar UserStatus.ACTIVE (em inglês conforme schema)
     const updatedUser = await this.prisma.user.update({
       where: { id },
-      data: { status: UserStatus.ATIVO },
+      data: { status: UserStatus.ACTIVE },
       include: {
         company: {
           select: {
@@ -263,9 +309,30 @@ export class UsersService {
     return this.toResponseDto(updatedUser);
   }
 
-  async findByCompany(companyId: string): Promise<UserResponseDto[]> {
+  async findByCompany(companyId: string, includeWithoutCompany: boolean = false): Promise<UserResponseDto[]> {
+    // CORREÇÃO: Permitir buscar usuários sem empresa também
+    const where: Prisma.UserWhereInput = {};
+    
+    if (companyId === 'null' || companyId === 'undefined') {
+      where.companyId = null;
+    } else {
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+      if (!uuidRegex.test(companyId)) {
+        throw new BadRequestException('ID da empresa inválido');
+      }
+      
+      if (includeWithoutCompany) {
+        where.OR = [
+          { companyId },
+          { companyId: null }
+        ];
+      } else {
+        where.companyId = companyId;
+      }
+    }
+
     const users = await this.prisma.user.findMany({
-      where: { companyId },
+      where,
       orderBy: { name: 'asc' },
     });
 
@@ -281,86 +348,77 @@ export class UsersService {
     return users.map(user => this.toResponseDto(user));
   }
   
-  // CORREÇÃO no UsersService - searchUsers method
-async searchUsers(query: string, companyId?: string): Promise<MentionUserResponseDto[]> {
-  console.log('🎯 searchUsers chamado com:', { query, companyId });
-  
-  if (!query || query.trim().length < 2) {
-    console.log('❌ Query muito curta');
-    return [];
-  }
-
-  const cleanQuery = query.trim().toLowerCase();
-
-  try {
-    // 🔥 CORREÇÃO: Construir query de forma mais robusta
-    const where: Prisma.UserWhereInput = {
-      OR: [
-        { name: { contains: cleanQuery, mode: 'insensitive' } },
-        { email: { contains: cleanQuery, mode: 'insensitive' } },
-      ],
-      isProfessional: true,
-      status: UserStatus.ATIVO,
-    };
-
-    // 🔥 VALIDAÇÃO SEGURA do companyId
-    if (companyId && companyId !== 'undefined' && companyId !== 'null') {
-      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-      const isValid = uuidRegex.test(companyId);
-      
-      if (isValid) {
-        where.companyId = companyId;
-        console.log('✅ CompanyId válido, aplicando filtro:', companyId);
-      } else {
-        console.warn('⚠️ CompanyId inválido, ignorando filtro:', companyId);
-      }
-    } else {
-      console.log('ℹ️  Sem companyId ou valor inválido');
+  async searchUsers(query: string, companyId?: string): Promise<MentionUserResponseDto[]> {
+    if (!query || query.trim().length < 2) {
+      return [];
     }
 
-    console.log('🔍 Query Prisma:', JSON.stringify(where, null, 2));
+    const cleanQuery = query.trim().toLowerCase();
 
-    const users = await this.prisma.user.findMany({
-      where,
-      orderBy: [
-        { name: 'asc' },
-        { professionalRole: 'asc' },
-      ],
-      take: 8,
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        phone: true,
-        professionalRole: true,
+    try {
+      const where: Prisma.UserWhereInput = {
+        OR: [
+          { name: { contains: cleanQuery, mode: 'insensitive' } },
+          { email: { contains: cleanQuery, mode: 'insensitive' } },
+        ],
         isProfessional: true,
-        company: {
-          select: {
-            id: true,
-            name: true,
+        // CORREÇÃO: Usar UserStatus.ACTIVE (em inglês conforme schema)
+        status: UserStatus.ACTIVE,
+      };
+
+      // CORREÇÃO: Tratar companyId corretamente (pode ser null ou string)
+      if (companyId) {
+        if (companyId === 'null' || companyId === 'undefined') {
+          where.companyId = null;
+        } else {
+          const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+          if (uuidRegex.test(companyId)) {
+            where.companyId = companyId;
+          } else {
+            // Se não for um UUID válido, não aplicar filtro
+            console.warn('CompanyId inválido para busca:', companyId);
+          }
+        }
+      }
+
+      const users = await this.prisma.user.findMany({
+        where,
+        orderBy: [
+          { name: 'asc' },
+          { professionalRole: 'asc' },
+        ],
+        take: 8,
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          phone: true,
+          professionalRole: true,
+          isProfessional: true,
+          company: {
+            select: {
+              id: true,
+              name: true,
+            },
           },
         },
-      },
-    });
-
-    console.log(`✅ ${users.length} usuários encontrados para "${cleanQuery}"`);
-    
-    return users.map(u => new MentionUserResponseDto({
-      id: u.id,
-      name: u.name,
-      email: u.email,
-      phone: u.phone,
-      professionalRole: u.professionalRole ?? undefined,
-      isProfessional: u.isProfessional,
-      company: u.company ? {
-        id: u.company.id,
-        name: u.company.name,
-      } : undefined,
-    }));
-  } catch (error) {
-    console.error('❌ Erro no searchUsers:', error);
-    return [];
+      });
+      
+      return users.map(u => new MentionUserResponseDto({
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        phone: u.phone,
+        professionalRole: u.professionalRole ?? undefined,
+        isProfessional: u.isProfessional,
+        company: u.company ? {
+          id: u.company.id,
+          name: u.company.name,
+        } : undefined,
+      }));
+    } catch (error) {
+      console.error('Erro no searchUsers:', error);
+      return [];
+    }
   }
-}
-
 }
