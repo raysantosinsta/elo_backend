@@ -43,6 +43,25 @@ export class TasksController {
     private readonly tasksService: TasksService,
   ) { }
 
+  @Get()
+async findAll(@Request() req) {
+  try {
+    const companyId = req.user.companyId;
+    console.log('🔍 Buscando tasks para company:', companyId);
+    
+    const tasks = await this.tasksService.findAll(companyId);
+    console.log(`✅ Tasks encontradas: ${tasks.length}`);
+    
+    // Retorna diretamente o array
+    return tasks || [];
+    
+  } catch (error) {
+    console.error('❌ Erro ao buscar tarefas:', error);
+    // Retorna array vazio em caso de erro
+    return [];
+  }
+}
+
   // 🔄 Atualizar status da task (mover entre colunas)
   @Patch(':id/status')
   async updateStatus(

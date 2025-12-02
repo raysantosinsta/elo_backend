@@ -339,7 +339,15 @@ export class AuthService {
     };
   }
 
-  async validateUser(payload: JwtPayload): Promise<UserProfile | null> {
+  // auth.service.ts - método validateUser
+async validateUser(payload: any): Promise<UserProfile | null> {
+  console.log('👤 [AUTH SERVICE] Validando usuário do payload:', {
+    sub: payload.sub,
+    email: payload.email,
+    role: payload.role,
+  });
+
+  try {
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
       select: {
@@ -354,13 +362,27 @@ export class AuthService {
       },
     });
 
-    // 🔥 CORREÇÃO: Verificar status atualizado
-    if (!user || user.status !== 'ATIVO') {
+    console.log('🔍 [AUTH SERVICE] Usuário encontrado no banco:', user);
+
+    if (!user) {
+      console.log('❌ [AUTH SERVICE] Usuário não encontrado no banco');
       return null;
     }
 
+    // 🔥 CORREÇÃO: Verificar status atualizado
+    console.log('📊 [AUTH SERVICE] Status do usuário:', user.status);
+    if (user.status !== 'ATIVO') {
+      console.log('❌ [AUTH SERVICE] Usuário não está ATIVO. Status:', user.status);
+      return null;
+    }
+
+    console.log('✅ [AUTH SERVICE] Usuário validado com sucesso');
     return user;
+  } catch (error) {
+    console.error('💥 [AUTH SERVICE] Erro ao buscar usuário:', error);
+    return null;
   }
+}
   //TODO:  ver se realmnte precisa desses dois metodos separados
   async getCompanies() {
     const companies = await this.prisma.company.findMany({

@@ -28,8 +28,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
           let token = request?.cookies?.access_token || null;
           // Se não encontrar no cookie, tenta extrair do header Authorization
           if (!token && request.headers.authorization) {
-            token = request.headers.authorization.replace('Bearer ', '');
+            const authHeader = request.headers.authorization;
+            if (authHeader.startsWith('Bearer ')) {
+              token = authHeader.substring(7);
+            }
           }
+          console.log('🔑 [JWT STRATEGY] Token extraído:', token ? `${token.substring(0, 20)}...` : 'null');
           return token;
         },
         ExtractJwt.fromAuthHeaderAsBearerToken(),
@@ -41,19 +45,54 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: any) {
-    const user = await this.authService.validateUser(payload);
-    if (!user) {
-      throw new UnauthorizedException('Usuário inativo ou não encontrado');
-    }
+    console.log('🔑 [JWT STRATEGY] Payload recebido:', {
+      sub: payload.sub,
+      email: payload.email,
+      role: payload.role,
+      companyId: payload.companyId,
+      exp: payload.exp,
+      iat: payload.iat,
+    });
 
-    return {
-      sub: user.id,
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      role: user.role,
-      companyId: user.companyId,
-      status: user.status,
-    };
+    try {
+      // Primeiro, valida o usuário com o service
+      const user = await this.authService.validateUser(payload);
+      
+      if (!user) {
+        console.log('❌ [JWT STRATEGY] Usuário não encontrado ou inativo');
+        throw new UnauthorizedException('Usuário inativo ou não encontrado');
+      }
+
+      console.log('✅ [JWT STRATEGY] Usuário validado:', {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        companyId: user.companyId,
+        status: user.status,
+      });
+
+      // Retorna o usuário completo para o req.user
+      return {
+        sub: user.id,
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        companyId: user.companyId,
+        status: user.status,
+        document: user.document,
+        phone: user.phone,
+      };
+    } catch (error) {
+      console.error('💥 [JWT STRATEGY] Erro ao validar usuário:', error);
+      
+      // Se já é uma UnauthorizedException, re-lançar
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
+      
+      // Para outros erros, lançar exceção genérica
+      throw new UnauthorizedException('Falha na validação do token');
+    }
   }
 }

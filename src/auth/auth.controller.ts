@@ -10,7 +10,7 @@ import {
   Param,
   Post,
   Request,
-  UnauthorizedException,
+  Res,
   UseGuards
 } from '@nestjs/common';
 import { Public } from 'src/chat/public.decorator';
@@ -60,45 +60,52 @@ export class AuthController {
     return this.authService.getProfile(req.user.sub);
   }
 
-  // 🔥 NOVA ROTA: EMPRESAS PARA MASTER (PROTEGIDA - apenas MASTER pode acessar)
-  @Get('companies/master')
-  async getCompaniesForMaster(@Request() req) {
-    // Verificar se o usuário é MASTER
-    if (req.user.role !== 'MASTER') {
-      throw new UnauthorizedException('Apenas usuários MASTER podem acessar esta lista de empresas');
+  // auth.controller.ts - método getCompaniesForMaster final
+@UseGuards(JwtAuthGuard)
+@Get('companies/master')
+async getCompaniesForMaster(@Request() req, @Res() res: any) {
+  try {
+    console.log('🔍 [CONTROLLER] /companies/master chamado');
+    
+    if (!req.user) {
+      console.log('❌ [CONTROLLER] req.user está undefined');
+      return res.status(401).json({
+        statusCode: 401,
+        message: 'Usuário não autenticado',
+      });
     }
 
-    return this.authService.getCompaniesForMaster();
-  }
+    if (req.user.role !== 'MASTER') {
+      console.log('❌ [CONTROLLER] Usuário não é MASTER. Role:', req.user.role);
+      return res.status(403).json({
+        statusCode: 403,
+        message: 'Apenas usuários MASTER podem acessar esta lista de empresas',
+      });
+    }
 
-  @Public() // 🔥 Marcar esta rota como pública
+    console.log('✅ [CONTROLLER] Usuário autorizado, buscando empresas...');
+    
+    const companies = await this.authService.getCompaniesForMaster();
+    
+    console.log(`📦 [CONTROLLER] Retornando ${companies.length} empresas`);
+    
+    // Retorna com status 200 e os dados
+    return res.status(200).json(companies);
+    
+  } catch (error) {
+    console.error('💥 [CONTROLLER] Erro ao buscar empresas:', error);
+    
+    return res.status(500).json({
+      statusCode: 500,
+      message: 'Erro interno ao buscar empresas',
+      error: error.message,
+    });
+  }
+}
+
+  @Public() 
   @Get('professionals/:companyId')
   async getProfessionals(@Param('companyId') companyId: string) {
     return this.authService.getProfessionals(companyId);
   }
-
-  // ✅ NOVA ROTA: SOFT DELETE DE USUÁRIO
-  // @Delete('users/:id')
-  // @HttpCode(HttpStatus.OK)
-  // @UseGuards(JwtAuthGuard)
-  // async softDeleteUser(
-  //   @Param('id') userId: string,
-  //   @Request() req: any, // ✅ Use @Request() em vez de @Req()
-  // ) {
-  //   return this.authService.softDeleteUser(userId, req.user);
-  // }
-
-
-
-  // 🔥 ROTA PÚBLICA PARA LISTAR EMPRESAS (qualquer um pode ver)
-  // @Get('companies')
-  // async getCompanies() {
-  //   return this.authService.getCompanies();
-  // }
-
-  // 🔥 ROTA DE SIGNUP PÚBLICA (se necessário)
-  // @Post('signup')
-  // async signUp(@Body() createUserDto: CreateUserDto) {
-  //   return this.authService.signUp(createUserDto);
-  // }
 }

@@ -1,6 +1,4 @@
-/* eslint-disable prettier/prettier */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
-// src/websocket/websocket.gateway.ts
+// src/websocket/notification-user.gateway.ts
 import {
   WebSocketGateway,
   WebSocketServer,
@@ -17,52 +15,62 @@ import { Server, Socket } from 'socket.io';
     origin: process.env.FRONTEND_URL || 'http://localhost:3000',
     credentials: true,
   },
+  namespace: '/', // opcional
 })
 export class NotificationUserGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
 
-  // Map para guardar qual usuário está em qual socket
+  // userId → Socket
   private userSockets = new Map<string, Socket>();
 
   handleConnection(client: Socket) {
-    console.log('Client connected:', client.id);
+    console.log('Cliente conectado → Socket ID:', client.id);
   }
 
   handleDisconnect(client: Socket) {
-    // Remove o socket do mapa quando desconectar
     for (const [userId, socket] of this.userSockets.entries()) {
       if (socket.id === client.id) {
+        console.log(`Usuário ${userId} desconectado (socket ${client.id})`);
         this.userSockets.delete(userId);
         break;
       }
     }
-    console.log('Client disconnected:', client.id);
   }
 
-  // Método para registrar o usuário (chamado do frontend)
   @SubscribeMessage('register')
   handleRegister(
     @MessageBody() userId: string,
     @ConnectedSocket() client: Socket,
   ) {
+    if (!userId) {
+      client.disconnect();
+      return;
+    }
+
     this.userSockets.set(userId, client);
-    console.log(`User ${userId} registered with socket ${client.id}`);
+    client.data.userId = userId; // bom pra debug
+    console.log(`Usuário registrado: ${userId} → ${client.id}`);
   }
 
-  // Método para enviar notificação para um usuário específico
+  // MÉTODO PRINCIPAL USADO PELO TASK SERVICE
   sendNotificationToUser(userId: string, notification: any) {
     const socket = this.userSockets.get(userId);
-    if (socket) {
-      socket.emit('notification', notification);
-      console.log(`Notificação enviada para user ${userId}:`, notification.title);
+
+    if (socket?.connected) {
+      socket.emit('notification', {
+        ...notification,
+        id: Date.now() + Math.random(), // pra frontend não duplicar
+        createdAt: new Date().toISOString(),
+      });
+      console.log(`Notificação enviada para ${userId}: ${notification.title}`);
     } else {
-      console.log(`Usuário ${userId} não está online (sem socket ativo)`);
+      console.log(`Usuário ${userId} offline → notificação só será vista no banco`);
     }
   }
 
-  // Enviar para todos da empresa (opcional)
+  // Opcional: enviar para todos da empresa
   broadcastToCompany(companyId: string, notification: any) {
-    this.server.emit('notification', { ...notification, companyId });
+    this.server.to(`company-${companyId}`).emit('notification', notification);
   }
 }
