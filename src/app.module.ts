@@ -12,6 +12,7 @@ import { ChatMessageModule } from './chat-message/chat-message.module';
 import { WhatsappModule } from './whatsapp/whatsapp.module';
 import { NotificationUserModule } from './notification-user/notification-user.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { ReportsModule } from './reports/reports.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { NotificationsModule } from './notifications/notifications.module';
     WhatsappModule,
     NotificationUserModule,
     NotificationsModule,
+    ReportsModule,
   ],
   providers: [],
 })
