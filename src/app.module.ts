@@ -15,6 +15,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { ReportsModule } from './reports/reports.module';
 import { FlowModule } from './flow/flow.module';
 import { ReportsTasksModule } from './reports-tasks/reports-tasks.module';
+import { ReportsFlowModule } from './reports-flow/reports-flow.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { ReportsTasksModule } from './reports-tasks/reports-tasks.module';
     ReportsModule,
     FlowModule,
     ReportsTasksModule,
+    ReportsFlowModule,
   ],
   providers: [],
 })
