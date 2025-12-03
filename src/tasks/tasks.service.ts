@@ -716,4 +716,61 @@ export class TasksService {
       create: { ...mappedData, taskId, companyId },
     });
   }
+
+  // // Adicione este método na classe TasksService
+  // async getTaskReport(companyId: string, filters: any) {
+  //   const where: any = { companyId };
+
+  //   // Aplicar filtros
+  //   if (filters.status) where.status = filters.status;
+  //   if (filters.priority) where.priority = Number(filters.priority);
+
+  //   if (filters.startDate || filters.endDate) {
+  //     where.createdAt = {};
+  //     if (filters.startDate) where.createdAt.gte = new Date(filters.startDate);
+  //     if (filters.endDate) where.createdAt.lte = new Date(filters.endDate);
+  //   }
+
+  //   // Buscar tarefas
+  //   const tasks = await this.prisma.task.findMany({
+  //     where,
+  //     include: {
+  //       assignedTo: { select: { name: true, email: true } },
+  //       column: { select: { title: true } }
+  //     },
+  //     orderBy: { createdAt: 'desc' }
+  //   });
+
+  //   // Calcular métricas
+  //   const total = tasks.length;
+  //   const completed = tasks.filter(t => t.status === 'COMPLETED').length;
+  //   const pending = tasks.filter(t => t.status === 'PENDING' || t.status === 'IN_PROGRESS').length;
+  //   const overdue = tasks.filter(t => t.dueDate && new Date(t.dueDate) < new Date() && t.status !== 'COMPLETED').length;
+
+  //   // Dados para gráficos
+  //   const byStatus = [
+  //     { name: 'Concluída', value: completed, color: '#22c55e' },
+  //     { name: 'Em Andamento', value: tasks.filter(t => t.status === 'IN_PROGRESS').length, color: '#3b82f6' },
+  //     { name: 'Pendente', value: tasks.filter(t => t.status === 'PENDING').length, color: '#94a3b8' },
+  //     { name: 'Falhou', value: tasks.filter(t => t.status === 'FAILED').length, color: '#ef4444' },
+  //   ].filter(i => i.value > 0);
+
+  //   const byPriority = [1, 2, 3, 4, 5].map(p => ({
+  //     name: `Nível ${p}`,
+  //     value: tasks.filter(t => t.priority === p).length
+  //   }));
+
+  //   return {
+  //     tasks,
+  //     summary: {
+  //       totalTasks: total,
+  //       completedTasks: completed,
+  //       pendingTasks: pending,
+  //       overdueTasks: overdue,
+  //       completionRate: total > 0 ? ((completed / total) * 100) : 0,
+  //       byStatus,
+  //       byPriority
+  //     }
+  //   };
+  // }
 }

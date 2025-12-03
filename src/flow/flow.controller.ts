@@ -23,7 +23,7 @@ import { FlowService } from './flow.service';
 @Controller('flow')
 @UseGuards(JwtAuthGuard)
 export class FlowController {
-  constructor(private readonly flowService: FlowService) {}
+  constructor(private readonly flowService: FlowService) { }
 
   // ============ FLUXOS ============
   @Post()
@@ -290,83 +290,83 @@ export class FlowController {
   }
 
   @Post('items/:itemId/media-multiple/:type')
-@UseInterceptors(FilesInterceptor('files', 10)) // Aceita até 10 arquivos
-@UseGuards(JwtAuthGuard)
-async addMultipleMediaToItem(
-  @Req() req: any,
-  @Param('itemId') itemId: string,
-  @Param('type') type: 'image' | 'audio' | 'video',
-  @UploadedFiles() files: any[]
-) {
-  const user = req.user;
-  
-  if (!files || files.length === 0) {
-    throw new BadRequestException('Nenhum arquivo enviado');
-  }
+  @UseInterceptors(FilesInterceptor('files', 10)) // Aceita até 10 arquivos
+  @UseGuards(JwtAuthGuard)
+  async addMultipleMediaToItem(
+    @Req() req: any,
+    @Param('itemId') itemId: string,
+    @Param('type') type: 'image' | 'audio' | 'video',
+    @UploadedFiles() files: any[]
+  ) {
+    const user = req.user;
 
-  return this.flowService.addMultipleMediaToItem(
-    itemId,
-    user.companyId,
-    user.id,
-    files,
-    type
-  );
-}
-
-  // NO FLOW CONTROLLER, ADICIONE ESTE ENDPOINT PARA MULTIPART/FORM-DATA
-@Post(':flowId/items/upload')
-@UseInterceptors(FileInterceptor('file'))
-@UseGuards(JwtAuthGuard)
-async createFlowItemWithFiles(
-  @Req() req: any,
-  @Param('flowId') flowId: string,
-  @Body() body: any,
-  @UploadedFile() file?: any
-) {
-  const user = req.user;
-  
-  // Parse o JSON que vem como string do FormData
-  const itemData = JSON.parse(body.data || '{}');
-  
-  // Cria o item primeiro
-  const flowItem = await this.flowService.createFlowItem(
-    user.companyId,
-    flowId,
-    user.id,
-    {
-      title: itemData.title,
-      orderNumber: itemData.orderNumber,
-      productRef: itemData.productRef,
-      quantity: itemData.quantity ? parseInt(itemData.quantity) : 1,
-      priority: itemData.priority ? parseInt(itemData.priority) : 3,
-      dueDate: itemData.dueDate ? new Date(itemData.dueDate) : undefined,
-      assignedToId: itemData.assignedToId,
-      description: itemData.description
+    if (!files || files.length === 0) {
+      throw new BadRequestException('Nenhum arquivo enviado');
     }
-  );
 
-  // Se houver arquivos, faz upload
-  if (file) {
-    const fileType = this.getFileType(file.mimetype);
-    await this.flowService.addMediaToItem(
-      flowItem.id,
+    return this.flowService.addMultipleMediaToItem(
+      itemId,
       user.companyId,
       user.id,
-      file,
-      fileType
+      files,
+      type
     );
   }
 
-  // Se houver múltiplos arquivos (enviados como FormData fields)
-  // Você precisaria de uma lógica mais complexa para múltiplos arquivos
+  // NO FLOW CONTROLLER, ADICIONE ESTE ENDPOINT PARA MULTIPART/FORM-DATA
+  @Post(':flowId/items/upload')
+  @UseInterceptors(FileInterceptor('file'))
+  @UseGuards(JwtAuthGuard)
+  async createFlowItemWithFiles(
+    @Req() req: any,
+    @Param('flowId') flowId: string,
+    @Body() body: any,
+    @UploadedFile() file?: any
+  ) {
+    const user = req.user;
 
-  return flowItem;
-}
+    // Parse o JSON que vem como string do FormData
+    const itemData = JSON.parse(body.data || '{}');
 
-private getFileType(mimetype: string): 'image' | 'audio' | 'video' {
-  if (mimetype.startsWith('image/')) return 'image';
-  if (mimetype.startsWith('audio/')) return 'audio';
-  if (mimetype.startsWith('video/')) return 'video';
-  throw new BadRequestException('Tipo de arquivo não suportado');
-}
+    // Cria o item primeiro
+    const flowItem = await this.flowService.createFlowItem(
+      user.companyId,
+      flowId,
+      user.id,
+      {
+        title: itemData.title,
+        orderNumber: itemData.orderNumber,
+        productRef: itemData.productRef,
+        quantity: itemData.quantity ? parseInt(itemData.quantity) : 1,
+        priority: itemData.priority ? parseInt(itemData.priority) : 3,
+        dueDate: itemData.dueDate ? new Date(itemData.dueDate) : undefined,
+        assignedToId: itemData.assignedToId,
+        description: itemData.description
+      }
+    );
+
+    // Se houver arquivos, faz upload
+    if (file) {
+      const fileType = this.getFileType(file.mimetype);
+      await this.flowService.addMediaToItem(
+        flowItem.id,
+        user.companyId,
+        user.id,
+        file,
+        fileType
+      );
+    }
+
+    // Se houver múltiplos arquivos (enviados como FormData fields)
+    // Você precisaria de uma lógica mais complexa para múltiplos arquivos
+
+    return flowItem;
+  }
+
+  private getFileType(mimetype: string): 'image' | 'audio' | 'video' {
+    if (mimetype.startsWith('image/')) return 'image';
+    if (mimetype.startsWith('audio/')) return 'audio';
+    if (mimetype.startsWith('video/')) return 'video';
+    throw new BadRequestException('Tipo de arquivo não suportado');
+  }
 }

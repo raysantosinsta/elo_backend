@@ -497,4 +497,12 @@ export class TasksController {
       undefined,
     );
   }
+
+// Adicione este método na classe TasksController
+// @Get('reports')
+// async getTaskReport(@Request() req, @Query() query: any) {
+//   const companyId = req.user.companyId;
+//   // Encaminha para o service (veja abaixo)
+//   return await this.tasksService.getTaskReport(companyId, query);
+// }
 }

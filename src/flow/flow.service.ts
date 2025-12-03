@@ -1,8 +1,9 @@
-import { 
-  Injectable, 
-  NotFoundException, 
+/* eslint-disable prettier/prettier */
+import {
+  Injectable,
+  NotFoundException,
   BadRequestException,
-  Logger 
+  Logger
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SupabaseService } from '../supabase/supabase.service';
@@ -14,7 +15,7 @@ export class FlowService {
   constructor(
     private prisma: PrismaService,
     private supabase: SupabaseService
-  ) {}
+  ) { }
 
   // ============ FLUXOS ============
   async createFlow(companyId: string, userId: string, data: { name: string; description?: string }) {
@@ -53,9 +54,9 @@ export class FlowService {
           orderBy: { order: 'asc' }
         },
         _count: {
-          select: { 
+          select: {
             items: true,
-            stages: true 
+            stages: true
           }
         }
       },
@@ -69,9 +70,9 @@ export class FlowService {
     this.logger.log(`Buscando fluxo ${flowId} da empresa ${companyId}`);
 
     const flow = await this.prisma.productFlow.findFirst({
-      where: { 
+      where: {
         id: flowId,
-        companyId 
+        companyId
       },
       include: {
         stages: {
@@ -91,9 +92,9 @@ export class FlowService {
     this.logger.log(`Atualizando fluxo ${flowId}`);
 
     const flow = await this.prisma.productFlow.findFirst({
-      where: { 
+      where: {
         id: flowId,
-        companyId 
+        companyId
       }
     });
 
@@ -114,9 +115,9 @@ export class FlowService {
     this.logger.log(`Deletando fluxo ${flowId}`);
 
     const flow = await this.prisma.productFlow.findFirst({
-      where: { 
+      where: {
         id: flowId,
-        companyId 
+        companyId
       }
     });
 
@@ -242,7 +243,7 @@ export class FlowService {
     this.logger.log(`Deletando etapa ${stageId}`);
 
     const stage = await this.prisma.flowStage.findFirst({
-      where: { 
+      where: {
         id: stageId,
         flow: {
           companyId: companyId
@@ -281,222 +282,222 @@ export class FlowService {
 
   // ============ ITENS ============
   async createFlowItem(
-  companyId: string, 
-  flowId: string,
-  userId: string,
-  data: {
-    title: string;
-    orderNumber?: string;
-    productRef?: string;
-    quantity?: number;
-    priority?: number;
-    description?: string;
-    dueDate?: any;
-    assignedToId?: string;
-  }
-) {
-  this.logger.log(`Criando item para fluxo ${flowId} por usuário ${userId}`);
-
-  // Verifica se o fluxo existe e pertence à empresa
-  const flow = await this.prisma.productFlow.findFirst({
-    where: { 
-      id: flowId,
-      companyId 
-    }
-  });
-
-  if (!flow) {
-    throw new BadRequestException('Fluxo não encontrado');
-  }
-
-  // Pega a primeira etapa do fluxo
-  const firstStage = await this.prisma.flowStage.findFirst({
-    where: { flowId },
-    orderBy: { order: 'asc' }
-  });
-
-  if (!firstStage) {
-    throw new BadRequestException('Fluxo não possui etapas configuradas');
-  }
-
-  // Gera número de pedido se não fornecido
-  const orderNumber = data.orderNumber || `PED-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-
-  // Determina ordem na etapa
-  const lastOrder = await this.prisma.flowItem.findFirst({
-    where: { stageId: firstStage.id },
-    orderBy: { orderInStage: 'desc' },
-    select: { orderInStage: true }
-  });
-
-  const orderInStage = lastOrder ? lastOrder.orderInStage + 1 : 0;
-
-  // Converte dueDate para Date ou null
-  let dueDateValue: Date | null = null;
-  
-  if (data.dueDate) {
-    try {
-      if (typeof data.dueDate === 'string') {
-        // Se for string, tenta converter para Date
-        // Adiciona segundos se a string estiver incompleta
-        let dateString = data.dueDate;
-        if (dateString.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/)) {
-          dateString += ':00';
-        }
-        
-        dueDateValue = new Date(dateString);
-        
-        // Se a conversão falhar, seta como null
-        if (isNaN(dueDateValue.getTime())) {
-          this.logger.warn(`Data inválida recebida: ${data.dueDate}`);
-          dueDateValue = null;
-        }
-      } else if (data.dueDate instanceof Date) {
-        dueDateValue = data.dueDate;
-      }
-    } catch (error) {
-      dueDateValue = null;
-      this.logger.warn(`Erro ao converter data: ${data.dueDate}`, error);
-    }
-  }
-
-  // Cria o item
-  const flowItem = await this.prisma.flowItem.create({
+    companyId: string,
+    flowId: string,
+    userId: string,
     data: {
-      title: data.title,
-      orderNumber: orderNumber,
-      productRef: data.productRef || 'SEM-REF',
-      quantity: data.quantity || 1,
-      priority: data.priority || 3,
-      dueDate: dueDateValue,
-      assignedToId: data.assignedToId || null,
-      flowId: flowId,
-      stageId: firstStage.id,
-      companyId: companyId,
-      orderInStage: orderInStage,
-      enteredAt: new Date()
-    },
-    include: {
-      stage: true,
-      assignedTo: {
-        select: { name: true, email: true }
+      title: string;
+      orderNumber?: string;
+      productRef?: string;
+      quantity?: number;
+      priority?: number;
+      description?: string;
+      dueDate?: any;
+      assignedToId?: string;
+    }
+  ) {
+    this.logger.log(`Criando item para fluxo ${flowId} por usuário ${userId}`);
+
+    // Verifica se o fluxo existe e pertence à empresa
+    const flow = await this.prisma.productFlow.findFirst({
+      where: {
+        id: flowId,
+        companyId
       }
+    });
+
+    if (!flow) {
+      throw new BadRequestException('Fluxo não encontrado');
     }
-  });
 
-  this.logger.log(`Item criado com ID: ${flowItem.id}`);
+    // Pega a primeira etapa do fluxo
+    const firstStage = await this.prisma.flowStage.findFirst({
+      where: { flowId },
+      orderBy: { order: 'asc' }
+    });
 
-  return flowItem;
-}
-
-  async updateFlowItem(
-  itemId: string,
-  companyId: string,
-  data: {
-    title?: string;
-    orderNumber?: string;
-    productRef?: string;
-    quantity?: number;
-    priority?: number;
-    description?: string;
-    dueDate?: any;
-    assignedToId?: string;
-    stageId?: string;
-  }
-) {
-  this.logger.log(`Atualizando item ${itemId}`);
-
-  const item = await this.prisma.flowItem.findFirst({
-    where: { 
-      id: itemId,
-      companyId 
+    if (!firstStage) {
+      throw new BadRequestException('Fluxo não possui etapas configuradas');
     }
-  });
 
-  if (!item) {
-    throw new NotFoundException('Item não encontrado');
-  }
+    // Gera número de pedido se não fornecido
+    const orderNumber = data.orderNumber || `PED-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
-  // Converte dueDate para Date ou null
-  let dueDateValue: Date | null | undefined = undefined;
-  
-  if (data.dueDate !== undefined) {
-    if (data.dueDate === null || data.dueDate === '') {
-      dueDateValue = null;
-    } else {
+    // Determina ordem na etapa
+    const lastOrder = await this.prisma.flowItem.findFirst({
+      where: { stageId: firstStage.id },
+      orderBy: { orderInStage: 'desc' },
+      select: { orderInStage: true }
+    });
+
+    const orderInStage = lastOrder ? lastOrder.orderInStage + 1 : 0;
+
+    // Converte dueDate para Date ou null
+    let dueDateValue: Date | null = null;
+
+    if (data.dueDate) {
       try {
         if (typeof data.dueDate === 'string') {
+          // Se for string, tenta converter para Date
           // Adiciona segundos se a string estiver incompleta
           let dateString = data.dueDate;
           if (dateString.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/)) {
             dateString += ':00';
           }
-          
+
           dueDateValue = new Date(dateString);
-          
-          // Se a conversão falhar, mantém o valor atual
+
+          // Se a conversão falhar, seta como null
           if (isNaN(dueDateValue.getTime())) {
             this.logger.warn(`Data inválida recebida: ${data.dueDate}`);
-            dueDateValue = undefined; // Não atualiza
+            dueDateValue = null;
           }
         } else if (data.dueDate instanceof Date) {
           dueDateValue = data.dueDate;
         }
       } catch (error) {
+        dueDateValue = null;
         this.logger.warn(`Erro ao converter data: ${data.dueDate}`, error);
-        dueDateValue = undefined; // Não atualiza
       }
     }
-  }
 
-  // Se estiver mudando de etapa, ajusta a ordem
-  let orderInStage: number | undefined = undefined;
-  if (data.stageId && data.stageId !== item.stageId) {
-    const lastOrder = await this.prisma.flowItem.findFirst({
-      where: { stageId: data.stageId },
-      orderBy: { orderInStage: 'desc' },
-      select: { orderInStage: true }
+    // Cria o item
+    const flowItem = await this.prisma.flowItem.create({
+      data: {
+        title: data.title,
+        orderNumber: orderNumber,
+        productRef: data.productRef || 'SEM-REF',
+        quantity: data.quantity || 1,
+        priority: data.priority || 3,
+        dueDate: dueDateValue,
+        assignedToId: data.assignedToId || null,
+        flowId: flowId,
+        stageId: firstStage.id,
+        companyId: companyId,
+        orderInStage: orderInStage,
+        enteredAt: new Date()
+      },
+      include: {
+        stage: true,
+        assignedTo: {
+          select: { name: true, email: true }
+        }
+      }
     });
 
-    orderInStage = lastOrder ? lastOrder.orderInStage + 1 : 0;
+    this.logger.log(`Item criado com ID: ${flowItem.id}`);
+
+    return flowItem;
   }
 
-  // Prepara dados para atualização
-  const updateData: any = {
-    title: data.title,
-    orderNumber: data.orderNumber,
-    productRef: data.productRef,
-    quantity: data.quantity,
-    priority: data.priority,
-    assignedToId: data.assignedToId,
-    stageId: data.stageId,
-    updatedAt: new Date()
-  };
-
-  // Só adiciona dueDate se foi convertido corretamente
-  if (dueDateValue !== undefined) {
-    updateData.dueDate = dueDateValue;
-  }
-
-  // Só adiciona orderInStage se estiver mudando de etapa
-  if (orderInStage !== undefined) {
-    updateData.orderInStage = orderInStage;
-  }
-
-  return this.prisma.flowItem.update({
-    where: { id: itemId },
-    data: updateData,
-    include: {
-      stage: true,
-      assignedTo: {
-        select: { name: true, email: true }
-      },
-      images: true,
-      audios: true,
-      videos: true
+  async updateFlowItem(
+    itemId: string,
+    companyId: string,
+    data: {
+      title?: string;
+      orderNumber?: string;
+      productRef?: string;
+      quantity?: number;
+      priority?: number;
+      description?: string;
+      dueDate?: any;
+      assignedToId?: string;
+      stageId?: string;
     }
-  });
-}
+  ) {
+    this.logger.log(`Atualizando item ${itemId}`);
+
+    const item = await this.prisma.flowItem.findFirst({
+      where: {
+        id: itemId,
+        companyId
+      }
+    });
+
+    if (!item) {
+      throw new NotFoundException('Item não encontrado');
+    }
+
+    // Converte dueDate para Date ou null
+    let dueDateValue: Date | null | undefined = undefined;
+
+    if (data.dueDate !== undefined) {
+      if (data.dueDate === null || data.dueDate === '') {
+        dueDateValue = null;
+      } else {
+        try {
+          if (typeof data.dueDate === 'string') {
+            // Adiciona segundos se a string estiver incompleta
+            let dateString = data.dueDate;
+            if (dateString.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/)) {
+              dateString += ':00';
+            }
+
+            dueDateValue = new Date(dateString);
+
+            // Se a conversão falhar, mantém o valor atual
+            if (isNaN(dueDateValue.getTime())) {
+              this.logger.warn(`Data inválida recebida: ${data.dueDate}`);
+              dueDateValue = undefined; // Não atualiza
+            }
+          } else if (data.dueDate instanceof Date) {
+            dueDateValue = data.dueDate;
+          }
+        } catch (error) {
+          this.logger.warn(`Erro ao converter data: ${data.dueDate}`, error);
+          dueDateValue = undefined; // Não atualiza
+        }
+      }
+    }
+
+    // Se estiver mudando de etapa, ajusta a ordem
+    let orderInStage: number | undefined = undefined;
+    if (data.stageId && data.stageId !== item.stageId) {
+      const lastOrder = await this.prisma.flowItem.findFirst({
+        where: { stageId: data.stageId },
+        orderBy: { orderInStage: 'desc' },
+        select: { orderInStage: true }
+      });
+
+      orderInStage = lastOrder ? lastOrder.orderInStage + 1 : 0;
+    }
+
+    // Prepara dados para atualização
+    const updateData: any = {
+      title: data.title,
+      orderNumber: data.orderNumber,
+      productRef: data.productRef,
+      quantity: data.quantity,
+      priority: data.priority,
+      assignedToId: data.assignedToId,
+      stageId: data.stageId,
+      updatedAt: new Date()
+    };
+
+    // Só adiciona dueDate se foi convertido corretamente
+    if (dueDateValue !== undefined) {
+      updateData.dueDate = dueDateValue;
+    }
+
+    // Só adiciona orderInStage se estiver mudando de etapa
+    if (orderInStage !== undefined) {
+      updateData.orderInStage = orderInStage;
+    }
+
+    return this.prisma.flowItem.update({
+      where: { id: itemId },
+      data: updateData,
+      include: {
+        stage: true,
+        assignedTo: {
+          select: { name: true, email: true }
+        },
+        images: true,
+        audios: true,
+        videos: true
+      }
+    });
+  }
 
   async moveItem(itemId: string, newStageId: string, userId: string) {
     this.logger.log(`Movendo item ${itemId} para etapa ${newStageId}`);
@@ -554,9 +555,9 @@ export class FlowService {
     this.logger.log(`Deletando item ${itemId}`);
 
     const item = await this.prisma.flowItem.findFirst({
-      where: { 
+      where: {
         id: itemId,
-        companyId 
+        companyId
       },
       include: {
         images: true,
@@ -586,40 +587,105 @@ export class FlowService {
     });
   }
 
- async addMultipleMediaToItem(
-  itemId: string,
-  companyId: string,
-  userId: string,
-  files: any[],
-  type: 'image' | 'audio' | 'video'
-): Promise<any[]> {
-  this.logger.log(`Adicionando ${files.length} mídias do tipo ${type} ao item ${itemId}`);
+  async addMultipleMediaToItem(
+    itemId: string,
+    companyId: string,
+    userId: string,
+    files: any[],
+    type: 'image' | 'audio' | 'video'
+  ): Promise<any[]> {
+    this.logger.log(`Adicionando ${files.length} mídias do tipo ${type} ao item ${itemId}`);
 
-  const item = await this.prisma.flowItem.findFirst({
-    where: { 
-      id: itemId,
-      companyId 
+    const item = await this.prisma.flowItem.findFirst({
+      where: {
+        id: itemId,
+        companyId
+      }
+    });
+
+    if (!item) {
+      throw new NotFoundException('Item não encontrado');
     }
-  });
 
-  if (!item) {
-    throw new NotFoundException('Item não encontrado');
+    const uploadPromises = files.map(file =>
+      // CORREÇÃO: Use this.supabase.uploadFlowFile() em vez de this.uploadFlowFile()
+      this.supabase.uploadFlowFile(itemId, file, type, {
+        companyId,
+        uploadedBy: userId,
+        flowId: item.flowId,
+        itemId: itemId
+      })
+    );
+
+    const uploadResults = await Promise.all(uploadPromises);
+
+    const createdMedia = [] as any;
+    for (const uploadResult of uploadResults) {
+      const mediaData = {
+        url: uploadResult.url,
+        filename: uploadResult.filename,
+        size: uploadResult.size,
+        itemId,
+        companyId,
+        uploadedById: userId
+      };
+
+      if (type === 'image') {
+        const image = await this.prisma.flowImage.create({
+          data: mediaData
+        });
+        createdMedia.push(image);
+      } else if (type === 'audio') {
+        const audio = await this.prisma.flowAudio.create({
+          data: {
+            ...mediaData,
+            duration: 0
+          }
+        });
+        createdMedia.push(audio);
+      } else {
+        const video = await this.prisma.flowVideo.create({
+          data: {
+            ...mediaData,
+            duration: 0
+          }
+        });
+        createdMedia.push(video);
+      }
+    }
+
+    return createdMedia;
   }
 
-  const uploadPromises = files.map(file => 
-    // CORREÇÃO: Use this.supabase.uploadFlowFile() em vez de this.uploadFlowFile()
-    this.supabase.uploadFlowFile(itemId, file, type, {
+  async addMediaToItem(
+    itemId: string,
+    companyId: string,
+    userId: string,
+    file: any,
+    type: 'image' | 'audio' | 'video'
+  ) {
+    this.logger.log(`Adicionando mídia do tipo ${type} ao item ${itemId}`);
+
+    const item = await this.prisma.flowItem.findFirst({
+      where: {
+        id: itemId,
+        companyId
+      }
+    });
+
+    if (!item) {
+      throw new NotFoundException('Item não encontrado');
+    }
+
+    // CORREÇÃO: Use this.supabase.uploadFlowFile() aqui também
+    const uploadResult = await this.supabase.uploadFlowFile(itemId, file, type, {
       companyId,
       uploadedBy: userId,
       flowId: item.flowId,
       itemId: itemId
-    })
-  );
+    });
 
-  const uploadResults = await Promise.all(uploadPromises);
-  
-  const createdMedia = [] as any;
-  for (const uploadResult of uploadResults) {
+    // Salva no banco
     const mediaData = {
       url: uploadResult.url,
       filename: uploadResult.filename,
@@ -630,90 +696,25 @@ export class FlowService {
     };
 
     if (type === 'image') {
-      const image = await this.prisma.flowImage.create({
+      return this.prisma.flowImage.create({
         data: mediaData
       });
-      createdMedia.push(image);
     } else if (type === 'audio') {
-      const audio = await this.prisma.flowAudio.create({
+      return this.prisma.flowAudio.create({
         data: {
           ...mediaData,
           duration: 0
         }
       });
-      createdMedia.push(audio);
     } else {
-      const video = await this.prisma.flowVideo.create({
+      return this.prisma.flowVideo.create({
         data: {
           ...mediaData,
           duration: 0
         }
       });
-      createdMedia.push(video);
     }
   }
-
-  return createdMedia;
-}
-
-async addMediaToItem(
-  itemId: string,
-  companyId: string,
-  userId: string,
-  file: any,
-  type: 'image' | 'audio' | 'video'
-) {
-  this.logger.log(`Adicionando mídia do tipo ${type} ao item ${itemId}`);
-
-  const item = await this.prisma.flowItem.findFirst({
-    where: { 
-      id: itemId,
-      companyId 
-    }
-  });
-
-  if (!item) {
-    throw new NotFoundException('Item não encontrado');
-  }
-
-  // CORREÇÃO: Use this.supabase.uploadFlowFile() aqui também
-  const uploadResult = await this.supabase.uploadFlowFile(itemId, file, type, {
-    companyId,
-    uploadedBy: userId,
-    flowId: item.flowId,
-    itemId: itemId
-  });
-
-  // Salva no banco
-  const mediaData = {
-    url: uploadResult.url,
-    filename: uploadResult.filename,
-    size: uploadResult.size,
-    itemId,
-    companyId,
-    uploadedById: userId
-  };
-
-  if (type === 'image') {
-    return this.prisma.flowImage.create({
-      data: mediaData
-    });
-  } else if (type === 'audio') {
-    return this.prisma.flowAudio.create({
-      data: {
-        ...mediaData,
-        duration: 0
-      }
-    });
-  } else {
-    return this.prisma.flowVideo.create({
-      data: {
-        ...mediaData,
-        duration: 0
-      }
-    });
-  }
-}
 
   async removeMedia(
     itemId: string,
@@ -724,29 +725,29 @@ async addMediaToItem(
     this.logger.log(`Removendo mídia ${mediaId} do item ${itemId}`);
 
     let media;
-    
+
     if (type === 'image') {
       media = await this.prisma.flowImage.findFirst({
-        where: { 
+        where: {
           id: mediaId,
           itemId,
-          companyId 
+          companyId
         }
       });
     } else if (type === 'audio') {
       media = await this.prisma.flowAudio.findFirst({
-        where: { 
+        where: {
           id: mediaId,
           itemId,
-          companyId 
+          companyId
         }
       });
     } else {
       media = await this.prisma.flowVideo.findFirst({
-        where: { 
+        where: {
           id: mediaId,
           itemId,
-          companyId 
+          companyId
         }
       });
     }
@@ -780,9 +781,9 @@ async addMediaToItem(
     this.logger.log(`Buscando item ${itemId} com mídias`);
 
     const item = await this.prisma.flowItem.findFirst({
-      where: { 
+      where: {
         id: itemId,
-        companyId 
+        companyId
       },
       include: {
         images: {
@@ -811,14 +812,15 @@ async addMediaToItem(
     return item;
   }
 
+  // TODO: 
   // ============ KANBAN COMPLETO ============
   async getKanbanBoard(flowId: string, companyId: string) {
     this.logger.log(`Buscando board do fluxo ${flowId}`);
 
     const flow = await this.prisma.productFlow.findFirst({
-      where: { 
+      where: {
         id: flowId,
-        companyId 
+        companyId
       }
     });
 
@@ -836,15 +838,14 @@ async addMediaToItem(
               orderBy: { orderInStage: 'asc' },
               include: {
                 images: {
-                  take: 1,
                   select: { url: true, id: true }
                 },
                 audios: {
-                  take: 1,
+
                   select: { url: true, id: true }
                 },
                 videos: {
-                  take: 1,
+
                   select: { url: true, id: true }
                 },
                 _count: {
@@ -855,9 +856,9 @@ async addMediaToItem(
                   }
                 },
                 assignedTo: {
-                  select: { 
+                  select: {
                     name: true,
-                    email: true 
+                    email: true
                   }
                 }
               }
@@ -873,9 +874,9 @@ async addMediaToItem(
     this.logger.log(`Buscando estatísticas do fluxo ${flowId}`);
 
     const flow = await this.prisma.productFlow.findFirst({
-      where: { 
+      where: {
         id: flowId,
-        companyId 
+        companyId
       }
     });
 
@@ -1000,12 +1001,12 @@ async addMediaToItem(
 
     // Remove o item da lista
     const filteredItems = items.filter(i => i.id !== itemId);
-    
+
     // Insere na nova posição
     filteredItems.splice(newPosition, 0, item);
 
     // Atualiza ordens
-    const updates = filteredItems.map((item, index) => 
+    const updates = filteredItems.map((item, index) =>
       this.prisma.flowItem.update({
         where: { id: item.id },
         data: { orderInStage: index }
@@ -1057,9 +1058,9 @@ async addMediaToItem(
   // ============ MÉTODOS AUXILIARES ============
   async validateFlowAccess(flowId: string, companyId: string) {
     const flow = await this.prisma.productFlow.findFirst({
-      where: { 
+      where: {
         id: flowId,
-        companyId 
+        companyId
       }
     });
 
@@ -1072,7 +1073,7 @@ async addMediaToItem(
 
   async getUsersByCompany(companyId: string) {
     return this.prisma.user.findMany({
-      where: { 
+      where: {
         companyId,
         status: 'ACTIVE'
       },
@@ -1085,4 +1086,6 @@ async addMediaToItem(
       orderBy: { name: 'asc' }
     });
   }
+
+  
 }
