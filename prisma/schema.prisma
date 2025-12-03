@@ -107,6 +107,11 @@ model Company {
   taskAddresses TaskAddress[]
   chats         Chat[]
   collections   Collection[]
+  productFlows  ProductFlow[]
+  flowItems     FlowItem[]
+  flowImages    FlowImage[]
+  flowAudios    FlowAudio[]
+  flowVideos    FlowVideo[]
 
   @@index([cnpj])
   @@index([status])
@@ -151,8 +156,12 @@ model User {
   uploadedAudios      TaskAudio[]
   uploadedVideos      TaskVideo[]
 
-  company   Company? @relation("CompanyMembers", fields: [companyId], references: [id], onDelete: Cascade)
-  companyId String?  @map("empresa_id") @db.Uuid
+  company    Company?    @relation("CompanyMembers", fields: [companyId], references: [id], onDelete: Cascade)
+  companyId  String?     @map("empresa_id") @db.Uuid
+  flowItems  FlowItem[]
+  flowImages FlowImage[]
+  flowAudios FlowAudio[]
+  flowVideos FlowVideo[]
 
   @@index([companyId])
   @@index([email])
@@ -635,3 +644,153 @@ model ChatMessage {
 //   @@index([price])
 //   @@map("planos")
 // }
+
+// 1. FLUXO DE PRODUÇÃO (Esteira)
+model ProductFlow {
+  id        String  @id @default(uuid()) @map("id") @db.Uuid
+  name      String  @map("nome") @db.VarChar(100)
+  companyId String  @map("empresa_id") @db.Uuid
+  company   Company @relation(fields: [companyId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  stages FlowStage[]
+  items  FlowItem[]
+
+  @@index([companyId])
+  @@map("fluxos_produto")
+}
+
+// 2. ETAPAS (Colunas personalizadas)
+model FlowStage {
+  id    String  @id @default(uuid()) @map("id") @db.Uuid
+  name  String  @map("nome") @db.VarChar(50)
+  order Int     @default(0) @map("ordem")
+  color String? @map("cor") @db.VarChar(7)
+
+  flowId String      @map("fluxo_id") @db.Uuid
+  flow   ProductFlow @relation(fields: [flowId], references: [id])
+
+  items FlowItem[]
+
+  @@unique([flowId, order], name: "fluxo_ordem_unica")
+  @@index([flowId])
+  @@map("etapas_fluxo")
+}
+
+// 3. ITENS NO FLUXO
+model FlowItem {
+  id          String @id @default(uuid()) @map("id") @db.Uuid
+  title       String @map("titulo") @db.VarChar(200)
+  orderNumber String @map("numero_pedido") @db.VarChar(50)
+
+  // Posição
+  stageId      String?    @map("etapa_id") @db.Uuid
+  stage        FlowStage? @relation(fields: [stageId], references: [id])
+  orderInStage Int        @default(0) @map("ordem_etapa")
+
+  // Dados
+  productRef String @map("ref_produto") @db.VarChar(50)
+  quantity   Int    @default(1) @map("quantidade")
+  priority   Int    @default(3) @map("prioridade")
+
+  // Fluxo
+  flowId String      @map("fluxo_id") @db.Uuid
+  flow   ProductFlow @relation(fields: [flowId], references: [id])
+
+  // Datas
+  dueDate   DateTime? @map("prazo")
+  enteredAt DateTime  @default(now()) @map("entrada_em")
+
+  // Responsável
+  assignedToId String? @map("responsavel_id") @db.Uuid
+  assignedTo   User?   @relation(fields: [assignedToId], references: [id])
+
+  companyId String  @map("empresa_id") @db.Uuid
+  company   Company @relation(fields: [companyId], references: [id])
+
+  // Relacionamentos com mídias
+  images FlowImage[]
+  audios FlowAudio[]
+  videos FlowVideo[]
+
+  createdAt DateTime @default(now()) @map("criado_em")
+  updatedAt DateTime @updatedAt @map("atualizado_em")
+
+  @@index([companyId])
+  @@index([flowId])
+  @@index([stageId])
+  @@index([assignedToId])
+  @@index([priority])
+  @@index([dueDate])
+  @@map("itens_fluxo")
+}
+
+// 4. IMAGENS DO ITEM (igual ao TaskImage)
+model FlowImage {
+  id        String   @id @default(uuid()) @map("id") @db.Uuid
+  url       String   @map("url") @db.VarChar(500)
+  filename  String   @map("nome_arquivo") @db.VarChar(200)
+  size      Int?     @map("tamanho")
+  createdAt DateTime @default(now()) @map("criado_em")
+
+  itemId String   @map("item_id") @db.Uuid
+  item   FlowItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  companyId String  @map("empresa_id") @db.Uuid
+  company   Company @relation(fields: [companyId], references: [id])
+
+  uploadedById String @map("user_upload_id") @db.Uuid
+  uploadedBy   User   @relation(fields: [uploadedById], references: [id])
+
+  @@index([companyId])
+  @@index([itemId])
+  @@map("imagens_fluxo")
+}
+
+// 5. ÁUDIOS DO ITEM (igual ao TaskAudio)
+model FlowAudio {
+  id        String   @id @default(uuid()) @map("id") @db.Uuid
+  url       String   @map("url") @db.VarChar(500)
+  filename  String   @map("nome_arquivo") @db.VarChar(200)
+  duration  Int?     @map("duracao")
+  size      Int?     @map("tamanho")
+  createdAt DateTime @default(now()) @map("criado_em")
+
+  itemId String   @map("item_id") @db.Uuid
+  item   FlowItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  companyId String  @map("empresa_id") @db.Uuid
+  company   Company @relation(fields: [companyId], references: [id])
+
+  uploadedById String @map("user_upload_id") @db.Uuid
+  uploadedBy   User   @relation(fields: [uploadedById], references: [id])
+
+  @@index([companyId])
+  @@index([itemId])
+  @@map("audios_fluxo")
+}
+
+// 6. VÍDEOS DO ITEM (igual ao TaskVideo)
+model FlowVideo {
+  id        String   @id @default(uuid()) @map("id") @db.Uuid
+  url       String   @map("url") @db.VarChar(500)
+  filename  String   @map("nome_arquivo") @db.VarChar(200)
+  duration  Int?     @map("duracao")
+  size      Int?     @map("tamanho")
+  createdAt DateTime @default(now()) @map("criado_em")
+
+  itemId String   @map("item_id") @db.Uuid
+  item   FlowItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  companyId String  @map("empresa_id") @db.Uuid
+  company   Company @relation(fields: [companyId], references: [id])
+
+  uploadedById String @map("user_upload_id") @db.Uuid
+  uploadedBy   User   @relation(fields: [uploadedById], references: [id])
+
+  @@index([companyId])
+  @@index([itemId])
+  @@map("videos_fluxo")
+}

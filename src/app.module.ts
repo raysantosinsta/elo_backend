@@ -13,6 +13,7 @@ import { WhatsappModule } from './whatsapp/whatsapp.module';
 import { NotificationUserModule } from './notification-user/notification-user.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { ReportsModule } from './reports/reports.module';
+import { FlowModule } from './flow/flow.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { ReportsModule } from './reports/reports.module';
     NotificationUserModule,
     NotificationsModule,
     ReportsModule,
+    FlowModule,
   ],
   providers: [],
 })

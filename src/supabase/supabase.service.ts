@@ -12,7 +12,11 @@ interface MulterFile {
   buffer: Buffer;
 }
 
-type BucketType = 'task-images' | 'task-audios' | 'task-videos';
+// ADICIONE OS NOVOS BUCKETS
+type BucketType = 
+  | 'task-images' | 'task-audios' | 'task-videos'  // Tarefas existentes
+  | 'flow-images' | 'flow-audios' | 'flow-videos'  // Kanban de produção
+  | 'flow-templates';
 
 @Injectable()
 export class SupabaseService {
@@ -20,10 +24,15 @@ export class SupabaseService {
   private supabase: SupabaseClient;
   private supabasePublic: SupabaseClient;
 
-  private readonly BUCKETS = {
+  // ATUALIZE OS BUCKETS
+  private readonly BUCKETS: Record<BucketType, string> = {
     'task-images': 'task-images',
     'task-audios': 'task-audios', 
-    'task-videos': 'task-videos'
+    'task-videos': 'task-videos',
+    'flow-images': 'flow-images',
+    'flow-audios': 'flow-audios',
+    'flow-videos': 'flow-videos',
+    'flow-templates': 'flow-templates'
   };
 
   constructor(private configService: ConfigService) {
@@ -48,65 +57,89 @@ export class SupabaseService {
     return this.supabase;
   }
 
-  async uploadFile(
-    bucket: BucketType,
-    path: string,
-    fileBuffer: Buffer,
-    options?: {
-      contentType?: string;
-      metadata?: Record<string, any>;
-    }
-  ): Promise<{ id: string; path: string; fullPath: string }> {
-    try {
-      this.logger.log(`📤 Uploading file to ${bucket}/${path}`);
-
-      // Verificar tamanho do arquivo (limite de 50MB)
-      const maxSize = 50 * 1024 * 1024; // 50MB
-      if (fileBuffer.length > maxSize) {
-        throw new BadRequestException(`Arquivo muito grande. Tamanho máximo: 50MB`);
-      }
-
-      // 1. UPLOAD
-      const { data: uploadData, error: uploadError } = await this.supabase.storage
-        .from(bucket)
-        .upload(path, fileBuffer, {
-          contentType: options?.contentType || 'application/octet-stream',
-          upsert: true,
-          duplex: 'half',
-        });
-
-      if (uploadError) {
-        this.logger.error('❌ UPLOAD ERROR:', uploadError);
-        throw new BadRequestException(`Upload falhou: ${uploadError.message}`);
-      }
-
-      this.logger.log('✅ Upload realizado com sucesso');
-
-      // 2. GERAR URL PÚBLICA
-      const { data: publicUrlData } = this.supabasePublic.storage
-        .from(bucket)
-        .getPublicUrl(path);
-
-      if (!publicUrlData?.publicUrl) {
-        throw new BadRequestException('Falha ao gerar URL pública');
-      }
-
-      this.logger.log('🔗 URL pública gerada');
-
-      return {
-        id: uploadData?.id || path,
-        path: path,
-        fullPath: publicUrlData.publicUrl
-      };
-
-    } catch (error) {
-      this.logger.error('❌ Erro no upload:', error);
-      if (error instanceof BadRequestException) {
-        throw error;
-      }
-      throw new BadRequestException(`Falha no upload: ${error.message}`);
-    }
+  async replaceFile(
+  bucket: BucketType,
+  path: string,
+  fileBuffer: Buffer,
+  options?: {
+    contentType?: string;
+    metadata?: Record<string, any>;
   }
+): Promise<{ id: string; path: string; fullPath: string }> {
+  return this.uploadFile(bucket, path, fileBuffer, {
+    ...options,
+    overwrite: true
+  });
+}
+
+  async uploadFile(
+  bucket: BucketType,
+  path: string,
+  fileBuffer: Buffer,
+  options?: {
+    contentType?: string;
+    metadata?: Record<string, any>;
+    overwrite?: boolean; // ADICIONE ESTA OPÇÃO
+  }
+): Promise<{ id: string; path: string; fullPath: string }> {
+  try {
+    this.logger.log(`📤 Uploading file to ${bucket}/${path}`);
+
+    // Verificar tamanho do arquivo (limite de 50MB)
+    const maxSize = 50 * 1024 * 1024;
+    if (fileBuffer.length > maxSize) {
+      throw new BadRequestException(`Arquivo muito grande. Tamanho máximo: 50MB`);
+    }
+
+    // Verifica se o arquivo já existe e deleta se for para sobrescrever
+    if (options?.overwrite) {
+      try {
+        await this.deleteFile(bucket, path);
+      } catch (error) {
+        // Ignora erro se o arquivo não existir
+        this.logger.log(`Arquivo ${path} não existe para deleção`);
+      }
+    }
+
+    // UPLOAD com opção de sobrescrita
+    const { data: uploadData, error: uploadError } = await this.supabase.storage
+      .from(bucket)
+      .upload(path, fileBuffer, {
+        contentType: options?.contentType || 'application/octet-stream',
+        upsert: true, // IMPORTANTE: true para permitir sobrescrita
+        duplex: 'half',
+      });
+
+    if (uploadError) {
+      this.logger.error('❌ UPLOAD ERROR:', uploadError);
+      throw new BadRequestException(`Upload falhou: ${uploadError.message}`);
+    }
+
+    this.logger.log('✅ Upload realizado com sucesso');
+
+    // GERAR URL PÚBLICA
+    const { data: publicUrlData } = this.supabasePublic.storage
+      .from(bucket)
+      .getPublicUrl(path);
+
+    if (!publicUrlData?.publicUrl) {
+      throw new BadRequestException('Falha ao gerar URL pública');
+    }
+
+    return {
+      id: uploadData?.id || path,
+      path: path,
+      fullPath: publicUrlData.publicUrl
+    };
+
+  } catch (error) {
+    this.logger.error('❌ Erro no upload:', error);
+    if (error instanceof BadRequestException) {
+      throw error;
+    }
+    throw new BadRequestException(`Falha no upload: ${error.message}`);
+  }
+}
 
   async deleteFile(bucket: BucketType, path: string): Promise<void> {
     try {
@@ -147,79 +180,146 @@ export class SupabaseService {
     }
   }
 
-  async ensureBucketsExist(): Promise<void> {
-    const requiredBuckets: BucketType[] = ['task-images', 'task-audios', 'task-videos'];
-    
-    try {
-      const { data: buckets, error } = await this.supabase.storage.listBuckets();
-
-      if (error) {
-        this.logger.error('❌ Erro ao listar buckets:', error);
-        return;
-      }
-
-      const existingBuckets = buckets?.map(b => b.name) || [];
-
-      for (const bucketName of requiredBuckets) {
-        if (!existingBuckets.includes(bucketName)) {
-          this.logger.log(`🛠️ Tentando criar bucket: ${bucketName}`);
-          
-          try {
-            // Configurações mais simples para evitar erro 413
-            const { error: createError } = await this.supabase.storage.createBucket(bucketName, {
-              public: true,
-              fileSizeLimit: 52428800, // 50MB - mais conservador
-            });
-
-            if (createError) {
-              // Se der erro 413, tentar com configuração mínima
-              if (createError.message.includes('413') || createError.message.includes('exceeded')) {
-                this.logger.warn(`Erro 413 ao criar ${bucketName}, tentando configuração mínima...`);
-                
-                const { error: retryError } = await this.supabase.storage.createBucket(bucketName, {
-                  public: true,
-                });
-
-                if (retryError) {
-                  this.logger.error(`❌ Falha ao criar ${bucketName} mesmo com configuração mínima:`, retryError);
-                } else {
-                  this.logger.log(`✅ Bucket ${bucketName} criado com configuração mínima`);
-                }
-              } else {
-                this.logger.error(`❌ Erro ao criar ${bucketName}:`, createError);
-              }
-            } else {
-              this.logger.log(`✅ Bucket ${bucketName} criado com sucesso`);
-            }
-          } catch (bucketError) {
-            this.logger.error(`❌ Exceção ao criar ${bucketName}:`, bucketError);
-          }
-        } else {
-          this.logger.log(`✅ Bucket já existe: ${bucketName}`);
-        }
-      }
-    } catch (error) {
-      this.logger.error('❌ Erro ao verificar buckets:', error);
+   // Método auxiliar para determinar bucket baseado no tipo
+  getBucketForFlowFile(type: 'image' | 'audio' | 'video'): BucketType {
+    switch (type) {
+      case 'image': return 'flow-images';
+      case 'audio': return 'flow-audios';
+      case 'video': return 'flow-videos';
+      default: throw new BadRequestException('Tipo de arquivo não suportado');
     }
   }
 
-  private getAllowedMimeTypes(bucket: BucketType): string[] {
-    switch (bucket) {
-      case 'task-images':
-        return ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
-      case 'task-audios':
-        return ['audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/mp4', 'audio/aac'];
-      case 'task-videos':
-        return ['video/mp4', 'video/mpeg', 'video/ogg', 'video/webm', 'video/quicktime'];
-      default:
-        return [];
+ // Método específico para fluxo/produção
+  // Método específico para fluxo/produção
+async uploadFlowFile(
+  flowItemId: string,
+  file: MulterFile,
+  type: 'image' | 'audio' | 'video',
+  metadata?: Record<string, any>
+): Promise<{ url: string; filename: string; size: number }> { // Removi bucketPath do retorno
+  const bucket = this.getBucketForFlowFile(type);
+  
+  // Cria estrutura de pastas organizada
+  const fileExt = file.originalname.split('.').pop();
+  const timestamp = Date.now();
+  const uniqueFilename = `${flowItemId}/${type}s/${timestamp}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+  
+  // Verifica tipo MIME
+  const allowedTypes = this.getAllowedMimeTypes(bucket);
+  if (!allowedTypes.includes(file.mimetype)) {
+    throw new BadRequestException(`Tipo de arquivo não permitido para ${type}. Tipos permitidos: ${allowedTypes.join(', ')}`);
+  }
+
+  const uploadResult = await this.uploadFile(
+    bucket,
+    uniqueFilename,
+    file.buffer,
+    {
+      contentType: file.mimetype,
+      metadata: {
+        ...metadata,
+        originalFilename: file.originalname,
+        uploadedAt: new Date().toISOString(),
+        flowItemId,
+        type
+      }
     }
+  );
+
+  return {
+    url: uploadResult.fullPath,
+    filename: file.originalname,
+    size: file.size
+    // Não retorna bucketPath pois não é usado no modelo
+  };
+}
+
+  // Método para deletar arquivos de fluxo
+  async deleteFlowFile(url: string): Promise<void> {
+    try {
+      const { path, bucket } = this.extractPathFromUrl(url);
+      
+      // Verifica se é um bucket de flow
+      if (!bucket.includes('flow-')) {
+        this.logger.warn(`Tentativa de deletar arquivo de bucket não-flow: ${bucket}`);
+      }
+      
+      await this.deleteFile(bucket as BucketType, path);
+    } catch (error) {
+      this.logger.error('Erro ao deletar arquivo de fluxo:', error);
+      // Não lança erro para não quebrar fluxo principal
+    }
+  }
+
+  // Mantenha os outros métodos existentes, apenas atualize ensureBucketsExist
+  async ensureBucketsExist(): Promise<void> {
+  const requiredBuckets = Object.values(this.BUCKETS); // pega os nomes reais
+
+  try {
+    const { data: buckets, error } = await this.supabase.storage.listBuckets();
+
+    if (error) {
+      this.logger.error('❌ Erro ao listar buckets:', error);
+      return;
+    }
+
+    const existing = new Set(buckets?.map(b => b.name));
+
+    for (const bucketName of requiredBuckets) {
+      if (existing.has(bucketName)) {
+        this.logger.log(`✔️ Bucket já existe: ${bucketName}`);
+        continue; // não tenta criar → evita erro 409
+      }
+
+      this.logger.log(`🛠️ Criando bucket: ${bucketName}`);
+
+      const config: any = {
+        public: true,
+        fileSizeLimit: 52_428_800, // 50MB
+      };
+
+      if (bucketName.includes('flow-')) {
+        config.allowedMimeTypes = this.getAllowedMimeTypes(bucketName as BucketType);
+      }
+
+      const { error: createError } = await this.supabase.storage.createBucket(bucketName, config);
+
+      if (createError) {
+        this.logger.error(`❌ Falha ao criar bucket ${bucketName}:`, createError);
+      } else {
+        this.logger.log(`✅ Bucket criado: ${bucketName}`);
+      }
+    }
+  } catch (error) {
+    this.logger.error('❌ Erro ao garantir buckets:', error);
+  }
+}
+
+
+ // Atualize também este método
+  private getAllowedMimeTypes(bucket: BucketType): string[] {
+    const baseConfig = {
+      'task-images': ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'],
+      'task-audios': ['audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/mp4', 'audio/aac'],
+      'task-videos': ['video/mp4', 'video/mpeg', 'video/ogg', 'video/webm', 'video/quicktime'],
+      // ADICIONE OS NOVOS
+      'flow-images': ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml'],
+      'flow-audios': ['audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/mp4', 'audio/aac', 'audio/x-m4a'],
+      'flow-videos': ['video/mp4', 'video/mpeg', 'video/ogg', 'video/webm', 'video/quicktime', 'video/x-msvideo'],
+      'flow-templates': ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain']
+    };
+
+    return baseConfig[bucket] || [];
   }
 
   extractPathFromUrl(url: string): { path: string; bucket: BucketType } {
     try {
       const cleanUrl = url.split('?')[0];
-      const bucketMatch = cleanUrl.match(/\/(task-images|task-audioss|task-videos)\//);
+      // CORREÇÃO: Regex atualizado para incluir TODOS os buckets
+      const bucketMatch = cleanUrl.match(
+        /\/(task-images|task-audios|task-videos|flow-images|flow-audios|flow-videos|flow-templates)\//
+      );
       
       if (!bucketMatch) {
         throw new BadRequestException('URL do Supabase inválida - bucket não encontrado');
