@@ -273,34 +273,47 @@ export class KanbanColumnService {
   }
 
   async delete(id: string, companyId: string) {
-    if (!companyId) {
-      throw new BadRequestException('CompanyId é obrigatório');
+  if (!companyId) {
+    throw new BadRequestException('CompanyId é obrigatório');
+  }
+
+  console.log('🗑️ delete: id=', id, 'companyId=', companyId);
+
+  // Verificar se a coluna pertence à empresa
+  const column = await this.prisma.kanbanColumn.findFirst({
+    where: { 
+      id, 
+      companyId 
     }
+  });
 
-    console.log('🗑️ delete: id=', id, 'companyId=', companyId); // DEBUG
+  if (!column) {
+    throw new BadRequestException('Coluna não encontrada');
+  }
 
-    // Verificar se a coluna pertence à empresa
-    const column = await this.prisma.kanbanColumn.findFirst({
-      where: { 
-        id, 
-        companyId 
-      }
-    });
-
-    if (!column) {
-      throw new BadRequestException('Coluna não encontrada');
+  // 🔥 CORREÇÃO: Primeiro, verificar se já existe uma coluna "Sem etapa"
+  const existingDefaultColumn = await this.prisma.kanbanColumn.findFirst({
+    where: { 
+      title: {
+        equals: 'Sem etapa',
+        mode: 'insensitive'
+      },
+      companyId,
+      id: { not: id } // Não contar a própria coluna que está sendo deletada
     }
+  });
 
-    // 🔥 CORREÇÃO: Buscar a coluna padrão de forma mais flexível
-    const defaultColumn = await this.prisma.kanbanColumn.findFirst({
+  let targetColumnId: string | null = null;
+  
+  // Se já existe uma coluna "Sem etapa", usá-la
+  if (existingDefaultColumn) {
+    targetColumnId = existingDefaultColumn.id;
+    console.log('✅ Coluna "Sem etapa" já existe:', existingDefaultColumn.title);
+  } else {
+    // Se não existe, buscar outras colunas padrão alternativas
+    const alternativeDefaultColumn = await this.prisma.kanbanColumn.findFirst({
       where: { 
         OR: [
-          { 
-            title: { 
-              contains: 'sem etapa', 
-              mode: 'insensitive' 
-            }
-          },
           { 
             title: { 
               contains: 'sem coluna', 
@@ -312,81 +325,59 @@ export class KanbanColumnService {
               contains: 'pendente', 
               mode: 'insensitive' 
             }
+          },
+          { 
+            title: { 
+              contains: 'geral', 
+              mode: 'insensitive' 
+            }
           }
         ],
         companyId,
-        id: { not: id } // Não pode ser a própria coluna que está sendo deletada
+        id: { not: id }
       },
-      orderBy: { order: 'asc' } // Pegar a primeira coluna padrão encontrada
+      orderBy: { order: 'asc' }
     });
 
-    // 🔥 SE não encontrar coluna padrão, criar uma automaticamente
-    let targetColumnId: string | null = null;
-    
-    if (!defaultColumn) {
-      console.log('🔧 Coluna padrão não encontrada, criando automaticamente...');
-      
-      // Buscar um usuário da empresa para ser o criador
-      const companyUser = await this.prisma.user.findFirst({
-        where: { companyId },
-        select: { id: true }
-      });
-
-      if (!companyUser) {
-        throw new BadRequestException('Nenhum usuário encontrado para criar a coluna padrão');
-      }
-
-      // 🔥 CORREÇÃO: Adicionar description obrigatória
-      const newDefaultColumn = await this.prisma.kanbanColumn.create({
-        data: {
-          title: 'Sem etapa',
-          description: 'Coluna padrão para tarefas sem etapa definida', // Campo obrigatório
-          order: 0, // Colocar no início
-          companyId,
-          createdById: companyUser.id
-        }
-      });
-      
-      targetColumnId = newDefaultColumn.id;
-      console.log('✅ Coluna padrão criada automaticamente:', newDefaultColumn.title);
+    if (alternativeDefaultColumn) {
+      targetColumnId = alternativeDefaultColumn.id;
+      console.log('✅ Coluna padrão alternativa encontrada:', alternativeDefaultColumn.title);
     } else {
-      targetColumnId = defaultColumn.id;
-      console.log('✅ Coluna padrão encontrada:', defaultColumn.title);
-    }
-
-    // 🔥 CORREÇÃO: Se ainda não tem targetColumnId, usar undefined (sem coluna)
-    if (!targetColumnId) {
       console.log('⚠️ Nenhuma coluna padrão disponível, definindo tasks como sem coluna');
-      
-      // Atualizar tarefas para ficarem sem coluna (columnId = undefined)
-      await this.prisma.task.updateMany({
-        where: { 
-          columnId: id,
-          companyId 
-        },
-        data: { columnId: undefined },
-      });
-    } else {
-      // Atualizar todas as tarefas da coluna sendo deletada para a coluna padrão
-      await this.prisma.task.updateMany({
-        where: { 
-          columnId: id,
-          companyId 
-        },
-        data: { columnId: targetColumnId },
-      });
     }
-
-    // Deletar a coluna
-    const result = await this.prisma.kanbanColumn.delete({ 
-      where: { id } 
-    });
-
-    console.log(`✅ Coluna "${column.title}" deletada com sucesso`);
-    console.log(`📊 Tarefas realocadas para: ${targetColumnId ? 'coluna padrão' : 'sem coluna'}`);
-    
-    return result;
   }
+
+  // 🔥 CORREÇÃO IMPORTANTE: Mover as tarefas ANTES de deletar a coluna
+  if (targetColumnId) {
+    // Atualizar todas as tarefas da coluna sendo deletada para a coluna padrão
+    await this.prisma.task.updateMany({
+      where: { 
+        columnId: id,
+        companyId 
+      },
+      data: { columnId: targetColumnId },
+    });
+  } else {
+    // Atualizar tarefas para ficarem sem coluna (columnId = undefined)
+    await this.prisma.task.updateMany({
+      where: { 
+        columnId: id,
+        companyId 
+      },
+      data: { columnId: undefined },
+    });
+  }
+
+  // Agora deletar a coluna
+  const result = await this.prisma.kanbanColumn.delete({ 
+    where: { id } 
+  });
+
+  console.log(`✅ Coluna "${column.title}" deletada com sucesso`);
+  console.log(`📊 Tarefas realocadas para: ${targetColumnId ? 'coluna padrão' : 'sem coluna'}`);
+  
+  return result;
+}
 
   async reorder(columns: Array<{ id: string; order: number }>, companyId: string) {
     if (!companyId) {
