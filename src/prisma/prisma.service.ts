@@ -4,30 +4,30 @@ import { PrismaClient } from '@prisma/client';
 
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
-  private static instance: PrismaService;
+  // ❌ REMOVIDO: private static instance: PrismaService; 
+  // O NestJS já garante o Singleton por padrão.
 
   constructor() {
     super({
       log: ['warn', 'error'],
       errorFormat: 'minimal',
     });
-
-    if (PrismaService.instance) {
-      return PrismaService.instance;
-    }
-    PrismaService.instance = this;
+    
+    // ❌ REMOVIDO: A lógica de verificação e atribuição manual do Singleton.
   }
+
+  // --- Ciclos de Vida do Módulo ---
 
   async onModuleInit() {
     try {
       await this.$connect();
-      console.log('✅ Conectado ao banco de dados (Singleton)');
+      console.log('✅ Conectado ao banco de dados (Gerenciado pelo NestJS)');
     } catch (error) {
       console.error('❌ Erro ao conectar com o banco:', error);
-      // 🔥 CORREÇÃO: Não atribuir error a tipo any
       if (error instanceof Error) {
         console.error('Mensagem:', error.message);
       }
+      // Dependendo da gravidade, você pode querer relançar o erro ou encerrar o aplicativo.
     }
   }
 
@@ -37,14 +37,14 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
       console.log('❌ Desconectado do banco de dados');
     } catch (error) {
       console.error('❌ Erro ao desconectar:');
-      // 🔥 CORREÇÃO: Não atribuir error a tipo any
       if (error instanceof Error) {
         console.error('Mensagem:', error.message);
       }
     }
   }
 
-  // 🔥 CORREÇÃO: Remover 'async' se não usa await OU adicionar await
+  // --- Métodos de Negócio (Exemplo) ---
+
   async findChatByCompany(companyId: string) {
     return await this.chat.findFirst({ 
       where: { companyId },
