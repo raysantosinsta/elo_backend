@@ -1,4 +1,5 @@
 /* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
@@ -13,7 +14,7 @@ import {
 } from '@nestjs/common';
 import { NotificationType, Prisma, TaskStatus } from '@prisma/client';
 import type { Cache } from 'cache-manager';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
 import {
   IsArray,
   IsDateString,
@@ -60,9 +61,45 @@ export class UpdateTaskDto {
   @IsOptional() @IsEnum(TaskStatus) status?: TaskStatus;
   @IsOptional() @IsString() finalComment?: string;
   @IsOptional() @IsUUID() completedById?: string;
-  @IsOptional() @IsArray() removeImageIds?: string[];
-  @IsOptional() @IsArray() removeAudioIds?: string[];
-  @IsOptional() @IsArray() removeVideoIds?: string[];
+  @IsOptional()
+  @IsArray()
+  @Transform(({ value }) => {
+    if (typeof value === 'string') {
+      try {
+        return JSON.parse(value);
+      } catch (error) {
+        return [];
+      }
+    }
+    return value;
+  })
+  removeImageIds?: string[];
+  @IsOptional()
+  @IsArray()
+  @Transform(({ value }) => {
+    if (typeof value === 'string') {
+      try {
+        return JSON.parse(value);
+      } catch (error) {
+        return [];
+      }
+    }
+    return value;
+  })
+  removeAudioIds?: string[];
+  @IsOptional()
+  @IsArray()
+  @Transform(({ value }) => {
+    if (typeof value === 'string') {
+      try {
+        return JSON.parse(value);
+      } catch (error) {
+        return [];
+      }
+    }
+    return value;
+  })
+  removeVideoIds?: string[];
 }
 
 export interface UploadedFile {
@@ -90,7 +127,7 @@ export class TasksService {
     private readonly supabaseService: SupabaseService,
     private readonly websocketGateway: NotificationUserGateway,
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
-  ) {}
+  ) { }
 
   // Select Otimizado
   private getTaskIncludeDetails() {
