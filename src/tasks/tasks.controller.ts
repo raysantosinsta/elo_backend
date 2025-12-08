@@ -1,3 +1,4 @@
+/* eslint-disable prettier/prettier */
 import {
   Body,
   Controller,
@@ -43,9 +44,9 @@ export class TasksController {
   @ApiConsumes('multipart/form-data')
   @ApiResponse({ status: 201, description: 'Tarefa criada com sucesso.' })
   @UseInterceptors(FileFieldsInterceptor([
-    { name: 'images', maxCount: 5 },
-    { name: 'audios', maxCount: 5 },
-    { name: 'videos', maxCount: 2 },
+    { name: 'images', maxCount: 10 },
+    { name: 'audios', maxCount: 10 },
+    { name: 'videos', maxCount: 5 },
   ]))
   async create(
     @CurrentUser() user: User,
@@ -75,9 +76,9 @@ export class TasksController {
   @ApiOperation({ summary: 'Atualiza uma tarefa existente' })
   @ApiConsumes('multipart/form-data')
   @UseInterceptors(FileFieldsInterceptor([
-    { name: 'images', maxCount: 5 },
-    { name: 'audios', maxCount: 5 },
-    { name: 'videos', maxCount: 2 },
+    { name: 'images', maxCount: 10 },
+    { name: 'audios', maxCount: 10 },
+    { name: 'videos', maxCount: 5 },
   ]))
   async update(
     @Param('id', ParseUUIDPipe) id: string,

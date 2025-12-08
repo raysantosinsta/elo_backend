@@ -5,6 +5,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 // import compression = require('compression');
+import { json, urlencoded } from 'express';
 
 async function bootstrap() {
   // 1. Logger de Inicialização (Observabilidade)
@@ -12,15 +13,20 @@ async function bootstrap() {
 
   const app = await NestFactory.create(AppModule, {
     // Ativa logs do sistema baseados em níveis (pode ser substituído por 'nestjs-pino' para JSON logs em prod)
-    logger: process.env.NODE_ENV === 'production' 
-      ? ['error', 'warn', 'log'] 
+    logger: process.env.NODE_ENV === 'production'
+      ? ['error', 'warn', 'log']
       : ['error', 'warn', 'log', 'debug', 'verbose'],
   });
+
+  // 2. CONFIGURAÇÃO DE TAMANHO (Adicione estas duas linhas antes de tudo)
+  // Permite uploads de até 500MB (ajuste conforme necessidade)
+  app.use(json({ limit: '500mb' }));
+  app.use(urlencoded({ extended: true, limit: '500mb' }));
 
   // 2. Segurança (Security & Governance)
   // Helmet configura headers HTTP seguros (proteção contra XSS, Clickjacking, etc.)
   app.use(helmet());
-  
+
   // CORS configurado para produção (aceita variáveis de ambiente)
   app.enableCors({
     origin: '*',
@@ -37,7 +43,7 @@ async function bootstrap() {
   // 4. Governança e Evolução de API (Evolution)
   // Prefixo global evita conflitos com frontends servidos no mesmo domínio
   // app.setGlobalPrefix('api/v1');
-  
+
   // Versionamento de API (permite evoluir endpoints sem quebrar clientes antigos: /v1/, /v2/)
   // app.enableVersioning({
   //   type: VersioningType.URI,
@@ -81,7 +87,7 @@ async function bootstrap() {
 
   const port = process.env.PORT ?? 3000;
   await app.listen(port);
-  
+
   logger.log(`Application is running on: ${await app.getUrl()}`);
   logger.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 }
