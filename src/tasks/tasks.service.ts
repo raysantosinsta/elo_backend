@@ -44,7 +44,7 @@ export class CreateTaskDto {
   @IsOptional() @IsInt() @Type(() => Number) priority?: number;
   @IsOptional() @IsDateString() scheduledAt?: string | Date;
   @IsOptional() @IsUUID() routeId?: string;
-  @IsOptional() @IsInt() columnOrder?: number;
+  @IsOptional() @IsInt() @Type(() => Number) columnOrder?: number;
 }
 
 export class UpdateTaskDto {
@@ -151,7 +151,7 @@ export class TasksService {
         // CORREÇÃO: columnId é passado diretamente pois é obrigatório e string
         columnId: columnId,
         routeId: dto.routeId,
-        priority: dto.priority || 1,
+        priority: dto.priority ? Number(dto.priority) : 1,
         columnOrder: dto.columnOrder || 0,
         status: TaskStatus.PENDING,
         dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
@@ -223,7 +223,7 @@ export class TasksService {
     if (dto.routeId) data.route = { connect: { id: dto.routeId } };
     if (dto.assignedToId)
       data.assignedTo = { connect: { id: dto.assignedToId } };
-    if (dto.priority !== undefined) data.priority = dto.priority;
+    if (dto.priority !== undefined) data.priority = Number(dto.priority);
     if (dto.dueDate) data.dueDate = new Date(dto.dueDate);
     // if (dto.scheduledAt) data.scheduledAt = new Date(dto.scheduledAt);
     // if (dto.columnOrder !== undefined) data.columnOrder = dto.columnOrder;
