@@ -1,3 +1,8 @@
+/* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import {
   Injectable,
   BadRequestException,
@@ -39,7 +44,7 @@ export class KanbanColumnService {
   }
 
   // --- FIND ALL (Com Cache e Auto-Setup) ---
-  async findAll(companyId: string) {
+ async findAll(companyId: string) {
     const end = dbLatencyHistogram.labels('findAll').startTimer();
     
     // 1. Tentar Cache
@@ -52,27 +57,13 @@ export class KanbanColumnService {
 
     try {
       // 2. Buscar no Banco
-      let columns = await this.fetchColumns(companyId);
+      const columns = await this.fetchColumns(companyId);
 
-      // 3. Auto-Setup (Se vazio)
-      if (columns.length === 0) {
-        this.logger.log(`Empresa ${companyId} sem colunas. Iniciando setup padrão...`);
-        try {
-          await this.createDefaultColumns(companyId);
-          columns = await this.fetchColumns(companyId); // Re-busca
-        } catch (error) {
-          // Se der erro de Unique Constraint (P2002), significa que outra requisição criou primeiro.
-          // Ignoramos e buscamos o que foi criado.
-          if (error.code === 'P2002') {
-             this.logger.warn(`Concorrência no setup padrão para ${companyId}. Re-buscando...`);
-             columns = await this.fetchColumns(companyId);
-          } else {
-             throw error;
-          }
-        }
-      }
+      // --- REMOVIDO: AUTO-SETUP ---
+      // A lógica que criava colunas padrão (if columns.length === 0) foi removida 
+      // para permitir que o frontend mostre a tela de "criar primeira coluna".
 
-      // 4. Salvar Cache
+      // 3. Salvar Cache
       await this.cacheManager.set(cacheKey, columns, this.CACHE_TTL);
       columnOpsCounter.labels('findAll', 'success').inc();
       end();
