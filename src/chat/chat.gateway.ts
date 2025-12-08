@@ -1,112 +1,100 @@
-/* eslint-disable prettier/prettier */
-/* eslint-disable @typescript-eslint/no-unsafe-call */
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import {
-    WebSocketGateway,
-    WebSocketServer,
-    SubscribeMessage,
-    OnGatewayConnection,
-    OnGatewayDisconnect,
+  WebSocketGateway,
+  WebSocketServer,
+  SubscribeMessage,
+  OnGatewayConnection,
+  OnGatewayDisconnect,
+  OnGatewayInit,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
+import { Logger } from '@nestjs/common';
 
 @WebSocketGateway({
-  cors: { origin: '*' },
-  namespace: '/ws',
-  // 🔥 CORREÇÃO: Adicionar pings para manter a conexão ativa e detectar desconexões.
-  pingInterval: 25000, // Envia um ping a cada 25 segundos
-  pingTimeout: 60000,  // Considera desconectado se não houver resposta em 60 segundos
+  namespace: 'ws', // Namespace específico
+  cors: {
+    origin: ['http://localhost:3001', 'http://127.0.0.1:3001'],
+    credentials: true,
+  },
+  pingInterval: 10000,
+  pingTimeout: 5000,
 })
-export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit {
   @WebSocketServer() server: Server;
+  private readonly logger = new Logger(ChatGateway.name);
 
-  private connectedUsers = new Map<string, string>(); // socketId -> userId
+  // Mapeamento para rastrear conexões: userId -> socketId[] (um user pode ter varias abas)
+  private userSockets = new Map<string, Set<string>>();
+
+  afterInit() {
+    this.logger.log('✅ ChatGateway inicializado no namespace /ws');
+  }
 
   handleConnection(client: Socket) {
-    console.log(`🔗 Cliente conectado: ${client.id}`);
+    this.logger.log(`🔗 Cliente conectado: ${client.id}`);
   }
 
   handleDisconnect(client: Socket) {
-    console.log(`🔗 Cliente desconectado: ${client.id}`);
-    // Remover usuário da lista de conectados
-    for (const [userId, socketId] of this.connectedUsers.entries()) {
-      if (socketId === client.id) {
-        this.connectedUsers.delete(userId);
-        break;
-      }
-    }
+    this.logger.log(`❌ Cliente desconectado: ${client.id}`);
+    this.removeSocketFromUserMap(client.id);
   }
 
-  getUserRoom(userId: string) {
-    return `user:${userId}`;
-  }
-
-  getCompanyRoom(companyId: string) {
-    return `company:${companyId}`;
-  }
-
-  getChatRoom(chatId: string) {
-    return `chat:${chatId}`;
-  }
+  // --- GERENCIAMENTO DE SALAS ---
 
   @SubscribeMessage('join_user_room')
   handleJoinUserRoom(client: Socket, userId: string) {
-    client.join(this.getUserRoom(userId));
-    this.connectedUsers.set(userId, client.id);
-    console.log(`👤 User ${userId} joined their room (socket: ${client.id})`);
-    
-    // Confirmar entrada na sala
-    client.emit('room_joined', { room: `user:${userId}`, success: true });
-  }
-
-  @SubscribeMessage('join_company_room')
-  handleJoinCompanyRoom(client: Socket, companyId: string) {
-    client.join(this.getCompanyRoom(companyId));
-    console.log(`🏢 User joined company room ${companyId}`);
-    
-    client.emit('room_joined', { room: `company:${companyId}`, success: true });
+    if (!userId) return;
+    const room = `user:${userId}`;
+    client.join(room);
+    this.addUserSocket(userId, client.id);
+    this.logger.verbose(`👤 User ${userId} entrou na sala ${room}`);
   }
 
   @SubscribeMessage('join_chat_room')
   handleJoinChatRoom(client: Socket, chatId: string) {
-    client.join(this.getChatRoom(chatId));
-    console.log(`💬 User joined chat room ${chatId}`);
-    
-    client.emit('room_joined', { room: `chat:${chatId}`, success: true });
+    if (!chatId) return;
+    const room = `chat:${chatId}`;
+    client.join(room);
+    this.logger.verbose(`💬 Socket ${client.id} entrou no chat ${room}`);
   }
 
   @SubscribeMessage('leave_chat_room')
   handleLeaveChatRoom(client: Socket, chatId: string) {
-    client.leave(this.getChatRoom(chatId));
-    console.log(`🚪 User left chat room ${chatId}`);
+    const room = `chat:${chatId}`;
+    client.leave(room);
   }
 
-  // Notificar um usuário específico
-  notifyUser(userId: string, event: string, payload: any) {
-    this.server.to(this.getUserRoom(userId)).emit(event, payload);
-    console.log(`📨 Notificação enviada para usuário ${userId}: ${event}`);
-  }
+  // --- MÉTODOS DE ENVIO (Usados pelo Service) ---
 
-  // Notificar uma empresa
-  notifyCompany(companyId: string, event: string, payload: any) {
-    this.server.to(this.getCompanyRoom(companyId)).emit(event, payload);
-    console.log(`📨 Notificação enviada para empresa ${companyId}: ${event}`);
-  }
-
-  // Notificar um chat específico
   notifyChat(chatId: string, event: string, payload: any) {
-    this.server.to(this.getChatRoom(chatId)).emit(event, payload);
-    console.log(`📨 Notificação enviada para chat ${chatId}: ${event}`);
+    this.server.to(`chat:${chatId}`).emit(event, payload);
   }
 
-  // Notificar todos os usuários conectados
-  notifyAll(event: string, payload: any) {
-    this.server.emit(event, payload);
-    console.log(`📢 Notificação broadcast: ${event}`);
+  notifyUser(userId: string, event: string, payload: any) {
+    this.server.to(`user:${userId}`).emit(event, payload);
   }
 
-  // Método para obter usuários conectados (útil para admin)
-  getConnectedUsers(): string[] {
-    return Array.from(this.connectedUsers.keys());
+  notifyCompany(companyId: string, event: string, payload: any) {
+    this.server.to(`company:${companyId}`).emit(event, payload);
+  }
+
+  // --- HELPERS ---
+
+  private addUserSocket(userId: string, socketId: string) {
+    if (!this.userSockets.has(userId)) {
+      this.userSockets.set(userId, new Set());
+    }
+    this.userSockets.get(userId)?.add(socketId);
+  }
+
+  private removeSocketFromUserMap(socketId: string) {
+    for (const [userId, sockets] of this.userSockets.entries()) {
+      if (sockets.has(socketId)) {
+        sockets.delete(socketId);
+        if (sockets.size === 0) {
+          this.userSockets.delete(userId);
+        }
+        break;
+      }
+    }
   }
 }

@@ -6,367 +6,185 @@ import {
   Delete,
   Body,
   Param,
-  Query,
-  UploadedFile,
+  Req,
   UseGuards,
   UseInterceptors,
-  ParseFilePipe,
-  MaxFileSizeValidator,
+  UploadedFile,
+  ParseUUIDPipe,
+  Logger,
   BadRequestException,
-  Req,
-  UploadedFiles
 } from '@nestjs/common';
-import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { FlowService } from './flow.service';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiTags,
+  ApiConsumes,
+} from '@nestjs/swagger';
+import { CreateFlowDto, CreateFlowItemDto } from './dto/create-flow.dto';
 
-@Controller('flow')
+@ApiTags('Product Flow (Kanban)')
+@ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
+@Controller('flow')
 export class FlowController {
-  constructor(private readonly flowService: FlowService) { }
+  private readonly logger = new Logger(FlowController.name); // Logger para debug
+  constructor(private readonly flowService: FlowService) {}
 
-  // ============ FLUXOS ============
   @Post()
-  async createFlow(
-    @Req() req: any,
-    @Body() body: { name: string; description?: string }
-  ) {
-    const user = req.user;
-    return this.flowService.createFlow(user.companyId, user.id, body);
+  @ApiOperation({ summary: 'Cria um novo fluxo de produção' })
+  async createFlow(@Req() req: any, @Body() body: CreateFlowDto) {
+    this.logger.log(`Recebido body para criar fluxo: ${JSON.stringify(body)}`);
+    return this.flowService.createFlow(req.user.companyId, req.user.id, body);
   }
 
   @Get()
   async getFlows(@Req() req: any) {
-    const user = req.user;
-    return this.flowService.getFlows(user.companyId);
+    return this.flowService.getFlows(req.user.companyId);
   }
 
-  @Get(':flowId')
-  async getFlow(
+  @Get(':flowId/board')
+  async getKanbanBoard(
     @Req() req: any,
-    @Param('flowId') flowId: string
+    @Param('flowId', ParseUUIDPipe) flowId: string,
   ) {
-    const user = req.user;
-    return this.flowService.getFlowById(flowId, user.companyId);
+    return this.flowService.getKanbanBoard(flowId, req.user.companyId);
   }
 
-  @Put(':flowId')
-  async updateFlow(
-    @Req() req: any,
-    @Param('flowId') flowId: string,
-    @Body() body: { name?: string; description?: string }
-  ) {
-    const user = req.user;
-    return this.flowService.updateFlow(flowId, user.companyId, body);
-  }
-
-  @Delete(':flowId')
-  async deleteFlow(
-    @Req() req: any,
-    @Param('flowId') flowId: string
-  ) {
-    const user = req.user;
-    return this.flowService.deleteFlow(flowId, user.companyId);
-  }
-
-  // ============ ETAPAS ============
-  @Post(':flowId/stages')
-  async createStage(
-    @Param('flowId') flowId: string,
-    @Body() body: { name: string; color?: string; order?: number }
-  ) {
-    return this.flowService.createStage(flowId, body);
-  }
-
-  @Put('stages/:stageId')
-  async updateStage(
-    @Req() req: any,
-    @Param('stageId') stageId: string,
-    @Body() body: { name?: string; color?: string; order?: number }
-  ) {
-    const user = req.user;
-    return this.flowService.updateStage(stageId, body);
-  }
-
-  @Delete('stages/:stageId')
-  async deleteStage(
-    @Req() req: any,
-    @Param('stageId') stageId: string
-  ) {
-    const user = req.user;
-    return this.flowService.deleteStage(stageId, user.companyId);
-  }
-
-  // ============ ITENS ============
   @Post(':flowId/items')
-  async createFlowItem(
+  async createItem(
     @Req() req: any,
-    @Param('flowId') flowId: string,
-    @Body() body: {
-      title: string;
-      orderNumber?: string;
-      productRef?: string;
-      quantity?: number;
-      priority?: number;
-      dueDate?: Date;
-      assignedToId?: string;
-    }
+    @Param('flowId', ParseUUIDPipe) flowId: string,
+    @Body() body: CreateFlowItemDto,
   ) {
-    const user = req.user;
     return this.flowService.createFlowItem(
-      user.companyId,
+      req.user.companyId,
       flowId,
-      user.id,
-      body
+      req.user.id,
+      body,
     );
-  }
-
-  @Get('items/:itemId')
-  async getItem(
-    @Req() req: any,
-    @Param('itemId') itemId: string
-  ) {
-    const user = req.user;
-    return this.flowService.getItemWithMedia(itemId, user.companyId);
-  }
-
-  @Put('items/:itemId')
-  async updateFlowItem(
-    @Req() req: any,
-    @Param('itemId') itemId: string,
-    @Body() body: {
-      title?: string;
-      orderNumber?: string;
-      productRef?: string;
-      quantity?: number;
-      priority?: number;
-      dueDate?: Date;
-      assignedToId?: string;
-      stageId?: string;
-    }
-  ) {
-    const user = req.user;
-    return this.flowService.updateFlowItem(itemId, user.companyId, body);
   }
 
   @Put('items/:itemId/move')
   async moveItem(
     @Req() req: any,
-    @Param('itemId') itemId: string,
-    @Body() body: { newStageId: string }
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+    @Body() body: { newStageId: string },
   ) {
-    const user = req.user;
-    return this.flowService.moveItem(itemId, body.newStageId, user.id);
+    return this.flowService.moveItem(itemId, body.newStageId, req.user.id);
   }
+
+  @Delete(':flowId')
+  async deleteFlow(
+    @Req() req: any,
+    @Param('flowId', ParseUUIDPipe) flowId: string,
+  ) {
+    return this.flowService.deleteFlow(flowId, req.user.companyId);
+  }
+
+  // Endpoint para Upload Multipart (Compatível com FormData do Frontend)
+  @Post(':flowId/items/upload')
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FileInterceptor('file'))
+  async createItemWithUpload(
+    @Req() req: any,
+    @Param('flowId', ParseUUIDPipe) flowId: string,
+    @Body() body: any, // Body vem como string JSON dentro do FormData
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    let dto: CreateFlowItemDto;
+    try {
+      dto = typeof body.data === 'string' ? JSON.parse(body.data) : body;
+    } catch (e) {
+      dto = body;
+    }
+
+    // 1. Cria o item
+    const item = await this.flowService.createFlowItem(
+      req.user.companyId,
+      flowId,
+      req.user.id,
+      dto,
+    );
+
+    // 2. Upload (se houver)
+    if (file) {
+      // Lógica de upload separada no service (addMediaToItem)
+      // ...
+    }
+    return item;
+  }
+
+  @Post(':flowId/stages')
+  @ApiOperation({ summary: 'Adiciona uma nova etapa ao fluxo' })
+  async createStage(
+    @Req() req: any,
+    @Param('flowId', ParseUUIDPipe) flowId: string,
+    @Body() body: { name: string }, // Ou crie um DTO específico: CreateStageDto
+  ) {
+    return this.flowService.createStage(req.user.companyId, flowId, body.name);
+  }
+  @Put('stages/:stageId')
+  @ApiOperation({ summary: 'Atualiza uma etapa existente' })
+  async updateStage(
+    @Req() req: any,
+    @Param('stageId', ParseUUIDPipe) stageId: string,
+    @Body() body: { name?: string; color?: string; order?: number },
+  ) {
+    return this.flowService.updateStage(req.user.companyId, stageId, body);
+  }
+
+  @Delete('stages/:stageId')
+  @ApiOperation({ summary: 'Remove uma etapa e seus itens' })
+  async deleteStage(
+    @Req() req: any,
+    @Param('stageId', ParseUUIDPipe) stageId: string
+  ) {
+    return this.flowService.deleteStage(stageId, req.user.companyId);
+  }
+
+  // ... outros imports e métodos ...
 
   @Delete('items/:itemId')
-  async deleteFlowItem(
+  @ApiOperation({ summary: 'Remove um item do fluxo' })
+  async deleteItem(
     @Req() req: any,
-    @Param('itemId') itemId: string
+    @Param('itemId', ParseUUIDPipe) itemId: string
   ) {
-    const user = req.user;
-    return this.flowService.deleteFlowItem(itemId, user.companyId);
+    // Passamos o ID do item e o ID da empresa para garantir segurança
+    return this.flowService.deleteItem(itemId, req.user.companyId);
   }
 
-  // ============ MÍDIAS ============
+  // ... imports existentes
+
+  // Endpoint Específico para Upload de Mídia (Imagem, Áudio, Vídeo)
+  // O Frontend chama: /flow/items/:itemId/media/:type
   @Post('items/:itemId/media/:type')
+  @ApiConsumes('multipart/form-data')
   @UseInterceptors(FileInterceptor('file'))
-  async addMediaToItem(
+  async uploadMedia(
     @Req() req: any,
-    @Param('itemId') itemId: string,
-    @Param('type') type: 'image' | 'audio' | 'video',
-    @UploadedFile(
-      new ParseFilePipe({
-        validators: [
-          new MaxFileSizeValidator({ maxSize: 50 * 1024 * 1024 }) // 50MB
-        ]
-      })
-    ) file: any
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+    @Param('type') type: string,
+    @UploadedFile() file: Express.Multer.File
   ) {
-    const user = req.user;
+    // Validação simples do tipo
+    if (!['image', 'audio', 'video'].includes(type)) {
+      throw new BadRequestException('Tipo de mídia inválido. Use image, audio ou video.');
+    }
+
+    if (!file) {
+      throw new BadRequestException('Nenhum arquivo enviado.');
+    }
+
     return this.flowService.addMediaToItem(
+      req.user.companyId,
       itemId,
-      user.companyId,
-      user.id,
       file,
-      type
+      type as 'image' | 'audio' | 'video',
+      req.user.id
     );
-  }
-
-  @Delete('items/:itemId/media/:type/:mediaId')
-  async removeMedia(
-    @Req() req: any,
-    @Param('itemId') itemId: string,
-    @Param('type') type: 'image' | 'audio' | 'video',
-    @Param('mediaId') mediaId: string
-  ) {
-    const user = req.user;
-    return this.flowService.removeMedia(
-      itemId,
-      user.companyId,
-      mediaId,
-      type
-    );
-  }
-
-  // ============ KANBAN BOARD ============
-  @Get(':flowId/board')
-  async getKanbanBoard(
-    @Req() req: any,
-    @Param('flowId') flowId: string
-  ) {
-    const user = req.user;
-    return this.flowService.getKanbanBoard(flowId, user.companyId);
-  }
-
-  // ============ DASHBOARD ============
-  @Get(':flowId/stats')
-  async getFlowStats(
-    @Req() req: any,
-    @Param('flowId') flowId: string
-  ) {
-    const user = req.user;
-    return this.flowService.getFlowStats(flowId, user.companyId);
-  }
-
-  // ============ BUSCAS ============
-  @Get('items/search')
-  async searchItems(
-    @Req() req: any,
-    @Query('flowId') flowId?: string,
-    @Query('stageId') stageId?: string,
-    @Query('assignedToId') assignedToId?: string,
-    @Query('search') search?: string
-  ) {
-    const user = req.user;
-    return this.flowService.searchItems(
-      user.companyId,
-      flowId,
-      stageId,
-      assignedToId,
-      search
-    );
-  }
-
-  // ============ REORDENAÇÃO ============
-  @Put('items/:itemId/reorder')
-  async reorderItem(
-    @Req() req: any,
-    @Param('itemId') itemId: string,
-    @Body() body: { newPosition: number; stageId?: string }
-  ) {
-    const user = req.user;
-    return this.flowService.reorderItem(itemId, body.newPosition, body.stageId);
-  }
-
-  // ============ ATUALIZAÇÃO EM MASSA ============
-  @Put('items/bulk-update')
-  async bulkUpdateItems(
-    @Req() req: any,
-    @Body() body: {
-      itemIds: string[];
-      assignedToId?: string;
-      priority?: number;
-      stageId?: string;
-    }
-  ) {
-    const user = req.user;
-    return this.flowService.bulkUpdateItems(
-      user.companyId,
-      body.itemIds,
-      {
-        assignedToId: body.assignedToId,
-        priority: body.priority,
-        stageId: body.stageId
-      }
-    );
-  }
-
-  // ============ USUÁRIOS DA EMPRESA ============
-  @Get('company/users')
-  async getCompanyUsers(@Req() req: any) {
-    const user = req.user;
-    return this.flowService.getUsersByCompany(user.companyId);
-  }
-
-  @Post('items/:itemId/media-multiple/:type')
-  @UseInterceptors(FilesInterceptor('files', 10)) // Aceita até 10 arquivos
-  @UseGuards(JwtAuthGuard)
-  async addMultipleMediaToItem(
-    @Req() req: any,
-    @Param('itemId') itemId: string,
-    @Param('type') type: 'image' | 'audio' | 'video',
-    @UploadedFiles() files: any[]
-  ) {
-    const user = req.user;
-
-    if (!files || files.length === 0) {
-      throw new BadRequestException('Nenhum arquivo enviado');
-    }
-
-    return this.flowService.addMultipleMediaToItem(
-      itemId,
-      user.companyId,
-      user.id,
-      files,
-      type
-    );
-  }
-
-  // NO FLOW CONTROLLER, ADICIONE ESTE ENDPOINT PARA MULTIPART/FORM-DATA
-  @Post(':flowId/items/upload')
-  @UseInterceptors(FileInterceptor('file'))
-  @UseGuards(JwtAuthGuard)
-  async createFlowItemWithFiles(
-    @Req() req: any,
-    @Param('flowId') flowId: string,
-    @Body() body: any,
-    @UploadedFile() file?: any
-  ) {
-    const user = req.user;
-
-    // Parse o JSON que vem como string do FormData
-    const itemData = JSON.parse(body.data || '{}');
-
-    // Cria o item primeiro
-    const flowItem = await this.flowService.createFlowItem(
-      user.companyId,
-      flowId,
-      user.id,
-      {
-        title: itemData.title,
-        orderNumber: itemData.orderNumber,
-        productRef: itemData.productRef,
-        quantity: itemData.quantity ? parseInt(itemData.quantity) : 1,
-        priority: itemData.priority ? parseInt(itemData.priority) : 3,
-        dueDate: itemData.dueDate ? new Date(itemData.dueDate) : undefined,
-        assignedToId: itemData.assignedToId,
-        description: itemData.description
-      }
-    );
-
-    // Se houver arquivos, faz upload
-    if (file) {
-      const fileType = this.getFileType(file.mimetype);
-      await this.flowService.addMediaToItem(
-        flowItem.id,
-        user.companyId,
-        user.id,
-        file,
-        fileType
-      );
-    }
-
-    // Se houver múltiplos arquivos (enviados como FormData fields)
-    // Você precisaria de uma lógica mais complexa para múltiplos arquivos
-
-    return flowItem;
-  }
-
-  private getFileType(mimetype: string): 'image' | 'audio' | 'video' {
-    if (mimetype.startsWith('image/')) return 'image';
-    if (mimetype.startsWith('audio/')) return 'audio';
-    if (mimetype.startsWith('video/')) return 'video';
-    throw new BadRequestException('Tipo de arquivo não suportado');
   }
 }

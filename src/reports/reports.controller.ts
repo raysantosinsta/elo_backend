@@ -1,8 +1,15 @@
-/* eslint-disable prettier/prettier */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
-// src/reports/reports.controller.ts
-import { Controller, Get, Query, UseGuards, Request, ParseUUIDPipe, Param, ForbiddenException } from '@nestjs/common';
+import { 
+  Controller, 
+  Get, 
+  Query, 
+  UseGuards, 
+  Request, 
+  ParseUUIDPipe, 
+  Param, 
+  ForbiddenException, 
+  Post,
+  Body
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ReportsService } from './reports.service';
 
@@ -11,15 +18,19 @@ import { ReportsService } from './reports.service';
 export class ReportsController {
   constructor(private readonly reportsService: ReportsService) { }
 
+  /**
+   * Rota: GET /reports/professionals
+   * Exemplo: /reports/professionals/?status=ACTIVE&companyId=...
+   */
   @Get('professionals')
   async getProfessionalReport(
     @Request() req,
     @Query('companyId') companyId?: string,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
-    @Query('status') status?: string,
+    @Query('status') status?: string, // Recebe "ACTIVE" ou "INACTIVE"
   ) {
-    // Verificar permissões
+    // Verificar permissões (Apenas Admin/Master)
     if (!['MASTER', 'ADMIN'].includes(req.user.role)) {
       throw new ForbiddenException('Apenas administradores podem acessar relatórios');
     }
@@ -28,7 +39,7 @@ export class ReportsController {
       companyId: companyId || req.user.companyId,
       startDate: startDate ? new Date(startDate) : undefined,
       endDate: endDate ? new Date(endDate) : undefined,
-      status,
+      status, 
       requesterRole: req.user.role,
     });
   }
@@ -40,7 +51,6 @@ export class ReportsController {
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
   ) {
-    // Verificar permissões
     if (!['MASTER', 'ADMIN'].includes(req.user.role)) {
       throw new ForbiddenException('Apenas administradores podem acessar detalhes');
     }
@@ -52,4 +62,6 @@ export class ReportsController {
       endDate: endDate ? new Date(endDate) : undefined,
     });
   }
+
+ 
 }

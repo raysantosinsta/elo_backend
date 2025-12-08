@@ -1,17 +1,14 @@
-/* eslint-disable prettier/prettier */
-/* eslint-disable @typescript-eslint/no-unsafe-return */
-/* eslint-disable @typescript-eslint/no-unsafe-call */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
-// auth/jwt.strategy.ts
 import { ExtractJwt, Strategy, StrategyOptions } from 'passport-jwt';
 import { PassportStrategy } from '@nestjs/passport';
-import { Injectable, UnauthorizedException, Logger } from '@nestjs/common';
+import { Injectable, UnauthorizedException, Logger, ForbiddenException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
 import { UserRole, UserStatus } from '@prisma/client';
+import { Request } from 'express';
 
-interface JwtPayload {
+// --- Interfaces para Tipagem Estrita ---
+export interface JwtPayload {
   sub: string;
   email: string;
   role: UserRole;
@@ -20,119 +17,110 @@ interface JwtPayload {
   exp?: number;
 }
 
+interface ValidatedUser {
+  id: string;
+  email: string;
+  role: UserRole;
+  companyId: string | null;
+  status: UserStatus;
+  // Campos adicionais úteis para o Request Context
+  name: string;
+}
+
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
   private readonly logger = new Logger(JwtStrategy.name);
 
   constructor(
-    private authService: AuthService,
-    private configService: ConfigService,
+    private readonly authService: AuthService,
+    private readonly configService: ConfigService,
   ) {
     const secret = configService.get<string>('JWT_SECRET');
     if (!secret) {
-      throw new Error('JWT_SECRET is not defined in environment variables');
+      throw new Error('FATAL: JWT_SECRET is not defined in environment variables');
     }
 
     const options: StrategyOptions = {
+      // Estratégia de extração híbrida: Header -> Cookie
       jwtFromRequest: ExtractJwt.fromExtractors([
-        (request: any) => {
-          // Tenta extrair do cookie
-          let token = request?.cookies?.access_token || null;
-          
-          // Se não encontrar no cookie, tenta extrair do header Authorization
-          if (!token && request.headers?.authorization) {
-            const authHeader = request.headers.authorization;
-            if (authHeader.startsWith('Bearer ')) {
-              token = authHeader.substring(7);
-            }
-          }
-          
-          if (process.env.NODE_ENV !== 'production') {
-            this.logger.debug(`🔑 [JWT STRATEGY] Token extraído: ${token ? 'Present' : 'Null'}`);
-          }
-          
+        ExtractJwt.fromAuthHeaderAsBearerToken(),
+        (request: Request) => {
+          // Extração segura de cookie
+          const token = request?.cookies?.access_token;
+          if (!token) return null;
           return token;
         },
-        ExtractJwt.fromAuthHeaderAsBearerToken(),
       ]),
-      ignoreExpiration: false,
+      ignoreExpiration: false, // Segurança: Nunca ignorar expiração
       secretOrKey: secret,
-      algorithms: ['HS256'], // Especifica o algoritmo para segurança
+      algorithms: ['HS256'], // Segurança: Força algoritmo simétrico
+      passReqToCallback: false, // Performance: Não precisamos do request no validate, simplifica
     };
+    
     super(options);
   }
 
-  async validate(payload: JwtPayload) {
-    if (process.env.NODE_ENV !== 'production') {
-      this.logger.debug(`🔑 [JWT STRATEGY] Payload recebido:`, {
-        sub: payload.sub,
-        email: payload.email,
-        role: payload.role,
-        companyId: payload.companyId,
-      });
+  /**
+   * Validação do Token
+   * Executado automaticamente pelo Guard após a assinatura do token ser verificada com sucesso.
+   */
+  async validate(payload: JwtPayload): Promise<ValidatedUser> {
+    const start = performance.now();
+
+    // 1. Validação de Schema do Payload (Fail Fast)
+    if (!payload.sub || !payload.email || !payload.role) {
+      this.logger.warn(`Payload malformado detectado: sub=${payload.sub}`);
+      throw new UnauthorizedException('Token inválido: estrutura incorreta');
     }
 
     try {
-      // Valida o payload básico
-      if (!payload.sub || !payload.email || !payload.role) {
-        this.logger.warn('❌ [JWT STRATEGY] Payload incompleto');
-        throw new UnauthorizedException('Token inválido: payload incompleto');
-      }
-
-      // Verifica se o token está expirado
-      if (payload.exp && Date.now() >= payload.exp * 1000) {
-        this.logger.warn('❌ [JWT STRATEGY] Token expirado');
-        throw new UnauthorizedException('Token expirado');
-      }
-
-      // Valida o usuário com o service
-      const user = await this.authService.validateUser(payload);
+      // 2. Performance: Validação com Cache via AuthService
+      // O 'token' não está disponível aqui (apenas payload), então usamos o verifyToken com lógica interna ou cache manual
+      // Como o verifyToken do service precisa da string do token (que o passport já validou a assinatura),
+      // aqui focamos em validar se o usuário ainda existe e está ativo (usando o Cache do Service).
       
-      if (!user) {
-        this.logger.warn(`❌ [JWT STRATEGY] Usuário não encontrado ou inativo: ${payload.sub}`);
-        throw new UnauthorizedException('Usuário inativo ou não encontrado');
+      // Chamamos um método otimizado que busca por ID (usando cache)
+      const userProfile = await this.authService.getProfile(payload.sub);
+
+      // 3. Validação de Regras de Negócio
+      if (!userProfile) {
+        this.logger.warn(`Usuário não encontrado para ID: ${payload.sub}`);
+        throw new UnauthorizedException('Credenciais revogadas');
       }
 
-      // Verifica se o status do usuário é ativo
-      if (user.status !== UserStatus.ACTIVE) {
-        this.logger.warn(`❌ [JWT STRATEGY] Usuário inativo: ${user.id}`);
-        throw new UnauthorizedException('Usuário inativo');
+      if (userProfile.status !== UserStatus.ACTIVE) {
+        this.logger.warn(`Tentativa de acesso de usuário inativo: ${userProfile.email}`);
+        throw new ForbiddenException('Conta inativa ou bloqueada');
       }
 
-      if (process.env.NODE_ENV !== 'production') {
-        this.logger.debug(`✅ [JWT STRATEGY] Usuário validado:`, {
-          id: user.id,
-          email: user.email,
-          role: user.role,
-          companyId: user.companyId,
-          status: user.status,
-        });
+      // Validação de Consistência (Token vs Banco)
+      // Se o role no token for diferente do banco, força re-login (elevação de privilégio ou downgrade)
+      if (userProfile.role !== payload.role) {
+        this.logger.warn(`Discrepância de Role detectada. Token: ${payload.role}, DB: ${userProfile.role}`);
+        throw new UnauthorizedException('Permissões alteradas, faça login novamente');
       }
 
-      // Retorna o usuário com todas as propriedades necessárias
+      const duration = performance.now() - start;
+      if (duration > 50) { // Monitoramento de latência
+         this.logger.log(`Validação lenta: ${duration.toFixed(2)}ms para user ${payload.sub}`);
+      }
+
+      // 4. Retorno do Objeto User para o Request
       return {
-        sub: user.id,
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        companyId: user.companyId,
-        status: user.status,
-        document: user.document,
-        phone: user.phone,
-        isProfessional: user.isProfessional,
-        professionalRole: user.professionalRole,
+        id: userProfile.id,
+        email: userProfile.email,
+        name: userProfile.name,
+        role: userProfile.role,
+        companyId: userProfile.companyId,
+        status: userProfile.status,
       };
+
     } catch (error) {
-      this.logger.error(`💥 [JWT STRATEGY] Erro ao validar token: ${error.message}`, error.stack);
-      
-      // Se já é uma UnauthorizedException, re-lançar
-      if (error instanceof UnauthorizedException) {
-        throw error;
+      // Logging seletivo para evitar ruído de 'Unauthorized' normais
+      if (!(error instanceof UnauthorizedException) && !(error instanceof ForbiddenException)) {
+        this.logger.error(`Erro inesperado na validação JWT: ${error.message}`, error.stack);
       }
-      
-      // Para outros erros, lançar exceção genérica
-      throw new UnauthorizedException('Falha na validação do token');
+      throw error;
     }
   }
 }

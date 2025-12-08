@@ -400,7 +400,7 @@ model UserNotification {
   readAt    DateTime? @map("lido_em")
   createdAt DateTime  @default(now()) @map("criado_em")
 
-  user           User         @relation(fields: [userId], references: [id])
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId         String       @map("usuario_id") @db.Uuid
   notification   Notification @relation(fields: [notificationId], references: [id])
   notificationId String       @map("notificacao_id") @db.Uuid

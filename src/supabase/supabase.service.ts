@@ -13,9 +13,9 @@ interface MulterFile {
 }
 
 // ADICIONE OS NOVOS BUCKETS
-type BucketType = 
-  | 'task-images' | 'task-audios' | 'task-videos'  // Tarefas existentes
-  | 'flow-images' | 'flow-audios' | 'flow-videos'  // Kanban de produção
+export type BucketType = 
+  | 'task-images' | 'task-audios' | 'task-videos'
+  | 'flow-images' | 'flow-audios' | 'flow-videos'
   | 'flow-templates';
 
 @Injectable()
@@ -180,7 +180,7 @@ export class SupabaseService {
     }
   }
 
-   // Método auxiliar para determinar bucket baseado no tipo
+   // Método auxiliar para determinar bucket
   getBucketForFlowFile(type: 'image' | 'audio' | 'video'): BucketType {
     switch (type) {
       case 'image': return 'flow-images';

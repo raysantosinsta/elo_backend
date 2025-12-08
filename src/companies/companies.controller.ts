@@ -1,52 +1,104 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post } from '@nestjs/common';
-import { Company } from '@prisma/client';
-import { CompaniesService } from './companies.service';
+import { 
+  Body, 
+  Controller, 
+  Delete, 
+  Get, 
+  HttpCode, 
+  HttpStatus, 
+  Param, 
+  Patch, 
+  Post, 
+  Query, 
+  Logger,
+  ParseUUIDPipe,
+  UsePipes,
+  ValidationPipe
+} from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger'; // Para documentação (DevEx)
+import { Company, type User } from '@prisma/client';
+import { CompaniesService, CreateCompanyDto, UpdateCompanyDto, PaginationDto } from './companies.service';
+import { CurrentUser } from 'src/auth/current-user.decorator';
 
+@ApiTags('Companies') // Agrupa no Swagger
 @Controller('companies')
 export class CompaniesController {
+  private readonly logger = new Logger(CompaniesController.name);
+
   constructor(private readonly companiesService: CompaniesService) {}
 
-  // POST /companies
-  // Cria uma nova empresa.
+  /**
+   * POST /companies
+   * Criação com validação estrita (DTO).
+   */
   @Post()
-  @HttpCode(HttpStatus.CREATED) // Retorna 201 Created
-  create(@Body() createCompanyDto: any): Promise<Company> {
+  @ApiOperation({ summary: 'Cria uma nova empresa' })
+  @ApiResponse({ status: 201, description: 'Empresa criada com sucesso.' })
+  @ApiResponse({ status: 400, description: 'Dados inválidos ou CNPJ duplicado.' })
+  @HttpCode(HttpStatus.CREATED)
+  async create(@Body() createCompanyDto: CreateCompanyDto): Promise<Company> {
+    this.logger.log(`Solicitação de criação de empresa recebida: ${createCompanyDto.cnpj}`);
     return this.companiesService.create(createCompanyDto);
   }
 
-  // GET /companies
-  // Lista todas as empresas (ativas por padrão, conforme o service).
+  /**
+   * GET /companies
+   * Listagem paginada para escalabilidade e controle de banda.
+   */
   @Get()
-  findAll(): Promise<Company[]> {
-    return this.companiesService.findAll();
+  @ApiOperation({ summary: 'Lista empresas com paginação' })
+  @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
+  @ApiQuery({ name: 'limit', required: false, type: Number, example: 10 })
+  @ApiResponse({ status: 200, description: 'Lista retornada com metadados de paginação.' })
+  async findAll(@Query() pagination: PaginationDto): Promise<{ data: Partial<Company>[]; total: number; page: number; lastPage: number }> {
+    // O Service já trata os defaults se pagination for vazio
+    return this.companiesService.findAll(pagination);
   }
 
-  // GET /companies/:id
-  // Busca uma empresa específica pelo ID (UUID).
+  /**
+   * GET /companies/:id
+   * Busca por ID com validação de UUID.
+   */
   @Get(':id')
-  findOne(@Param('id') id: string): Promise<Company> {
-    // IMPORTANTE: Removido o '+' pois o ID é uma STRING (UUID)
+  @ApiOperation({ summary: 'Busca uma empresa por ID' })
+  @ApiResponse({ status: 200, description: 'Empresa encontrada.' })
+  @ApiResponse({ status: 404, description: 'Empresa não encontrada.' })
+  @ApiResponse({ status: 400, description: 'ID inválido (não é UUID).' })
+  async findOne(@Param('id', new ParseUUIDPipe()) id: string): Promise<Company> {
     return this.companiesService.findOne(id);
   }
 
-  // PATCH /companies/:id
-  // Atualiza parcialmente uma empresa pelo ID (UUID).
+  /**
+   * PATCH /companies/:id
+   * Atualização com RBAC Real via Token JWT
+   */
   @Patch(':id')
-  update(@Param('id') id: string, @Body() updateCompanyDto: any): Promise<Company> {
-    // IMPORTANTE: Removido o '+' pois o ID é uma STRING (UUID)
-    return this.companiesService.update(id, updateCompanyDto);
+  @ApiOperation({ summary: 'Atualiza dados de uma empresa' })
+  @ApiResponse({ status: 200, description: 'Empresa atualizada.' })
+  @ApiResponse({ status: 403, description: 'Proibido: Permissão insuficiente.' })
+  async update(
+    @Param('id', new ParseUUIDPipe()) id: string, 
+    @Body() updateCompanyDto: UpdateCompanyDto,
+    @CurrentUser() user: User // <--- AQUI ESTÁ A MÁGICA: O Nest injeta o usuário logado
+  ): Promise<Company> {
+    
+    this.logger.log(`Usuário ${user.id} (Role: ${user.role}) tentando atualizar empresa ${id}`);
+    
+    // Passamos a role real do usuário extraído do Token
+    return this.companiesService.update(id, updateCompanyDto, user.role);
   }
 
-  // DELETE /companies/:id
-  // Remove (ou inativa) uma empresa pelo ID (UUID).
+  /**
+   * DELETE /companies/:id
+   * Soft Delete com retorno 204 No Content.
+   */
   @Delete(':id')
-  @HttpCode(HttpStatus.NO_CONTENT) // Retorna 204 No Content para exclusões bem-sucedidas
-  remove(@Param('id') id: string): Promise<void> { // Mudança para retornar void ou Promise<Company> (Soft Delete)
-    // IMPORTANTE: Removido o '+' pois o ID é uma STRING (UUID)
-    // Se o service retorna a empresa excluída (soft delete), mantenha o tipo Promise<Company>
-    // Se o service retorna void (hard delete) ou apenas a execução da operação, use Promise<void>
-    return this.companiesService.remove(id).then(() => {
-      // Retorna 204 No Content se o delete foi bem-sucedido.
-    }) as any; // Usando 'as any' para permitir que o 204 funcione corretamente no NestJS, se o service retorna a Company.
+  @ApiOperation({ summary: 'Inativa (Soft Delete) uma empresa' })
+  @ApiResponse({ status: 204, description: 'Empresa inativada com sucesso.' })
+  @ApiResponse({ status: 404, description: 'Empresa não encontrada.' })
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async remove(@Param('id', new ParseUUIDPipe()) id: string): Promise<void> {
+    // O Service agora retorna void e faz apenas o update de status
+    await this.companiesService.remove(id);
+    // O NestJS envia automaticamente o status 204 e corpo vazio quando retorna void
   }
 }

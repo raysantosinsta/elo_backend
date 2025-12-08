@@ -1,160 +1,91 @@
-/* eslint-disable prettier/prettier */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
 import {
-  BadRequestException,
   Body,
   Controller,
-  ForbiddenException,
   Get,
   HttpCode,
   HttpStatus,
-  Param,
+  Logger,
   Post,
   Request,
-  UseGuards
+  UseGuards,
 } from '@nestjs/common';
-import { Public } from 'src/chat/public.decorator';
+import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
+import { UserRole } from '@prisma/client';
+import { Public } from 'src/auth/public.decorator';
+import { RolesGuard } from 'src/auth/roles.guard';
 import { AuthService } from './auth.service';
-import { CreateUserDto } from './dto/create-user.dto';
+import { RefreshTokenDto, VerifyTokenDto } from './dto/auth-payloads.dto';
 import { LoginUserDto } from './dto/login-user.dto';
 import { JwtAuthGuard } from './jwt-auth.guard';
+import { RefreshAuthGuard } from './refresh-auth.guard';
+
+// Interface para tipagem do Request autenticado
+interface RequestWithUser {
+  user: {
+    id: string;
+    role: UserRole;
+    email: string;
+    [key: string]: any;
+  };
+}
 
 @Controller('auth')
+// Governança: Aplica Guards na ordem correta:
+// 1. Throttler (Rate Limit) -> Protege contra ataques
+// 2. JwtAuth (Autenticação) -> Garante quem é o usuário
+// 3. Roles (Autorização) -> Garante o que ele pode fazer
+@UseGuards(ThrottlerGuard, JwtAuthGuard, RolesGuard) 
 export class AuthController {
-  constructor(private authService: AuthService) {}
+  private readonly logger = new Logger(AuthController.name);
 
-  // Rota protegida para criação de usuários por administradores
-  @UseGuards(JwtAuthGuard)
-  @Post('admin/signup')
-  async adminSignUp(@Body() createUserDto: CreateUserDto, @Request() req) {
-    // Verificar se o usuário tem permissão
-    if (!req.user) {
-      throw new ForbiddenException('Usuário não autenticado');
-    }
+  constructor(private readonly authService: AuthService) {}
 
-    // Verificar se é MASTER ou ADMIN
-    if (!['MASTER', 'ADMIN'].includes(req.user.role)) {
-      throw new ForbiddenException(
-        'Apenas usuários MASTER ou ADMIN podem criar usuários',
-      );
-    }
-
-    return this.authService.signUp(createUserDto, req.user);
-  }
 
   @Public()
-  @Post('signup')
-  async signUp(@Body() createUserDto: CreateUserDto) {
-    // Para signup público (se necessário), sem usuário solicitante
-    return this.authService.signUp(createUserDto);
-  }
-
-  @Public()
+  @Throttle({ default: { limit: 10, ttl: 60000 } }) // Resiliência: Proteção contra Brute Force
   @Post('login')
   @HttpCode(HttpStatus.OK)
   async login(@Body() loginUserDto: LoginUserDto) {
-    return this.authService.login(loginUserDto);
+    const start = performance.now();
+    try {
+      const result = await this.authService.login(loginUserDto);
+      
+      this.logger.log({
+        action: 'login_success',
+        email: loginUserDto.email,
+        duration: `${(performance.now() - start).toFixed(2)}ms`
+      });
+      
+      return result;
+    } catch (error) {
+      this.logger.warn(`Login falha: ${loginUserDto.email} - ${error.message}`);
+      throw error;
+    }
   }
 
+  // --- GESTÃO DE SESSÃO (Tokens) ---
+
   @Public()
+  @UseGuards(RefreshAuthGuard) // Usa especificamente o Guard de Refresh
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
-  async refreshTokens(@Body() body: { refreshToken: string }) {
-    if (!body.refreshToken) {
-      throw new BadRequestException('Refresh token é obrigatório');
-    }
-    return this.authService.refreshTokens(body.refreshToken);
+  async refreshTokens(@Body() dto: RefreshTokenDto) {
+    return this.authService.refreshTokens(dto.refreshToken);
   }
 
   @Public()
   @Post('verify-token')
-  async verifyToken(@Body() body: { token: string }) {
-    if (!body.token) {
-      throw new BadRequestException('Token é obrigatório');
-    }
-    return this.authService.verifyToken(body.token);
-  }
-
-  @UseGuards(JwtAuthGuard)
-  @Get('profile')
-  async getProfile(@Request() req: any) {
-    return this.authService.getProfile(req.user.sub);
-  }
-
-  @UseGuards(JwtAuthGuard)
-  @Get('companies')
-  async getCompanies(@Request() req) {
-    // Verificar se o usuário tem permissão (MASTER ou ADMIN)
-    if (!['MASTER', 'ADMIN'].includes(req.user.role)) {
-      throw new ForbiddenException(
-        'Apenas usuários MASTER ou ADMIN podem acessar esta lista',
-      );
-    }
-
-    return this.authService.getCompanies();
-  }
-
-  @UseGuards(JwtAuthGuard)
-  @Get('companies/master')
-  async getCompaniesForMaster(@Request() req) {
-    // Verificar se o usuário é MASTER
-    if (req.user.role !== 'MASTER') {
-      throw new ForbiddenException(
-        'Apenas usuários MASTER podem acessar esta lista completa de empresas',
-      );
-    }
-
-    return this.authService.getCompaniesForMaster();
-  }
-
-  @Public()
-  @Get('professionals/:companyId')
-  async getProfessionals(@Param('companyId') companyId: string) {
-    if (!companyId) {
-      throw new BadRequestException('ID da empresa é obrigatório');
-    }
-    return this.authService.getProfessionals(companyId);
-  }
-
-  // Nova rota para buscar usuário por documento
-  @Public()
-  @Get('document/:document')
-  async findByDocument(@Param('document') document: string) {
-    if (!document) {
-      throw new BadRequestException('Documento é obrigatório');
-    }
-    
-    const user = await this.authService.findByDocument(document);
-    
-    if (!user) {
-      throw new ForbiddenException('Usuário não encontrado ou inativo');
-    }
-    
-    return user;
-  }
-
-  // Nova rota para login por documento
-  @Public()
-  @Post('login/document')
   @HttpCode(HttpStatus.OK)
-  async loginByDocument(@Body() body: { document: string; password: string }) {
-    if (!body.document || !body.password) {
-      throw new BadRequestException('Documento e senha são obrigatórios');
-    }
+  async verifyToken(@Body() dto: VerifyTokenDto) {
+    return this.authService.verifyToken(dto.token);
+  }
 
-    // Primeiro, buscar usuário pelo documento
-    const user = await this.authService.findByDocument(body.document);
-    
-    if (!user) {
-      throw new ForbiddenException('Credenciais inválidas');
-    }
+  // --- PERFIL ---
 
-    // Depois, fazer login com email (já que o login atual usa email)
-    const loginDto: LoginUserDto = {
-      email: user.email,
-      password: body.password,
-    };
-
-    return this.authService.login(loginDto);
+  @Get('profile')
+  async getProfile(@Request() req: RequestWithUser) {
+    return this.authService.getProfile(req.user.id);
   }
 }

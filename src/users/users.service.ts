@@ -1,118 +1,90 @@
-/* eslint-disable prettier/prettier */
-/* eslint-disable @typescript-eslint/ban-ts-comment */
-/* eslint-disable prefer-const */
-/* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
-import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
+import { Prisma, UserRole, UserStatus } from '@prisma/client';
+import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
-import { UpdateUserDto } from './dto/update-user.dto';
-import { UserResponseDto } from './dto/user-response.dto'; 
-import { UserRole, UserStatus, Prisma } from '@prisma/client';
-import * as bcrypt from 'bcrypt';
 import { MentionUserResponseDto } from './dto/mention-user-response.dto';
+import { UpdateUserDto } from './dto/update-user.dto';
+import { UserResponseDto } from './dto/user-response.dto';
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService) { }
+  private readonly logger = new Logger(UsersService.name);
+  private readonly SALT_ROUNDS = 10;
+
+  constructor(private readonly prisma: PrismaService) {}
+
+  // --- Auxiliares Privados ---
 
   private async hashPassword(password: string): Promise<string> {
-    const saltRounds = 10;
-    return bcrypt.hash(password, saltRounds);
+    return bcrypt.hash(password, this.SALT_ROUNDS);
   }
 
   private toResponseDto(user: any): UserResponseDto {
+    // Sanitização final para garantir que password nunca vaze
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { password, ...userWithoutPassword } = user;
     return new UserResponseDto(userWithoutPassword);
   }
 
+  // --- CRUD Operations ---
+
   async create(createUserDto: CreateUserDto): Promise<UserResponseDto> {
-    // Verificar se email já existe
-    const existingUser = await this.prisma.user.findUnique({
-      where: { email: createUserDto.email },
-    });
+    const { email, document, companyId, password } = createUserDto;
 
-    if (existingUser) {
-      throw new ConflictException('Email já está em uso');
-    }
+    // Validações de Negócio (Check-First)
+    const [existingEmail, existingDoc] = await Promise.all([
+      this.prisma.user.findUnique({ where: { email } }),
+      document ? this.prisma.user.findUnique({ where: { document } }) : null,
+    ]);
 
-    // Verificar se documento já existe (se fornecido)
-    if (createUserDto.document) {
-      const existingDocument = await this.prisma.user.findUnique({
-        where: { document: createUserDto.document },
+    if (existingEmail) throw new ConflictException('Email já está em uso');
+    if (existingDoc) throw new ConflictException('Documento já está em uso');
+
+    if (companyId) {
+      const company = await this.prisma.company.findUnique({
+        where: { id: companyId },
       });
-
-      if (existingDocument) {
-        throw new ConflictException('Documento já está em uso');
-      }
+      if (!company) throw new BadRequestException('Empresa não encontrada');
     }
 
-    // Verificar companyId se fornecido
-    if (createUserDto.companyId) {
-      const companyExists = await this.prisma.company.findUnique({
-        where: { id: createUserDto.companyId },
-      });
-
-      if (!companyExists) {
-        throw new BadRequestException('Empresa não encontrada');
-      }
-    }
-
-    // Hash da senha
-    const hashedPassword = await this.hashPassword(createUserDto.password);
+    const hashedPassword = await this.hashPassword(password);
 
     const user = await this.prisma.user.create({
       data: {
         ...createUserDto,
         password: hashedPassword,
-        // CORREÇÃO: Usar UserStatus.ACTIVE (em inglês conforme schema)
         status: createUserDto.status || UserStatus.ACTIVE,
         isProfessional: createUserDto.isProfessional || false,
       },
     });
 
+    this.logger.log(`Usuário criado: ${user.id} (${user.email})`);
     return this.toResponseDto(user);
   }
 
   async findAll(
-    page: number = 1,
-    limit: number = 10,
+    page = 1,
+    limit = 10,
     companyId?: string,
     status?: UserStatus,
     role?: UserRole,
-  ): Promise<{
-    data: UserResponseDto[];
-    total: number;
-    page: number;
-    limit: number;
-    totalPages: number;
-  }> {
+  ) {
     const skip = (page - 1) * limit;
-
-    // CORREÇÃO: Construir where considerando que companyId pode ser null
     const where: Prisma.UserWhereInput = {};
-    
+
     if (companyId) {
-      if (companyId === 'null' || companyId === 'undefined') {
-        where.companyId = null;
-      } else {
-        // Validar se é um UUID válido
-        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-        if (uuidRegex.test(companyId)) {
-          where.companyId = companyId;
-        } else {
-          throw new BadRequestException('ID da empresa inválido');
-        }
-      }
+      where.companyId = companyId === 'null' ? null : companyId;
     }
-    
-    if (status) {
-      where.status = status;
-    }
-    
-    if (role) {
-      where.role = role;
-    }
+    if (status) where.status = status;
+    if (role) where.role = role;
 
     const [users, total] = await Promise.all([
       this.prisma.user.findMany({
@@ -120,20 +92,13 @@ export class UsersService {
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
-        include: {
-          company: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
-        },
+        include: { company: { select: { id: true, name: true } } },
       }),
       this.prisma.user.count({ where }),
     ]);
 
     return {
-      data: users.map(user => this.toResponseDto(user)),
+      data: users.map((u) => this.toResponseDto(u)),
       total,
       page,
       limit,
@@ -144,281 +109,130 @@ export class UsersService {
   async findOne(id: string): Promise<UserResponseDto> {
     const user = await this.prisma.user.findUnique({
       where: { id },
-      include: {
-        company: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
-      },
+      include: { company: { select: { id: true, name: true, email: true } } },
     });
 
-    if (!user) {
-      throw new NotFoundException(`Usuário com ID ${id} não encontrado`);
-    }
-
+    if (!user) throw new NotFoundException(`Usuário ${id} não encontrado`);
     return this.toResponseDto(user);
   }
 
-  async findByEmail(email: string): Promise<UserResponseDto | null> {
-    const user = await this.prisma.user.findUnique({
-      where: { email },
-    });
+  async update(
+    id: string,
+    updateUserDto: UpdateUserDto,
+  ): Promise<UserResponseDto> {
+    const existingUser = await this.prisma.user.findUnique({ where: { id } });
+    if (!existingUser)
+      throw new NotFoundException(`Usuário ${id} não encontrado`);
 
-    return user ? this.toResponseDto(user) : null;
-  }
-
-  async update(id: string, updateUserDto: UpdateUserDto): Promise<UserResponseDto> {
-    // Verificar se usuário existe
-    const existingUser = await this.prisma.user.findUnique({
-      where: { id },
-    });
-
-    if (!existingUser) {
-      throw new NotFoundException(`Usuário com ID ${id} não encontrado`);
-    }
-
-    // Verificar se email já está em uso por outro usuário
+    // Validações de Unicidade apenas se os campos mudaram
     if (updateUserDto.email && updateUserDto.email !== existingUser.email) {
       const emailExists = await this.prisma.user.findUnique({
         where: { email: updateUserDto.email },
       });
-
-      if (emailExists) {
-        throw new ConflictException('Email já está em uso');
-      }
+      if (emailExists) throw new ConflictException('Email já em uso');
     }
 
-    // Verificar se documento já está em uso por outro usuário
-    if (updateUserDto.document && updateUserDto.document !== existingUser.document) {
-      const documentExists = await this.prisma.user.findUnique({
-        where: { document: updateUserDto.document },
-      });
-
-      if (documentExists) {
-        throw new ConflictException('Documento já está em uso');
-      }
-    }
-
-    // Verificar companyId se fornecido
-    if (updateUserDto.companyId && updateUserDto.companyId !== existingUser.companyId) {
-      if (updateUserDto.companyId === 'null' || updateUserDto.companyId === 'undefined') { // @ts-ignore
-        updateUserDto.companyId = null;
-      } else {
-        const companyExists = await this.prisma.company.findUnique({
-          where: { id: updateUserDto.companyId },
-        });
-
-        if (!companyExists) {
-          throw new BadRequestException('Empresa não encontrada');
-        }
-      }
-    }
-
-    // Hash da senha se for fornecida
-    let updateData = { ...updateUserDto };
+    // Preparar dados de atualização
+    const data: Prisma.UserUpdateInput = { ...updateUserDto };
     if (updateUserDto.password) {
-      updateData.password = await this.hashPassword(updateUserDto.password);
+      data.password = await this.hashPassword(updateUserDto.password);
     }
 
-    const user = await this.prisma.user.update({
+    const updatedUser = await this.prisma.user.update({
       where: { id },
-      data: updateData,
-      include: {
-        company: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
-      },
+      data,
+      include: { company: { select: { id: true, name: true } } },
     });
 
-    return this.toResponseDto(user);
+    this.logger.log(`Usuário atualizado: ${id}`);
+    return this.toResponseDto(updatedUser);
   }
 
   async remove(id: string): Promise<void> {
-    // Verificar se usuário existe
-    const existingUser = await this.prisma.user.findUnique({
-      where: { id },
-    });
-
-    if (!existingUser) {
-      throw new NotFoundException(`Usuário com ID ${id} não encontrado`);
+    // Soft Delete preferível, mas mantendo hard delete conforme solicitado
+    try {
+      await this.prisma.user.delete({ where: { id } });
+      this.logger.warn(`Usuário removido: ${id}`);
+    } catch (error) {
+      if ((error as any).code === 'P2025')
+        throw new NotFoundException('Usuário não encontrado');
+      throw error;
     }
-
-    await this.prisma.user.delete({
-      where: { id },
-    });
   }
 
-  async deactivate(id: string): Promise<UserResponseDto> {
-    const user = await this.prisma.user.findUnique({
-      where: { id },
-    });
+  // --- Features Específicas ---
 
-    if (!user) {
-      throw new NotFoundException(`Usuário com ID ${id} não encontrado`);
+  async toggleStatus(id: string, status: UserStatus): Promise<UserResponseDto> {
+    const user = await this.prisma.user.update({
+      where: { id },
+      data: { status },
+    });
+    return this.toResponseDto(user);
+  }
+
+  async searchUsers(
+    query: string,
+    companyId?: string,
+  ): Promise<MentionUserResponseDto[]> {
+    if (!query || query.trim().length < 2) return [];
+
+    const where: Prisma.UserWhereInput = {
+      OR: [
+        { name: { contains: query, mode: 'insensitive' } },
+        { email: { contains: query, mode: 'insensitive' } },
+      ],
+      status: UserStatus.ACTIVE,
+      isProfessional: true, // Apenas profissionais aparecem na busca de menção
+    };
+
+    if (companyId && companyId !== 'null') {
+      where.companyId = companyId;
     }
 
-    // CORREÇÃO: Usar UserStatus.INACTIVE (em inglês conforme schema)
-    const updatedUser = await this.prisma.user.update({
-      where: { id },
-      data: { status: UserStatus.INACTIVE },
-      include: {
-        company: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
+    const users = await this.prisma.user.findMany({
+      where,
+      take: 10, // Performance: Limite hard
+      orderBy: { name: 'asc' },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone: true,
+        professionalRole: true,
+        isProfessional: true,
+        company: { select: { id: true, name: true } },
       },
     });
 
-    return this.toResponseDto(updatedUser);
+    return users.map(
+      (u) =>
+        new MentionUserResponseDto({
+          id: u.id,
+          name: u.name,
+          email: u.email,
+          phone: u.phone,
+          isProfessional: u.isProfessional,
+          // 🛠️ CORREÇÃO AQUI:
+          // Se for null (banco), converte para undefined (DTO)
+          professionalRole: u.professionalRole ?? undefined,
+          company: u.company ?? undefined,
+        }),
+    );
   }
 
-  async activate(id: string): Promise<UserResponseDto> {
-    const user = await this.prisma.user.findUnique({
-      where: { id },
-    });
-
-    if (!user) {
-      throw new NotFoundException(`Usuário com ID ${id} não encontrado`);
-    }
-
-    // CORREÇÃO: Usar UserStatus.ACTIVE (em inglês conforme schema)
-    const updatedUser = await this.prisma.user.update({
-      where: { id },
-      data: { status: UserStatus.ACTIVE },
-      include: {
-        company: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
-      },
-    });
-
-    return this.toResponseDto(updatedUser);
-  }
-
-  async findByCompany(companyId: string, includeWithoutCompany: boolean = false): Promise<UserResponseDto[]> {
-    // CORREÇÃO: Permitir buscar usuários sem empresa também
-    const where: Prisma.UserWhereInput = {};
-    
-    if (companyId === 'null' || companyId === 'undefined') {
-      where.companyId = null;
-    } else {
-      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-      if (!uuidRegex.test(companyId)) {
-        throw new BadRequestException('ID da empresa inválido');
-      }
-      
-      if (includeWithoutCompany) {
-        where.OR = [
-          { companyId },
-          { companyId: null }
-        ];
-      } else {
-        where.companyId = companyId;
-      }
-    }
+  // Mantidos para compatibilidade, mas idealmente usariam o findAll com filtros
+  async findByCompany(
+    companyId: string,
+    includeNull = false,
+  ): Promise<UserResponseDto[]> {
+    const where: Prisma.UserWhereInput = includeNull
+      ? { OR: [{ companyId }, { companyId: null }] }
+      : { companyId };
 
     const users = await this.prisma.user.findMany({
       where,
       orderBy: { name: 'asc' },
     });
-
-    return users.map(user => this.toResponseDto(user));
-  }
-
-  async findByRole(role: UserRole): Promise<UserResponseDto[]> {
-    const users = await this.prisma.user.findMany({
-      where: { role },
-      orderBy: { name: 'asc' },
-    });
-
-    return users.map(user => this.toResponseDto(user));
-  }
-  
-  async searchUsers(query: string, companyId?: string): Promise<MentionUserResponseDto[]> {
-    if (!query || query.trim().length < 2) {
-      return [];
-    }
-
-    const cleanQuery = query.trim().toLowerCase();
-
-    try {
-      const where: Prisma.UserWhereInput = {
-        OR: [
-          { name: { contains: cleanQuery, mode: 'insensitive' } },
-          { email: { contains: cleanQuery, mode: 'insensitive' } },
-        ],
-        isProfessional: true,
-        // CORREÇÃO: Usar UserStatus.ACTIVE (em inglês conforme schema)
-        status: UserStatus.ACTIVE,
-      };
-
-      // CORREÇÃO: Tratar companyId corretamente (pode ser null ou string)
-      if (companyId) {
-        if (companyId === 'null' || companyId === 'undefined') {
-          where.companyId = null;
-        } else {
-          const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-          if (uuidRegex.test(companyId)) {
-            where.companyId = companyId;
-          } else {
-            // Se não for um UUID válido, não aplicar filtro
-            console.warn('CompanyId inválido para busca:', companyId);
-          }
-        }
-      }
-
-      const users = await this.prisma.user.findMany({
-        where,
-        orderBy: [
-          { name: 'asc' },
-          { professionalRole: 'asc' },
-        ],
-        take: 8,
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          phone: true,
-          professionalRole: true,
-          isProfessional: true,
-          company: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
-        },
-      });
-      
-      return users.map(u => new MentionUserResponseDto({
-        id: u.id,
-        name: u.name,
-        email: u.email,
-        phone: u.phone,
-        professionalRole: u.professionalRole ?? undefined,
-        isProfessional: u.isProfessional,
-        company: u.company ? {
-          id: u.company.id,
-          name: u.company.name,
-        } : undefined,
-      }));
-    } catch (error) {
-      console.error('Erro no searchUsers:', error);
-      return [];
-    }
+    return users.map((u) => this.toResponseDto(u));
   }
 }

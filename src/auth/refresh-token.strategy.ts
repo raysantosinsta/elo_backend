@@ -1,139 +1,63 @@
-/* eslint-disable prettier/prettier */
-// /* eslint-disable prettier/prettier */
-// /* eslint-disable @typescript-eslint/require-await */
-// /* eslint-disable @typescript-eslint/no-unsafe-return */
-// /* eslint-disable @typescript-eslint/no-unsafe-member-access */
-// /* eslint-disable @typescript-eslint/no-unsafe-assignment */
-// // auth/refresh-token.strategy.ts
-// import { Strategy, ExtractJwt, StrategyOptionsWithRequest } from 'passport-jwt';
-// import { PassportStrategy } from '@nestjs/passport';
-// import { Injectable, UnauthorizedException, Logger } from '@nestjs/common';
-// import { ConfigService } from '@nestjs/config';
-// import { Request } from 'express';
-// import { UserRole } from '@prisma/client';
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+import { PassportStrategy } from '@nestjs/passport';
+import { ExtractJwt, Strategy } from 'passport-jwt';
+import { Injectable, ForbiddenException, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { Request } from 'express';
+import { UserRole } from '@prisma/client';
 
-// interface RefreshTokenPayload {
-//   sub: string;
-//   email: string;
-//   role: UserRole;
-//   companyId: string | null;
-//   iat?: number;
-//   exp?: number;
-// }
+// Tipagem alinhada com o JwtPayload
+interface RefreshTokenPayload {
+  sub: string;
+  email: string;
+  role: UserRole;
+  companyId: string | null;
+}
 
-// interface ValidatedUser {
-//   userId: string;
-//   email: string;
-//   role: UserRole;
-//   companyId: string | null;
-//   refreshToken: string;
-// }
+@Injectable()
+export class RefreshTokenStrategy extends PassportStrategy(Strategy, 'jwt-refresh') {
+  private readonly logger = new Logger(RefreshTokenStrategy.name);
 
-// @Injectable()
-// export class RefreshTokenStrategy extends PassportStrategy(Strategy, 'jwt-refresh') {
-//   private readonly logger = new Logger(RefreshTokenStrategy.name);
+  constructor(configService: ConfigService) {
+    const secret = configService.get<string>('JWT_REFRESH_SECRET');
+    if (!secret) throw new Error('JWT_REFRESH_SECRET missing');
 
-//   constructor(configService: ConfigService) {
-//     const secret = configService.get<string>('JWT_REFRESH_SECRET');
+    super({
+      jwtFromRequest: ExtractJwt.fromExtractors([
+        (request: Request) => {
+          // Prioridade: Body (SPA) > Header (Mobile/API) > Cookie (Web Legacy)
+          // Isso cobre todos os cenários de clientes modernos
+          let token = request?.body?.refreshToken;
+          if (!token) token = ExtractJwt.fromAuthHeaderAsBearerToken()(request);
+          if (!token) token = request?.cookies?.refresh_token;
+          return token;
+        },
+      ]),
+      secretOrKey: secret,
+      passReqToCallback: true, // Necessário para acessar o token bruto
+      ignoreExpiration: false,
+    });
+  }
+
+  validate(req: Request, payload: RefreshTokenPayload) {
+    // Extração manual para garantir que temos o token string para comparar no banco (se necessário)
+    // Nota: O passport já validou a assinatura e expiração antes de chegar aqui.
     
-//     if (!secret) {
-//       throw new Error('JWT_REFRESH_SECRET is not defined in environment variables');
-//     }
+    const refreshToken = 
+      req.body?.refreshToken || 
+      req.get('Authorization')?.replace('Bearer', '').trim() ||
+      req.cookies?.refresh_token;
 
-//     const options: StrategyOptionsWithRequest = {
-//       jwtFromRequest: ExtractJwt.fromExtractors([
-//         (request: Request) => {
-//           // Tenta extrair do cookie
-//           const token = request?.cookies?.refresh_token || 
-//                        this.extractTokenFromHeader(request);
-          
-//           if (process.env.NODE_ENV !== 'production') {
-//             this.logger.debug(`🔄 [REFRESH STRATEGY] Token extraído: ${token ? 'Present' : 'Null'}`);
-//           }
-          
-//           return token;
-//         },
-//       ]),
-//       secretOrKey: secret,
-//       passReqToCallback: true,
-//       ignoreExpiration: false,
-//       algorithms: ['HS256'],
-//     };
-    
-//     super(options);
-//   }
+    if (!refreshToken) {
+        this.logger.warn(`Refresh Token ausente no request de ${payload.email}`);
+        throw new ForbiddenException('Refresh token malformado');
+    }
 
-//   private extractTokenFromHeader(request: Request): string | null {
-//     const authHeader = request.headers.authorization;
-//     if (!authHeader) {
-//       return null;
-//     }
-    
-//     if (authHeader.startsWith('Bearer ')) {
-//       return authHeader.substring(7);
-//     }
-    
-//     return authHeader;
-//   }
-
-//   async validate(req: Request, payload: RefreshTokenPayload): Promise<ValidatedUser> {
-//     try {
-//       if (process.env.NODE_ENV !== 'production') {
-//         this.logger.debug(`🔄 [REFRESH STRATEGY] Payload recebido:`, {
-//           sub: payload.sub,
-//           email: payload.email,
-//           role: payload.role,
-//         });
-//       }
-
-//       // Valida o payload básico
-//       if (!payload.sub || !payload.email || !payload.role) {
-//         this.logger.warn('❌ [REFRESH STRATEGY] Payload de refresh incompleto');
-//         throw new UnauthorizedException('Refresh token inválido: payload incompleto');
-//       }
-
-//       // Verifica se o token está expirado
-//       if (payload.exp && Date.now() >= payload.exp * 1000) {
-//         this.logger.warn('❌ [REFRESH STRATEGY] Refresh token expirado');
-//         throw new UnauthorizedException('Refresh token expirado');
-//       }
-
-//       // Extrai o token do header ou cookie
-//       let refreshToken = req?.cookies?.refresh_token || null;
-      
-//       if (!refreshToken) {
-//         const authHeader = req.headers.authorization;
-//         if (authHeader) {
-//           refreshToken = authHeader.startsWith('Bearer ') 
-//             ? authHeader.substring(7) 
-//             : authHeader;
-//         }
-//       }
-      
-//       if (!refreshToken) {
-//         this.logger.warn('❌ [REFRESH STRATEGY] Refresh token não encontrado');
-//         throw new UnauthorizedException('Refresh token não encontrado');
-//       }
-
-//       if (process.env.NODE_ENV !== 'production') {
-//         this.logger.debug(`✅ [REFRESH STRATEGY] Refresh token validado para usuário: ${payload.email}`);
-//       }
-
-//       return {
-//         userId: payload.sub,
-//         email: payload.email,
-//         role: payload.role,
-//         companyId: payload.companyId,
-//         refreshToken,
-//       };
-//     } catch (error) {
-//       this.logger.error(`💥 [REFRESH STRATEGY] Erro ao validar refresh token: ${error.message}`);
-      
-//       if (error instanceof UnauthorizedException) {
-//         throw error;
-//       }
-      
-//       throw new UnauthorizedException('Falha na validação do refresh token');
-//     }
-//   }
-// }
+    // Retorna o objeto que será injetado em req.user
+    // O AuthService.refreshTokens usará isso
+    return {
+      ...payload,
+      refreshToken, 
+    };
+  }
+}

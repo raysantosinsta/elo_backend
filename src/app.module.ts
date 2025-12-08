@@ -17,10 +17,18 @@ import { FlowModule } from './flow/flow.module';
 import { ReportsTasksModule } from './reports-tasks/reports-tasks.module';
 import { ReportsFlowModule } from './reports-flow/reports-flow.module';
 import { CompaniesModule } from './companies/companies.module';
+import { APP_GUARD } from '@nestjs/core';
+import { JwtAuthGuard } from './auth/jwt-auth.guard';
+import { CacheModule } from '@nestjs/cache-manager';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }), // carrega .env
+    CacheModule.register({
+      isGlobal: true,
+      ttl: 60000, // Configuração padrão
+      max: 100, // Máximo de itens no cache
+    }),
     PrismaModule,
     SupabaseModule,
     AuthModule,
@@ -38,6 +46,11 @@ import { CompaniesModule } from './companies/companies.module';
     ReportsFlowModule,
     CompaniesModule,
   ],
-  providers: [],
+  providers: [
+    {
+      provide: APP_GUARD,
+      useClass: JwtAuthGuard, // Agora protege tudo por padrão!
+    },
+  ],
 })
 export class AppModule {}

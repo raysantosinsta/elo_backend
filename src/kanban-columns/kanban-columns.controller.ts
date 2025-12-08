@@ -1,108 +1,82 @@
-/* eslint-disable prettier/prettier */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import {
+  BadRequestException,
+  Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseUUIDPipe,
+  Patch,
   Post,
   Put,
-  Delete,
-  Body,
-  Param,
-  Patch,
   UseGuards,
-  Request,
 } from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import type { User } from '@prisma/client';
+import { CurrentUser } from 'src/auth/current-user.decorator';
 import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
+import { CreateKanbanColumnDto, ReorderColumnsDto, UpdateKanbanColumnDto } from './dto/create-kanban-column.dto';
 import { KanbanColumnService } from './kanban-columns.service';
 
-@Controller('kanban-columns')
+@ApiTags('Kanban Columns')
+@ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
+@Controller('kanban-columns')
 export class KanbanColumnController {
   constructor(private readonly kanbanColumnService: KanbanColumnService) {}
 
   @Get()
-  async findAll(@Request() req) {
-    try {
-      const companyId = req.user.companyId;
-      console.log('📥 Requisição para /kanban-columns - companyId:', companyId);
-      
-      if (!companyId) {
-        return {
-          success: false,
-          message: 'CompanyId não encontrado no token',
-          columns: []
-        };
-      }
-
-      const columns = await this.kanbanColumnService.findAll(companyId);
-      
-      return {
-        success: true,
-        message: `Encontradas ${columns.length} colunas`,
-        columns
-      };
-      
-    } catch (error) {
-      console.error('❌ Erro no controller de colunas:', error);
-      return {
-        success: false,
-        message: error.message || 'Erro ao buscar colunas',
-        columns: []
-      };
-    }
+  @ApiOperation({ summary: 'Lista todas as colunas do Kanban da empresa' })
+  async findAll(@CurrentUser() user: User) {
+    if (!user.companyId) throw new BadRequestException('Usuário sem empresa vinculada');
+    
+    // O service agora retorna o array direto (ou cacheado)
+    const columns = await this.kanbanColumnService.findAll(user.companyId);
+    
+    // Mantendo formato { success: true, columns: [] } se o frontend espera isso
+    return { success: true, columns }; 
   }
 
   @Get(':id')
-  async findOne(@Param('id') id: string, @Request() req) {
-    const companyId = req.user.companyId;
-    return this.kanbanColumnService.findOne(id, companyId);
+  @ApiOperation({ summary: 'Busca detalhes de uma coluna' })
+  async findOne(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: User) {
+    if (!user.companyId) throw new BadRequestException('Usuário sem empresa vinculada');
+    return this.kanbanColumnService.findOne(id, user.companyId);
   }
 
   @Post()
-  async create(@Body() createDto: { title: string }, @Request() req) {
-    const companyId = req.user.companyId;
-    const createdById = req.user.id;
-    return this.kanbanColumnService.create(
-      createDto.title,
-      companyId,
-      createdById,
-    );
+  @ApiOperation({ summary: 'Cria uma nova coluna' })
+  async create(@Body() dto: CreateKanbanColumnDto, @CurrentUser() user: User) {
+    if (!user.companyId) throw new BadRequestException('Usuário sem empresa vinculada');
+    return this.kanbanColumnService.create(dto.title, user.companyId, user.id);
   }
 
   @Put(':id')
+  @ApiOperation({ summary: 'Atualiza título/descrição da coluna' })
   async update(
-    @Param('id') id: string,
-    @Body() updateDto: { title: string },
-    @Request() req,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateKanbanColumnDto,
+    @CurrentUser() user: User,
   ) {
-    const companyId = req.user.companyId;
-    return this.kanbanColumnService.update(id, updateDto.title, companyId);
+    if (!user.companyId) throw new BadRequestException('Usuário sem empresa vinculada');
+    // dto.title é opcional no update, passamos undefined se não vier
+    return this.kanbanColumnService.update(id, dto.title, user.companyId, dto.description);
   }
 
   @Delete(':id')
-  async delete(@Param('id') id: string, @Request() req) {
-    try {
-      const companyId = req.user.companyId;
-      console.log(`🗑️ Tentando deletar coluna ${id} da empresa ${companyId}`);
-      console.log('Usuário:', req.user.email);
-
-      const result = await this.kanbanColumnService.delete(id, companyId);
-
-      console.log('✅ Coluna deletada com sucesso');
-      return result;
-    } catch (error) {
-      console.error('❌ Erro ao deletar coluna:', error);
-      throw error; // O NestJS vai lidar com a exception
-    }
+  @ApiOperation({ summary: 'Deleta coluna e move tarefas' })
+  async delete(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: User) {
+    if (!user.companyId) throw new BadRequestException('Usuário sem empresa vinculada');
+    return this.kanbanColumnService.delete(id, user.companyId);
   }
 
   @Patch('reorder')
-  async reorder(
-    @Body() reorderDto: { columns: Array<{ id: string; order: number }> },
-    @Request() req,
-  ) {
-    const companyId = req.user.companyId;
-    return this.kanbanColumnService.reorder(reorderDto.columns, companyId);
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Reordena múltiplas colunas' })
+  async reorder(@Body() dto: ReorderColumnsDto, @CurrentUser() user: User) {
+    if (!user.companyId) throw new BadRequestException('Usuário sem empresa vinculada');
+    return this.kanbanColumnService.reorder(dto.columns, user.companyId);
   }
 }
