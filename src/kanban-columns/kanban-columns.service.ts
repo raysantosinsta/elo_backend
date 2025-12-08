@@ -37,22 +37,22 @@ export class KanbanColumnService {
   constructor(
     private prisma: PrismaService,
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
-  ) {}
+  ) { }
 
   private async invalidateCache(companyId: string) {
     await this.cacheManager.del(`kanban_columns_${companyId}`);
   }
 
   // --- FIND ALL (Com Cache e Auto-Setup) ---
- async findAll(companyId: string) {
+  async findAll(companyId: string) {
     const end = dbLatencyHistogram.labels('findAll').startTimer();
-    
+
     // 1. Tentar Cache
     const cacheKey = `kanban_columns_${companyId}`;
     const cached = await this.cacheManager.get(cacheKey);
     if (cached) {
-        end();
-        return cached;
+      end();
+      return cached;
     }
 
     try {
@@ -129,25 +129,26 @@ export class KanbanColumnService {
   // --- CREATE ---
   async create(title: string, companyId: string, createdById: string) {
     const existing = await this.prisma.kanbanColumn.findFirst({
-        where: { title: { equals: title.trim(), mode: 'insensitive' }, companyId }
+      where: { title: { equals: title.trim(), mode: 'insensitive' }, companyId }
     });
 
     if (existing) throw new BadRequestException('Já existe uma coluna com este título.');
-
+    
+    // Entre todas as colunas dessa empresa, qual é o número mais alto no campo order
     const maxOrder = await this.prisma.kanbanColumn.aggregate({
-        where: { companyId },
-        _max: { order: true }
+      where: { companyId },
+      _max: { order: true }
     });
     const order = (maxOrder._max.order ?? -1) + 1;
 
     const column = await this.prisma.kanbanColumn.create({
-        data: {
-            title: title.trim(),
-            description: `Coluna ${title.trim()}`,
-            order,
-            companyId,
-            createdById
-        }
+      data: {
+        title: title.trim(),
+        description: `Coluna ${title.trim()}`,
+        order,
+        companyId,
+        createdById
+      }
     });
 
     await this.invalidateCache(companyId);
@@ -157,24 +158,24 @@ export class KanbanColumnService {
   // --- UPDATE ---
   async update(id: string, title: string | undefined, companyId: string, description?: string) {
     const data: Prisma.KanbanColumnUpdateInput = {};
-    
+
     if (title) {
-        const existing = await this.prisma.kanbanColumn.findFirst({
-            where: { 
-                title: { equals: title.trim(), mode: 'insensitive' }, 
-                companyId, 
-                id: { not: id } 
-            }
-        });
-        if (existing) throw new BadRequestException('Já existe outra coluna com este título.');
-        data.title = title.trim();
+      const existing = await this.prisma.kanbanColumn.findFirst({
+        where: {
+          title: { equals: title.trim(), mode: 'insensitive' },
+          companyId,
+          id: { not: id }
+        }
+      });
+      if (existing) throw new BadRequestException('Já existe outra coluna com este título.');
+      data.title = title.trim();
     }
 
     if (description !== undefined) data.description = description;
 
     const updated = await this.prisma.kanbanColumn.update({
-        where: { id },
-        data
+      where: { id },
+      data
     });
 
     await this.invalidateCache(companyId);
@@ -184,45 +185,45 @@ export class KanbanColumnService {
   // --- DELETE (Com Migração de Tarefas) ---
   async delete(id: string, companyId: string) {
     const columnToDelete = await this.prisma.kanbanColumn.findUnique({ where: { id } });
-    
+
     if (!columnToDelete || columnToDelete.companyId !== companyId) {
-        throw new NotFoundException('Coluna não encontrada.');
+      throw new NotFoundException('Coluna não encontrada.');
     }
 
     // Estratégia de Fallback: Achar outra coluna para mover as tasks
     const fallbackColumn = await this.prisma.kanbanColumn.findFirst({
-        where: {
-            companyId,
-            id: { not: id },
-            // Prioriza colunas "padrão" ou a primeira disponível
-            OR: [
-                { title: { contains: 'Sem etapa', mode: 'insensitive' } },
-                { order: 0 } 
-            ]
-        },
-        orderBy: { order: 'asc' }
+      where: {
+        companyId,
+        id: { not: id },
+        // Prioriza colunas "padrão" ou a primeira disponível
+        OR: [
+          { title: { contains: 'Sem etapa', mode: 'insensitive' } },
+          { order: 0 }
+        ]
+      },
+      orderBy: { order: 'asc' }
     });
 
     await this.prisma.$transaction(async (tx) => {
-        // 1. Mover tarefas
-        if (fallbackColumn) {
-            await tx.task.updateMany({
-                where: { columnId: id },
-                data: { columnId: fallbackColumn.id }
-            });
-        } 
-        // Se não houver fallback, o CASCADE do banco deletaria as tarefas.
-        // Se quiser evitar isso, precisaria setar columnId = null (se o schema permitir) 
-        // ou impedir a deleção da última coluna.
+      // 1. Mover tarefas
+      if (fallbackColumn) {
+        await tx.task.updateMany({
+          where: { columnId: id },
+          data: { columnId: fallbackColumn.id }
+        });
+      }
+      // Se não houver fallback, o CASCADE do banco deletaria as tarefas.
+      // Se quiser evitar isso, precisaria setar columnId = null (se o schema permitir) 
+      // ou impedir a deleção da última coluna.
 
-        // 2. Deletar Coluna
-        await tx.kanbanColumn.delete({ where: { id } });
+      // 2. Deletar Coluna
+      await tx.kanbanColumn.delete({ where: { id } });
     });
 
     await this.invalidateCache(companyId);
-    return { 
-        message: 'Coluna deletada.', 
-        tasksMovedTo: fallbackColumn?.title || 'Nenhuma (ou excluídas)' 
+    return {
+      message: 'Coluna deletada.',
+      tasksMovedTo: fallbackColumn?.title || 'Nenhuma (ou excluídas)'
     };
   }
 
@@ -231,20 +232,20 @@ export class KanbanColumnService {
     // Validação de Segurança
     const ids = columns.map(c => c.id);
     const count = await this.prisma.kanbanColumn.count({
-        where: { id: { in: ids }, companyId }
+      where: { id: { in: ids }, companyId }
     });
 
     if (count !== columns.length) {
-        throw new BadRequestException('Tentativa de reordenar colunas inválidas.');
+      throw new BadRequestException('Tentativa de reordenar colunas inválidas.');
     }
 
     await this.prisma.$transaction(
-        columns.map(col => 
-            this.prisma.kanbanColumn.update({
-                where: { id: col.id },
-                data: { order: col.order }
-            })
-        )
+      columns.map(col =>
+        this.prisma.kanbanColumn.update({
+          where: { id: col.id },
+          data: { order: col.order }
+        })
+      )
     );
 
     await this.invalidateCache(companyId);
@@ -252,11 +253,11 @@ export class KanbanColumnService {
   }
 
   async findOne(id: string, companyId: string) {
-      const column = await this.prisma.kanbanColumn.findFirst({
-          where: { id, companyId },
-          include: { tasks: { include: { assignedTo: true } } }
-      });
-      if(!column) throw new NotFoundException('Coluna não encontrada');
-      return column;
+    const column = await this.prisma.kanbanColumn.findFirst({
+      where: { id, companyId },
+      include: { tasks: { include: { assignedTo: true } } }
+    });
+    if (!column) throw new NotFoundException('Coluna não encontrada');
+    return column;
   }
 }

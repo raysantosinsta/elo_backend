@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import { NotificationType, Prisma, TaskStatus } from '@prisma/client';
 import type { Cache } from 'cache-manager';
+import { Type } from 'class-transformer';
 import {
   IsArray,
   IsDateString,
@@ -40,7 +41,7 @@ export class CreateTaskDto {
   @IsOptional() @IsUUID() assignedToId?: string;
   @IsUUID() @IsNotEmpty() companyId: string;
   @IsUUID() @IsNotEmpty() createdById: string;
-  @IsOptional() @IsInt() priority?: number;
+  @IsOptional() @IsInt() @Type(() => Number) priority?: number;
   @IsOptional() @IsDateString() scheduledAt?: string | Date;
   @IsOptional() @IsUUID() routeId?: string;
   @IsOptional() @IsInt() columnOrder?: number;
