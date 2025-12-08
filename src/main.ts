@@ -1,10 +1,10 @@
 /* eslint-disable prettier/prettier */
+import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module';
-import { Logger, ValidationPipe, VersioningType } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
-import compression = require('compression');
+import { AppModule } from './app.module';
+// import compression = require('compression');
 
 async function bootstrap() {
   // 1. Logger de Inicialização (Observabilidade)
@@ -23,7 +23,7 @@ async function bootstrap() {
   
   // CORS configurado para produção (aceita variáveis de ambiente)
   app.enableCors({
-    origin: process.env.CORS_ORIGINS?.split(',') || ['http://localhost:3001', 'http://127.0.0.1:3001'],
+    origin: '*',
     credentials: true,
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     preflightContinue: false,
@@ -32,7 +32,7 @@ async function bootstrap() {
 
   // 3. Performance & Custo (Cost Control)
   // Compressão Gzip diminui o tamanho do payload JSON (menos custo de banda / resposta mais rápida)
-  app.use(compression());
+  // app.use(compression());
 
   // 4. Governança e Evolução de API (Evolution)
   // Prefixo global evita conflitos com frontends servidos no mesmo domínio

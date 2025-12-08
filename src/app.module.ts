@@ -20,6 +20,7 @@ import { CompaniesModule } from './companies/companies.module';
 import { APP_GUARD } from '@nestjs/core';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { CacheModule } from '@nestjs/cache-manager';
+import { AppController } from './app.controller';
 
 @Module({
   imports: [
@@ -46,6 +47,8 @@ import { CacheModule } from '@nestjs/cache-manager';
     ReportsFlowModule,
     CompaniesModule,
   ],
+  // ADICIONE O CONTROLLER AQUI
+  controllers: [AppController],
   providers: [
     {
       provide: APP_GUARD,
@@ -53,4 +56,4 @@ import { CacheModule } from '@nestjs/cache-manager';
     },
   ],
 })
-export class AppModule {}
+export class AppModule { }
