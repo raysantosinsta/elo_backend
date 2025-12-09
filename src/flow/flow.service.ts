@@ -87,6 +87,59 @@ export class FlowService {
     return flows;
   }
 
+  // Adicione isso dentro da classe FlowService
+
+  async updateFlowItem(
+    companyId: string,
+    itemId: string,
+    userId: string,
+    data: any // Idealmente use um UpdateFlowItemDto
+  ) {
+    // 1. Verifica se o item existe
+    const item = await this.prisma.flowItem.findFirst({
+      where: { id: itemId, companyId },
+    });
+
+    if (!item) throw new NotFoundException('Item não encontrado');
+
+    // 2. Prepara os dados (converte data se necessário)
+    const updateData: any = {
+      title: data.title,
+      orderNumber: data.orderNumber,
+      productRef: data.productRef,
+      quantity: data.quantity,
+      priority: data.priority,
+      // description: data.description,
+      assignedToId: data.assignedToId || null, // Se vier vazio, remove o responsável
+      updatedAt: new Date(),
+    };
+
+    // Se tiver data de vencimento
+    if (data.dueDate) {
+      updateData.dueDate = new Date(data.dueDate);
+    } else if (data.dueDate === null || data.dueDate === '') {
+       updateData.dueDate = null;
+    }
+
+    // Se o frontend mandar stageId e for diferente, atualizamos (opcional aqui, já que existe o drag and drop)
+    if (data.stageId && data.stageId !== item.stageId) {
+       updateData.stageId = data.stageId;
+       // Nota: Ao mudar de etapa via modal, a ordem pode ficar desajustada. 
+       // O ideal é usar o drag-and-drop, mas isso garante que a edição funcione.
+    }
+
+    // 3. Atualiza no banco
+    const updated = await this.prisma.flowItem.update({
+      where: { id: itemId },
+      data: updateData,
+    });
+
+    // 4. Invalida cache
+    await this.invalidateFlowCache(companyId, item.flowId);
+
+    return updated;
+  }
+
   async getKanbanBoard(flowId: string, companyId: string) {
     const cacheKey = `flow_board_${flowId}`;
     const cached = await this.cacheManager.get(cacheKey);

@@ -45,6 +45,23 @@ export class FlowController {
     return this.flowService.getFlows(req.user.companyId);
   }
 
+  // Adicione isso dentro da classe FlowController
+
+  @Put('items/:itemId')
+  @ApiOperation({ summary: 'Atualiza dados de um item (título, descrição, etc)' })
+  async updateItem(
+    @Req() req: any,
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+    @Body() body: any,
+  ) {
+    return this.flowService.updateFlowItem(
+      req.user.companyId,
+      itemId,
+      req.user.id,
+      body,
+    );
+  }
+
   @Get(':flowId/board')
   async getKanbanBoard(
     @Req() req: any,
