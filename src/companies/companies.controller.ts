@@ -1,23 +1,22 @@
-import { 
-  Body, 
-  Controller, 
-  Delete, 
-  Get, 
-  HttpCode, 
-  HttpStatus, 
-  Param, 
-  Patch, 
-  Post, 
-  Query, 
+/* eslint-disable prettier/prettier */
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
   Logger,
+  Param,
   ParseUUIDPipe,
-  UsePipes,
-  ValidationPipe
+  Patch,
+  Post,
+  Query
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger'; // Para documentação (DevEx)
+import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger'; // Para documentação (DevEx)
 import { Company, type User } from '@prisma/client';
-import { CompaniesService, CreateCompanyDto, UpdateCompanyDto, PaginationDto } from './companies.service';
 import { CurrentUser } from 'src/auth/current-user.decorator';
+import { CompaniesService, CreateCompanyDto, PaginationDto, UpdateCompanyDto } from './companies.service';
 
 @ApiTags('Companies') // Agrupa no Swagger
 @Controller('companies')

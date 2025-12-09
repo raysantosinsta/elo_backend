@@ -1,3 +1,8 @@
+/* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import {
   BadRequestException,
@@ -213,21 +218,24 @@ export class CompaniesService {
     return company;
   }
 
+  // src/companies/companies.service.ts
+
   /**
-   * U - Update com verificação de Permissão (RBAC)
-   * Agora aceita o argumento opcional currentUserRole
+   * U - Update with RBAC permission check
+   * Accepts optional currentUserRole
    */
   async update(id: string, updateCompanyDto: UpdateCompanyDto, currentUserRole?: string): Promise<Company> {
-    // 1. Autorização (RBAC)
-    // Se uma role for passada, validamos. Se não for (ex: chamada interna), deixamos passar ou bloqueamos conforme sua regra.
-    if (currentUserRole && currentUserRole !== 'ADMIN' && currentUserRole !== 'MANAGER') {
-        // Importe ForbiddenException de @nestjs/common se preferir o status 403
+    // 1. Authorization (RBAC)
+    // Updated to match Prisma Enum: MASTER, ADMIN, EMPLOYER
+    // Only MASTER and ADMIN should be allowed to update company details
+    if (currentUserRole && currentUserRole !== 'ADMIN' && currentUserRole !== 'MASTER') {
+        // ForbiddenException is more appropriate for 403, but sticking to your existing BadRequest for consistency or change to Forbidden
         throw new BadRequestException('Permissão insuficiente para alterar empresas.');
     }
 
     await this.findOne(id); 
 
-    // Sanitização de CNPJ
+    // CNPJ Sanitization
     if (updateCompanyDto.cnpj) {
         updateCompanyDto.cnpj = updateCompanyDto.cnpj.replace(/\D/g, '');
     }
@@ -237,12 +245,13 @@ export class CompaniesService {
         where: { id },
         data: {
             ...updateCompanyDto,
-            status: updateCompanyDto.status 
+            // Only update status if it is provided in the DTO
+            ...(updateCompanyDto.status && { status: updateCompanyDto.status }),
         },
       })
     );
 
-    // Invalidação de Cache
+    // Cache Invalidation
     await this.cacheManager.del(`company_${id}`);
 
     try {
@@ -252,7 +261,7 @@ export class CompaniesService {
             await Promise.all(keys.map(k => this.cacheManager.del(k)));
         }
     } catch (e) {
-        this.logger.error('Falha ao limpar cache de listas no update', e);
+        this.logger.error('Failed to clear list cache on update', e);
     }
 
     return updated;

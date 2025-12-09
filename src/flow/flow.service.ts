@@ -100,48 +100,40 @@ export class FlowService {
     companyId: string,
     itemId: string,
     userId: string,
-    data: any // Idealmente use um UpdateFlowItemDto
+    data: any 
   ) {
-    // 1. Verifica se o item existe
     const item = await this.prisma.flowItem.findFirst({
       where: { id: itemId, companyId },
     });
 
     if (!item) throw new NotFoundException('Item não encontrado');
 
-    // 2. Prepara os dados (converte data se necessário)
     const updateData: any = {
       title: data.title,
       orderNumber: data.orderNumber,
       productRef: data.productRef,
       quantity: data.quantity,
       priority: data.priority,
-      // description: data.description,
-      assignedToId: data.assignedToId || null, // Se vier vazio, remove o responsável
+      description: data.description, // <--- ADICIONADO: Campo description
+      assignedToId: data.assignedToId || null,
       updatedAt: new Date(),
     };
 
-    // Se tiver data de vencimento
     if (data.dueDate) {
       updateData.dueDate = new Date(data.dueDate);
     } else if (data.dueDate === null || data.dueDate === '') {
        updateData.dueDate = null;
     }
 
-    // Se o frontend mandar stageId e for diferente, atualizamos (opcional aqui, já que existe o drag and drop)
     if (data.stageId && data.stageId !== item.stageId) {
        updateData.stageId = data.stageId;
-       // Nota: Ao mudar de etapa via modal, a ordem pode ficar desajustada. 
-       // O ideal é usar o drag-and-drop, mas isso garante que a edição funcione.
     }
 
-    // 3. Atualiza no banco
     const updated = await this.prisma.flowItem.update({
       where: { id: itemId },
       data: updateData,
     });
 
-    // 4. Invalida cache
     await this.invalidateFlowCache(companyId, item.flowId);
 
     return updated;
@@ -224,52 +216,38 @@ export class FlowService {
     return { success: true };
   }
 
-  // ============ ITENS (Transacional) ============
-
-  // No arquivo flow.service.ts
-
-  // No arquivo flow.service.ts
+ 
 
   async createFlowItem(companyId: string, flowId: string, userId: string, dto: CreateFlowItemDto) {
     return this.prisma.$transaction(async (tx) => {
-      // O TypeScript infere que isso é (string | undefined)
       let targetStageId = dto.stageId;
 
-      // 1. Decidir qual etapa usar
       if (targetStageId) {
         const stageExists = await tx.flowStage.findFirst({
           where: { id: targetStageId, flowId }
         });
-        
-        if (!stageExists) {
-            // CORREÇÃO: Use undefined em vez de null
-            targetStageId = undefined; 
-        }
+        if (!stageExists) targetStageId = undefined; 
       }
 
-      // 2. Se não tem etapa definida (ou a enviada era inválida), pega a primeira do fluxo
-      // undefined é "falsy", então entra no if normalmente
       if (!targetStageId) {
         const firstStage = await tx.flowStage.findFirst({
           where: { flowId },
           orderBy: { order: 'asc' }
         });
-
-        if (!firstStage) throw new BadRequestException('Este fluxo não possui etapas. Crie uma etapa (ex: CORTE) antes de criar itens.');
+        if (!firstStage) throw new BadRequestException('Este fluxo não possui etapas.');
         targetStageId = firstStage.id;
       }
 
-      // 3. Calcular a ordem dentro da etapa selecionada
       const lastItem = await tx.flowItem.findFirst({
         where: { stageId: targetStageId },
         orderBy: { orderInStage: 'desc' },
         select: { orderInStage: true }
       });
 
-      // 4. Criar o item
       const newItem = await tx.flowItem.create({
         data: {
           title: dto.title,
+          description: dto.description, // <--- ADICIONADO: Campo description
           orderNumber: dto.orderNumber || `ORD-${Date.now()}`,
           productRef: dto.productRef || 'N/A',
           quantity: dto.quantity || 1,
@@ -278,7 +256,7 @@ export class FlowService {
           assignedToId: dto.assignedToId,
           flowId,
           companyId,
-          stageId: targetStageId!, // O "!" garante ao TS que aqui já temos um valor (string)
+          stageId: targetStageId!,
           orderInStage: (lastItem?.orderInStage ?? -1) + 1,
           enteredAt: new Date()
         }
@@ -333,7 +311,10 @@ export class FlowService {
 
   // ============ STAGES ============
 
-  async createStage(companyId: string, flowId: string, name: string) {
+  // ============ STAGES ============
+
+  // Atualizado para aceitar o parâmetro opcional 'color'
+  async createStage(companyId: string, flowId: string, name: string, color?: string) {
     const end = dbLatency.labels('createStage').startTimer();
     
     try {
@@ -359,7 +340,8 @@ export class FlowService {
           name,
           flowId,
           order: newOrder,
-          color: '#CBD5E1' // Cor padrão (cinza claro)
+          // ALTERAÇÃO: Usa a cor enviada ou o Azul Escuro (#2C3E50) como padrão
+          color: color || '#2C3E50' 
         }
       });
 

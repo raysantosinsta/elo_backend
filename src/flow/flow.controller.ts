@@ -1,3 +1,4 @@
+/* eslint-disable prettier/prettier */
 import {
   Controller,
   Post,
@@ -31,7 +32,7 @@ import { CreateFlowDto, CreateFlowItemDto } from './dto/create-flow.dto';
 @Controller('flow')
 export class FlowController {
   private readonly logger = new Logger(FlowController.name); // Logger para debug
-  constructor(private readonly flowService: FlowService) {}
+  constructor(private readonly flowService: FlowService) { }
 
   @Post()
   @ApiOperation({ summary: 'Cria um novo fluxo de produção' })
@@ -139,10 +140,13 @@ export class FlowController {
   async createStage(
     @Req() req: any,
     @Param('flowId', ParseUUIDPipe) flowId: string,
-    @Body() body: { name: string }, // Ou crie um DTO específico: CreateStageDto
+    // ALTERAÇÃO: Adicionado 'color' ao Body
+    @Body() body: { name: string; color?: string },
   ) {
-    return this.flowService.createStage(req.user.companyId, flowId, body.name);
+    // ALTERAÇÃO: Passando a cor para o serviço
+    return this.flowService.createStage(req.user.companyId, flowId, body.name, body.color);
   }
+
   @Put('stages/:stageId')
   @ApiOperation({ summary: 'Atualiza uma etapa existente' })
   async updateStage(

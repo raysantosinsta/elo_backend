@@ -694,7 +694,7 @@ model FlowItem {
   productRef String @map("ref_produto") @db.VarChar(50)
   quantity   Int    @default(1) @map("quantidade")
   priority   Int    @default(3) @map("prioridade")
-  // description String? @map("descricao") @db.Text
+  description String? @map("descricao") @db.Text
 
   // Fluxo
   flowId String      @map("fluxo_id") @db.Uuid
