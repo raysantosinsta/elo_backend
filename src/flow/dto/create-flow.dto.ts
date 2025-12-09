@@ -1,3 +1,4 @@
+/* eslint-disable prettier/prettier */
 import { IsNotEmpty, IsString, IsOptional, IsNumber, IsUUID, IsDateString, Min } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
@@ -69,4 +70,10 @@ export class CreateFlowItemDto {
   @IsOptional()
   @IsString()
   description?: string;
+
+  // --- ADICIONE ISTO AQUI EMBAIXO ---
+  @ApiProperty({ required: false, description: 'ID da etapa onde o item será criado' })
+  @IsOptional()
+  @IsUUID()
+  stageId?: string;
 }
