@@ -12,9 +12,11 @@ import { Logger } from '@nestjs/common';
 @WebSocketGateway({
   namespace: 'ws', // Namespace específico
   cors: {
-    origin: ['http://localhost:3001', 'http://127.0.0.1:3001'],
+    origin: '*',
+    methods: ['GET', 'POST'],
     credentials: true,
   },
+  transports: ['websocket', 'polling'],
   pingInterval: 10000,
   pingTimeout: 5000,
 })

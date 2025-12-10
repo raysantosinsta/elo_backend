@@ -29,7 +29,7 @@ async function bootstrap() {
 
   // CORS configurado para produção (aceita variáveis de ambiente)
   app.enableCors({
-    origin: '*',
+    origin: true,
     credentials: true,
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     preflightContinue: false,
