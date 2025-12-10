@@ -216,7 +216,62 @@ export class FlowService {
     return { success: true };
   }
 
- 
+ // Adicione este método dentro da classe FlowService em flow.service.ts
+
+  // ============ DELETE MEDIA ============
+  async deleteMedia(
+    companyId: string,
+    itemId: string,
+    type: 'image' | 'audio' | 'video',
+    mediaId: string
+  ) {
+    // 1. Identificar o item e a mídia correta
+    let mediaRecord;
+    let modelDelegate;
+
+    if (type === 'image') {
+      modelDelegate = this.prisma.flowImage;
+    } else if (type === 'audio') {
+      modelDelegate = this.prisma.flowAudio;
+    } else if (type === 'video') {
+      modelDelegate = this.prisma.flowVideo;
+    } else {
+      throw new BadRequestException('Tipo de mídia inválido');
+    }
+
+    // Busca o registro garantindo que pertence à empresa e ao item
+    mediaRecord = await modelDelegate.findFirst({
+      where: { id: mediaId, itemId, companyId }
+    });
+
+    if (!mediaRecord) {
+      throw new NotFoundException('Mídia não encontrada');
+    }
+
+    // 2. Deletar do Supabase (Storage)
+    if (mediaRecord.url) {
+      await this.supabase.deleteFlowFile(mediaRecord.url).catch(err => 
+        this.logger.error(`Erro ao deletar arquivo do storage: ${mediaRecord.url}`, err)
+      );
+    }
+
+    // 3. Deletar do Banco de Dados (Prisma)
+    await modelDelegate.delete({
+      where: { id: mediaId }
+    });
+
+    // 4. Invalidar Cache para atualizar o Frontend
+    const item = await this.prisma.flowItem.findUnique({ 
+        where: { id: itemId },
+        select: { flowId: true }
+    });
+    
+    if (item) {
+        await this.invalidateFlowCache(companyId, item.flowId);
+    }
+
+    return { success: true };
+  }
 
   async createFlowItem(companyId: string, flowId: string, userId: string, dto: CreateFlowItemDto) {
     return this.prisma.$transaction(async (tx) => {

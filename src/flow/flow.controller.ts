@@ -46,6 +46,28 @@ export class FlowController {
     return this.flowService.getFlows(req.user.companyId);
   }
 
+  // No arquivo flow.controller.ts, adicione este método dentro da classe:
+
+  @Delete('items/:itemId/media/:type/:mediaId')
+  @ApiOperation({ summary: 'Remove uma mídia específica (audio, video, image) de um item' })
+  async deleteMedia(
+    @Req() req: any,
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+    @Param('type') type: string,
+    @Param('mediaId', ParseUUIDPipe) mediaId: string,
+  ) {
+    if (!['image', 'audio', 'video'].includes(type)) {
+       throw new BadRequestException('Tipo inválido');
+    }
+
+    return this.flowService.deleteMedia(
+      req.user.companyId,
+      itemId,
+      type as 'image' | 'audio' | 'video',
+      mediaId
+    );
+  }
+
   // Adicione isso dentro da classe FlowController
 
   @Put('items/:itemId')

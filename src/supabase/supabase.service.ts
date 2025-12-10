@@ -305,7 +305,7 @@ async uploadFlowFile(
       'task-videos': ['video/mp4', 'video/mpeg', 'video/ogg', 'video/webm', 'video/quicktime'],
       // ADICIONE OS NOVOS
       'flow-images': ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml'],
-      'flow-audios': ['audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/mp4', 'audio/aac', 'audio/x-m4a'],
+      'flow-audios': ['audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/mp4', 'audio/aac', 'audio/x-m4a', 'audio/webm'],
       'flow-videos': ['video/mp4', 'video/mpeg', 'video/ogg', 'video/webm', 'video/quicktime', 'video/x-msvideo'],
       'flow-templates': ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain']
     };
