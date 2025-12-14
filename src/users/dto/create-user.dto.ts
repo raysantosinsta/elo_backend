@@ -19,16 +19,14 @@ export class CreateUserDto {
   @IsEnum(UserRole)
   role: UserRole;
 
-  @IsBoolean()
-  @IsOptional()
-  isProfessional?: boolean;
+
 
   @IsOptional()
   @IsString()
   professionalRole?: string;
 
   @IsString()
-  phone: string;
+  contact: string;
 
   @IsOptional()
   @IsString()
@@ -37,4 +35,5 @@ export class CreateUserDto {
   @IsEnum(UserStatus)
   @IsOptional()
   status?: UserStatus;
+
 }

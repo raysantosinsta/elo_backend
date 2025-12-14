@@ -3,8 +3,7 @@ export class MentionUserResponseDto {
   id: string;
   name: string;
   email: string;
-  phone: string;
-  isProfessional: boolean;
+  contact: string;
   professionalRole?: string;
   company?: {
     id: string;

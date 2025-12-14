@@ -1,6 +1,6 @@
 /* eslint-disable prettier/prettier */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
-import { PrismaClient, UserRole, UserStatus, CompanyStatus } from '@prisma/client';
+import { PrismaClient, UserRole, UserStatus, SimpleStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
@@ -19,7 +19,7 @@ async function main() {
     where: { cnpj: '12.345.678/0001-90' },
     update: {},
     create: {
-      status: CompanyStatus.ATIVO,
+      status: SimpleStatus.ACTIVE,
       name: 'Empresa Demo',
       cnpj: '12.345.678/0001-90',
       telefone: '(11) 99999-9999',
@@ -48,8 +48,7 @@ async function main() {
       password: masterPassword,
       role: UserRole.MASTER,
       status: UserStatus.ACTIVE,
-      phone: '(11) 99999-9999',
-      isProfessional: true,
+      contact: '(11) 99999-9999',
       professionalRole: 'Desenvolvedor Full Stack',
       companyId: company.id, // Vincula à empresa criada acima
     },

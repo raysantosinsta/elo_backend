@@ -10,7 +10,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { CompanyStatus, UserRole, UserStatus } from '@prisma/client';
+import { SimpleStatus, UserRole, UserStatus } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { LoginUserDto } from './dto/login-user.dto';
@@ -135,7 +135,7 @@ export class AuthService {
         ]);
 
         if (!company) throw new NotFoundException('Empresa não encontrada');
-        if (company.status !== CompanyStatus.ATIVO) throw new BadRequestException('Empresa inativa');
+        if (company.status !== SimpleStatus.ACTIVE) throw new BadRequestException('Empresa inativa');
         if (existingUser) throw new ConflictException('Email já cadastrado');
         if (existingDoc) throw new ConflictException('Documento já cadastrado');
 
@@ -148,11 +148,10 @@ export class AuthService {
             password: hashedPassword,
             name,
             document: document || null,
-            phone: phone || 'Não informado',
+            contact: phone || 'Não informado',
             companyId,
             role: role as UserRole,
             status: UserStatus.ACTIVE,
-            isProfessional,
             professionalRole: isProfessional ? professionalRole : null,
           },
           include: {

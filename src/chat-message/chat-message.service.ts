@@ -25,7 +25,6 @@ export class ChatMessageService {
             const user = await this.prisma.user.findFirst({
                 where: { 
                     name: { contains: mention.name, mode: 'insensitive' },
-                    isProfessional: true,
                     status: UserStatus.ACTIVE 
                 },
                 select: { id: true, name: true }
@@ -49,7 +48,7 @@ export class ChatMessageService {
       },
       include: {
         sender: { select: { id: true, name: true, role: true, professionalRole: true } },
-        mentionedProfessional: { select: { id: true, name: true, phone: true } }
+        mentionedProfessional: { select: { id: true, name: true, contact: true } }
       }
     });
 

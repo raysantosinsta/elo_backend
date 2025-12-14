@@ -8,9 +8,8 @@ export class UserResponseDto {
   email: string;
   document?: string;
   role: UserRole;
-  isProfessional: boolean;
   professionalRole?: string;
-  phone: string;
+  contact: string;
   companyId?: string;
   createdAt: Date;
   updatedAt: Date;

@@ -1,5 +1,5 @@
 /* eslint-disable prettier/prettier */
-import { CompanyStatus, UserRole, UserStatus } from "@prisma/client";
+import { SimpleStatus, UserRole, UserStatus } from "@prisma/client";
 
 // auth/types/index.ts
 export interface UserProfile {
@@ -16,7 +16,7 @@ export interface UserProfile {
   company?: {
     id: string;
     name: string;
-    status: CompanyStatus;
+    status: SimpleStatus;
   } | null;
   createdAt?: Date;
 }

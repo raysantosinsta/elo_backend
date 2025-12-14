@@ -12,7 +12,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { Company, CompanyStatus } from '@prisma/client'; // Importando Enums gerados
+import { Company, SimpleStatus } from '@prisma/client'; // Importando Enums gerados
 import type { Cache } from 'cache-manager';
 import {
   IsEmail,
@@ -50,7 +50,7 @@ export class CreateCompanyDto {
   @IsOptional() @IsUUID() userCreateId?: string;
   
   // Status é opcional na criação, pois o banco tem default(ATIVO)
-  @IsOptional() @IsEnum(CompanyStatus) status?: CompanyStatus;
+  @IsOptional() @IsEnum(SimpleStatus) status?: SimpleStatus;
 }
 
 export class UpdateCompanyDto {
@@ -68,7 +68,7 @@ export class UpdateCompanyDto {
   @IsOptional() @IsString() ramoAtividade?: string;
   
   @IsOptional() @IsUUID() userUpdateId?: string;
-  @IsOptional() @IsEnum(CompanyStatus) status?: CompanyStatus;
+  @IsOptional() @IsEnum(SimpleStatus) status?: SimpleStatus;
 }
 
 export class PaginationDto {
@@ -140,10 +140,10 @@ export class CompaniesService {
     const sanitizedCnpj = createCompanyDto.cnpj.replace(/\D/g, '');
 
     // Idempotência
-    const existing = await this.prisma.company.findUnique({ where: { cnpj: sanitizedCnpj } });
-    if (existing) {
-        throw new BadRequestException('Empresa já cadastrada com este CNPJ.');
-    }
+   const existing = await this.prisma.company.findUnique({ where: { cnpj: sanitizedCnpj } });
+if (existing) {
+    throw new BadRequestException('Empresa já cadastrada com este CNPJ.'); // ISSO GERA O 400
+}
 
     const company = await this.executeWithResilience('create_company', () => 
       this.prisma.company.create({
@@ -151,7 +151,7 @@ export class CompaniesService {
           ...createCompanyDto,
           cnpj: sanitizedCnpj,
           // Garante que o status usa o Enum correto se não for passado
-          status: createCompanyDto.status || CompanyStatus.ATIVO,
+          status: createCompanyDto.status || SimpleStatus.ACTIVE,
         },
       })
     );
@@ -178,7 +178,7 @@ export class CompaniesService {
         this.prisma.company.findMany({
           skip,
           take: limit,
-          where: { status: CompanyStatus.ATIVO }, // Uso do Enum correto
+          where: { status: SimpleStatus.ACTIVE }, // Uso do Enum correto
           select: {
              id: true,
              name: true,
@@ -191,7 +191,7 @@ export class CompaniesService {
              // Selecione apenas o necessário para listagens
           }
         }),
-        this.prisma.company.count({ where: { status: CompanyStatus.ATIVO } }),
+        this.prisma.company.count({ where: { status: SimpleStatus.ACTIVE } }),
       ])
     );
 
@@ -277,7 +277,7 @@ export class CompaniesService {
       this.prisma.company.update({
         where: { id },
         data: { 
-            status: CompanyStatus.INATIVO,
+            status: SimpleStatus.INACTIVE,
         }, 
       })
     );

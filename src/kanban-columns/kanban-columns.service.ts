@@ -85,7 +85,7 @@ export class KanbanColumnService {
         tasks: {
           orderBy: { columnOrder: 'asc' },
           include: {
-            assignedTo: { select: { id: true, name: true, email: true } },
+            userAssigned: { select: { id: true, name: true, email: true } },
             // Otimização: Não trazer histórico ou anexos pesados na listagem
           },
         },
@@ -119,7 +119,7 @@ export class KanbanColumnService {
             description: col.description,
             order: index,
             companyId,
-            createdById: companyUser.id,
+            userCreateId: companyUser.id,
           },
         }),
       ),
@@ -147,8 +147,7 @@ export class KanbanColumnService {
         description: `Coluna ${title.trim()}`,
         order,
         companyId,
-        createdById
-      }
+        userCreateId: createdById,}
     });
 
     await this.invalidateCache(companyId);
@@ -255,7 +254,7 @@ export class KanbanColumnService {
   async findOne(id: string, companyId: string) {
     const column = await this.prisma.kanbanColumn.findFirst({
       where: { id, companyId },
-      include: { tasks: { include: { assignedTo: true } } }
+      include: { tasks: { include: { userAssigned: true } } }
     });
     if (!column) throw new NotFoundException('Coluna não encontrada');
     return column;

@@ -1,6 +1,6 @@
 /* eslint-disable prettier/prettier */
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { CompanyStatus } from '@prisma/client';
+import { SimpleStatus } from '@prisma/client';
 import { 
   IsEmail, 
   IsEnum, 
@@ -111,10 +111,10 @@ export class CreateCompanyDto {
 
   @ApiPropertyOptional({ 
     description: 'Status da empresa', 
-    enum: CompanyStatus, 
-    default: CompanyStatus.ATIVO 
+    enum: SimpleStatus, 
+    default: SimpleStatus.ACTIVE 
   })
   @IsOptional()
-  @IsEnum(CompanyStatus, { message: 'Status inválido. Use ATIVO ou INATIVO.' })
-  status?: CompanyStatus;
+  @IsEnum(SimpleStatus, { message: 'Status inválido. Use ATIVO ou INATIVO.' })
+  status?: SimpleStatus;
 }
