@@ -1,32 +1,33 @@
+/* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-redundant-type-constituents */
+/* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable @typescript-eslint/require-await */
 import {
-  BadRequestException,
-  Controller,
-  ForbiddenException,
-  Get,
-  Query,
-  UseGuards,
+    BadRequestException,
+    Controller,
+    ForbiddenException,
+    Get,
+    Query,
+    UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { IsDateString, IsEnum, IsOptional, IsUUID } from 'class-validator';
+import { IsDateString, IsEnum, IsOptional } from 'class-validator'; // Removido IsUUID
 
 import type { User, UserRole } from '@prisma/client';
 import { TaskStatus } from '@prisma/client';
-import { CurrentUser } from 'src/auth/current-user.decorator'; // Assumindo este decorator
+import { CurrentUser } from 'src/auth/current-user.decorator'; 
 import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
 import { ReportsTasksService } from './reports-tasks.service';
 
 // --- DTO para Query Parameters ---
 class TaskReportQueryDto {
-    @IsOptional()
-    @IsUUID('4', { message: 'companyId deve ser um UUID válido.' })
-    companyId?: string;
+    // REMOVIDO: companyId para impedir que o usuário filtre por outra empresa na API
 
     @IsOptional()
     @IsEnum(TaskStatus, { message: `Status deve ser um dos seguintes: ${Object.values(TaskStatus).join(', ')} ou 'all'.` })
-    status?: TaskStatus | 'all'; // Recebe TaskStatus ou 'all'
+    status?: TaskStatus | 'all';
 
     @IsOptional()
-    // Prioridade é um número de 1 a 5 no seu schema, mas a query pode receber como string.
     @IsEnum(['1', '2', '3', '4', '5', 'all'], { message: 'Prioridade deve ser um número entre 1 e 5, ou "all".' })
     priority?: string | 'all';
 
@@ -47,33 +48,26 @@ export class ReportsTasksController {
     constructor(private readonly reportsTasksService: ReportsTasksService) { }
 
     @Get('tasks')
-    @ApiOperation({ summary: 'Gera relatório de tarefas com filtros por status, prioridade e data.' })
+    @ApiOperation({ summary: 'Gera relatório de tarefas da empresa do usuário logado.' })
     async getTasksReport(
         @CurrentUser() user: User,
         @Query() query: TaskReportQueryDto,
     ) {
-        // 1. Verificação de Permissões (Apenas MASTER e ADMIN podem acessar)
+        // 1. Verificação de Permissões
         const allowedRoles: UserRole[] = ['MASTER', 'ADMIN'];
         if (!allowedRoles.includes(user.role)) {
             throw new ForbiddenException('Apenas usuários com as roles MASTER ou ADMIN podem acessar relatórios de tarefas.');
         }
 
-        // 2. Determinação do ID da Empresa
-        let targetCompanyId: string;
+        // 2. SEGURANÇA: Força o ID da empresa do usuário logado.
+        // Independentemente da Role (mesmo MASTER), ele só vê os dados da sua própria empresa (contexto do token).
+        const targetCompanyId = user.companyId;
 
-        if (user.role === 'MASTER' && query.companyId) {
-            // MASTER pode consultar qualquer empresa
-            targetCompanyId = query.companyId;
-        } else if (user.companyId) {
-            // ADMIN consulta apenas sua própria empresa
-            targetCompanyId = user.companyId;
-        } else {
-            // Caso de segurança: ADMIN sem companyId ou MASTER sem companyId na query.
-            throw new BadRequestException('ID da empresa não fornecido ou inválido para a sua role.');
+        if (!targetCompanyId) {
+            throw new BadRequestException('Usuário não está vinculado a nenhuma empresa.');
         }
         
         // 3. Chamada ao Serviço
-        // O ReportsTasksService espera { status, priority, startDate, endDate } no segundo argumento.
         return this.reportsTasksService.getTasksReport(targetCompanyId, {
             status: query.status,
             priority: query.priority,
@@ -82,10 +76,13 @@ export class ReportsTasksController {
         });
     }
 
-    // Rota placeholder para evitar erro 404 no botão de exportar
     @Get('tasks/export')
-    @ApiOperation({ summary: 'Rota placeholder para exportação de tarefas.' })
-    async exportTasks() {
+    @ApiOperation({ summary: 'Exportação de tarefas da empresa do usuário logado.' })
+    async exportTasks(
+        @CurrentUser() user: User,
+        // @Query() query: TaskReportQueryDto // Se precisar passar filtros para o export
+    ) {
+        // Lógica de segurança deve ser a mesma aqui: usar user.companyId
         return { message: "Funcionalidade de exportação em desenvolvimento" };
     }
 }

@@ -170,8 +170,8 @@ export class TasksController {
 
     // --- READ OPERATIONS ---
 
-    @Get()
-    @ApiOperation({ summary: 'Lista tarefas paginadas, filtradas por empresa, coluna e busca' })
+   @Get()
+    @ApiOperation({ summary: 'Lista tarefas paginadas da empresa do usuário' })
     @ApiQuery({ name: 'page', required: false, type: Number })
     @ApiQuery({ name: 'limit', required: false, type: Number })
     @ApiQuery({ name: 'columnId', required: false, type: String })
@@ -182,10 +182,10 @@ export class TasksController {
         @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
         @Query('columnId') columnId?: string,
         @Query('search') search?: string,
-        // @Query('status') status?: TaskStatus, // Removido do Service, então removido daqui
     ) {
         if (!user.companyId) throw new BadRequestException('Empresa não identificada.');
 
+        // SEGURANÇA: Passamos o companyId do usuário logado
         return this.tasksService.findAllPaginated({
             companyId: user.companyId,
             page,
@@ -196,12 +196,15 @@ export class TasksController {
     }
 
     @Get(':id')
-    @ApiOperation({ summary: 'Busca uma tarefa pelo ID com todos os detalhes' })
-    async findOne(@Param('id', ParseUUIDPipe) id: string) {
-        // A segurança de pertencimento à empresa pode ser adicionada aqui,
-        // mas por enquanto confiamos no Service para lançar NotFound se não existir
-        // (ou ajuste o findOne do service para receber companyId)
-        return this.tasksService.findOne(id);
+    @ApiOperation({ summary: 'Busca uma tarefa por ID (Apenas se pertencer à empresa)' })
+    async findOne(
+        @Param('id', ParseUUIDPipe) id: string,
+        @CurrentUser() user: User // Injetamos o usuário aqui
+    ) {
+        if (!user.companyId) throw new BadRequestException('Empresa não identificada.');
+
+        // SEGURANÇA: Passamos o ID e o CompanyId para o service
+        return this.tasksService.findOne(id, user.companyId);
     }
 
     // --- DELETE ---

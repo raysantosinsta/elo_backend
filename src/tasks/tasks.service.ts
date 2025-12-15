@@ -482,12 +482,23 @@ export class TasksService {
         };
     }
 
-    async findOne(id: string) {
-        const task = await this.prisma.task.findUnique({
-            where: { id },
+    async findOne(id: string, companyId: string) {
+        // SEGURANÇA: Mudamos de findUnique para findFirst
+        // O Prisma vai buscar onde ID bate E CompanyId bate.
+        const task = await this.prisma.task.findFirst({
+            where: { 
+                id: id,
+                companyId: companyId // <--- A Chave da segurança
+            },
             include: this.getTaskIncludeDetails(),
         });
-        if (!task) throw new NotFoundException('Task não encontrada');
+
+        if (!task) {
+            // Se a tarefa existir em outra empresa, o findFirst retorna null
+            // e lançamos NotFound, garantindo que o usuário não saiba nem que ela existe.
+            throw new NotFoundException('Task não encontrada.');
+        }
+        
         return task;
     }
 

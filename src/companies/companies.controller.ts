@@ -11,12 +11,11 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
-  Query,
-  UseGuards // Adicionei para garantir
+  Query
 } from '@nestjs/common';
-import { ApiOperation, ApiQuery, ApiResponse, ApiTags, ApiBearerAuth } from '@nestjs/swagger';
-import { Company } from '@prisma/client';
+import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import type { User } from '@prisma/client';
+import { Company } from '@prisma/client';
 import { CurrentUser } from 'src/auth/current-user.decorator';
 import { CompaniesService, CreateCompanyDto, PaginationDto, UpdateCompanyDto } from './companies.service';
 // Importe seus Guards se não estiverem aplicados globalmente ou na classe
@@ -48,14 +47,18 @@ export class CompaniesController {
     return this.companiesService.create(createCompanyDto);
   }
 
-  // ... (Mantenha os outros métodos findAll, findOne, update, remove iguais)
   @Get()
-  @ApiOperation({ summary: 'Lista empresas com paginação' })
+  @ApiOperation({ summary: 'Lista empresas do usuário logado com paginação' })
   @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
   @ApiQuery({ name: 'limit', required: false, type: Number, example: 10 })
-  @ApiResponse({ status: 200, description: 'Lista retornada com metadados de paginação.' })
-  async findAll(@Query() pagination: PaginationDto): Promise<{ data: Partial<Company>[]; total: number; page: number; lastPage: number }> {
-    return this.companiesService.findAll(pagination);
+  @ApiResponse({ status: 200, description: 'Lista retornada.' })
+  async findAll(
+    @Query() pagination: PaginationDto,
+    @CurrentUser() user: User // <--- ADICIONADO: Pega o usuário do Token
+  ): Promise<{ data: Partial<Company>[]; total: number; page: number; lastPage: number }> {
+    
+    // Passamos o user.id para o serviço filtrar
+    return this.companiesService.findAll(pagination, user.id); 
   }
 
   @Get(':id')

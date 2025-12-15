@@ -162,23 +162,37 @@ if (existing) {
     return company;
   }
 
-  async findAll(pagination: PaginationDto = { page: 1, limit: 10 }): Promise<{ data: Partial<Company>[]; total: number; page: number; lastPage: number }> {
-    // Correção do erro TS18048: Definindo valores default na desestruturação
+  async findAll(
+    pagination: PaginationDto = { page: 1, limit: 10 },
+    userId?: string 
+  ): Promise<{ data: Partial<Company>[]; total: number; page: number; lastPage: number }> {
+    
     const { page = 1, limit = 10 } = pagination;
     const skip = (page - 1) * limit;
-    const cacheKey = `companies_list_${page}_${limit}`;
+
+    // IMPORTANTE: O cache deve ser único por usuário agora!
+    // Se não colocar userId na chave, o usuário B verá as empresas do usuário A que ficaram em cache.
+    const cacheKey = `companies_list_${userId || 'all'}_${page}_${limit}`;
 
     const cached = await this.cacheManager.get(cacheKey);
     if (cached) {
-        return cached as any;
+      return cached as any;
     }
+
+    // Configura o filtro WHERE
+    const whereCondition = {
+        status: SimpleStatus.ACTIVE,
+        // Se o userId foi passado, filtra por ele.
+        // Verifique no seu schema.prisma se o campo é 'userCreateId' ou 'userId'
+        ...(userId ? { userCreateId: userId } : {}), 
+    };
 
     const [data, total] = await this.executeWithResilience('find_all', () => 
       this.prisma.$transaction([
         this.prisma.company.findMany({
           skip,
           take: limit,
-          where: { status: SimpleStatus.ACTIVE }, // Uso do Enum correto
+          where: whereCondition, // <--- Filtro aplicado aqui
           select: {
              id: true,
              name: true,
@@ -188,14 +202,16 @@ if (existing) {
              telefone: true,
              cidade: true,
              estado: true
-             // Selecione apenas o necessário para listagens
-          }
+          },
+          orderBy: { name: 'asc' } // Boa prática: ordenar listas paginadas
         }),
-        this.prisma.company.count({ where: { status: SimpleStatus.ACTIVE } }),
+        this.prisma.company.count({ where: whereCondition }), // <--- Contagem também filtrada
       ])
     );
 
     const result = { data, total, page, lastPage: Math.ceil(total / limit) };
+    
+    // Salva no cache
     await this.cacheManager.set(cacheKey, result, 60000);
 
     return result;
@@ -217,8 +233,6 @@ if (existing) {
     await this.cacheManager.set(cacheKey, company, 300000); 
     return company;
   }
-
-  // src/companies/companies.service.ts
 
   /**
    * U - Update with RBAC permission check

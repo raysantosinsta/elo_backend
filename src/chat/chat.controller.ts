@@ -7,18 +7,16 @@ import {
   Param,
   Delete,
   Req,
-  UseGuards, // 1. Certifique-se que está importado
+  UseGuards,
   HttpCode,
   HttpStatus,
   UnauthorizedException,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import { ChatService } from './chat.service';
 import { CreateChatDto } from './dto/create-chat.dto';
 import { ChatResponseDto } from './dto/chat-response.dto';
-import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
-
-// 🔥 2. IMPORTANTE: Importe o seu Guard real aqui.
-// Se você não tiver o arquivo, me avise que eu crio ele para você.
+import { JwtAuthGuard } from 'src/auth/jwt-auth.guard'; // Ajuste o caminho se necessário
 
 interface RequestWithUser extends Request {
   user: {
@@ -30,7 +28,7 @@ interface RequestWithUser extends Request {
 }
 
 @Controller('chats')
-@UseGuards(JwtAuthGuard) // 🔥 3. CRUCIAL: Isso popula o req.user
+@UseGuards(JwtAuthGuard)
 export class ChatController {
   constructor(private readonly chatService: ChatService) {}
 
@@ -41,11 +39,11 @@ export class ChatController {
   ): Promise<ChatResponseDto> {
     const user = req.user;
 
-    // Validação Defensiva (Safety Check)
-    if (!user || !user.companyId) {
-      throw new UnauthorizedException('Sessão inválida ou expirada.');
+    if (!user?.companyId) {
+      throw new UnauthorizedException('Usuário sem empresa vinculada.');
     }
 
+    // SEGURANÇA 1: Forçamos o companyId do usuário logado
     const secureDto = {
       ...createChatDto,
       companyId: user.companyId,
@@ -58,44 +56,42 @@ export class ChatController {
   async findAll(@Req() req: RequestWithUser): Promise<ChatResponseDto[]> {
     const user = req.user;
 
-    // 🔥 O ERRO 500 ACONTECIA AQUI
-    // Se o Guard estiver desligado, 'user' é undefined e user.companyId quebra o servidor.
-    if (!user || !user.companyId) {
-       console.error("❌ Erro: req.user não encontrado. Verifique o JWT.");
-       throw new UnauthorizedException('Usuário não autenticado.');
+    if (!user?.companyId) {
+      throw new UnauthorizedException('Usuário sem empresa vinculada.');
     }
     
-    // Ignoramos o companyId que vem da URL (query param) por segurança
-    // e usamos estritamente o do Token (req.user)
+    // SEGURANÇA 2: Buscamos APENAS chats onde companyId == user.companyId
     return this.chatService.findAll(user.companyId);
   }
 
   @Get(':id')
   async findOne(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string, // Valida se é UUID
     @Req() req: RequestWithUser,
   ): Promise<ChatResponseDto> {
     const user = req.user;
     
-    if (!user || !user.companyId) {
+    if (!user?.companyId) {
       throw new UnauthorizedException('Acesso negado.');
     }
 
+    // SEGURANÇA 3: Passamos o ID do chat E o ID da empresa
     return this.chatService.findOne(id, user.companyId);
   }
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Req() req: RequestWithUser,
   ): Promise<void> {
     const user = req.user;
 
-    if (!user) {
+    if (!user?.companyId) {
         throw new UnauthorizedException('Sessão inválida.');
     }
 
+    // SEGURANÇA 4: Passamos ID, Empresa e Role para validação completa
     await this.chatService.remove(id, user.companyId, user.role);
   }
 }
