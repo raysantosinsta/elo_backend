@@ -21,6 +21,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { CacheModule } from '@nestjs/cache-manager';
 import { AppController } from './app.controller';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler'; // Importe o Guard
 
 @Module({
   imports: [
@@ -28,11 +29,15 @@ import { AppController } from './app.controller';
     CacheModule.register({
       isGlobal: true,
       ttl: 60000, // Configuração padrão
-      max: 100, // Máximo de itens no cache
+      max: 1000, // Máximo de itens no cache
     }),
+    ThrottlerModule.forRoot([{
+      ttl: 60000,
+      limit: 100, 
+    }]), // Configuração padrão
     PrismaModule,
-    SupabaseModule,
     AuthModule,
+    SupabaseModule,
     KanbanColumnsModule,
     TasksModule,
     UsersModule,
@@ -53,6 +58,10 @@ import { AppController } from './app.controller';
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard, // Agora protege tudo por padrão!
+    },
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard, 
     },
   ],
 })

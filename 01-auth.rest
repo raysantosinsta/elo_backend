@@ -1,0 +1,90 @@
+@baseUrl = http://localhost:3000
+@contentType = application/json
+
+# --- VARIÁVEIS DE AMBIENTE (Preencha aqui para facilitar) ---
+@email = santosray62@gmail.com
+@password = Blessedhr10@
+
+# Cole os tokens aqui após fazer o login para usar nas rotas protegidas
+@accessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkMmRjM2M5Zi04N2JkLTQ3M2QtYjVhYy0zNzNhZjAyY2ZlZjkiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiIzMjhmNWYwOC1kOGEzLTQ2MzctYmJjYy1hOWQ1NmI2Zjg0NTYiLCJpYXQiOjE3NjU5MDYxNzAsImV4cCI6MTc2NTkwNzA3MH0.K430QVjOFHhqI_NoRHyHAB1FPUPc-biB3Nwv1qC-jaw
+
+@refreshToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkMmRjM2M5Zi04N2JkLTQ3M2QtYjVhYy0zNzNhZjAyY2ZlZjkiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiIzMjhmNWYwOC1kOGEzLTQ2MzctYmJjYy1hOWQ1NmI2Zjg0NTYiLCJpYXQiOjE3NjU5MDYxNzAsImV4cCI6MTc2NjUxMDk3MH0.H9FbDphU_MzQE6urZUQ2rPiWzsg-C_TRyA9rMbIl6y4
+
+
+# ==============================================================================
+# 1. AUTENTICAÇÃO (LOGIN)
+# ==============================================================================
+
+### Login - Sucesso
+# Endpoint protegido por Throttle (Rate Limit)
+# Retorna: accessToken (15min) e refreshToken (7dias)
+POST {{baseUrl}}/auth/login
+Content-Type: {{contentType}}
+
+{
+    "email": "{{email}}",
+    "password": "{{password}}"
+}
+
+### Login - Teste de Senha Errada
+# Deve retornar 401 Unauthorized
+POST {{baseUrl}}/auth/login
+Content-Type: {{contentType}}
+
+{
+    "email": "{{email}}",
+    "password": "senha_errada_123"
+}
+
+
+# ==============================================================================
+# 2. PERFIL E DADOS (Rotas Protegidas)
+# ==============================================================================
+
+### Obter Perfil do Usuário
+# Requer: Header Authorization com Access Token válido
+# Validação: Passa pelo JwtAuthGuard e RolesGuard
+GET {{baseUrl}}/auth/profile
+Authorization: Bearer {{accessToken}}
+
+
+# ==============================================================================
+# 3. GESTÃO DE SESSÃO (Tokens)
+# ==============================================================================
+
+### Verificar Validade do Token
+# Endpoint usado pelo Middleware do Next.js
+# Verifica se o token ainda é válido e se o usuário está ATIVO no banco
+POST {{baseUrl}}/auth/verify-token
+Content-Type: {{contentType}}
+
+{
+    "token": "{{accessToken}}"
+}
+
+### Atualizar Tokens (Refresh)
+# Usado quando o accessToken expira (401).
+# Requer: Refresh Token válido no corpo.
+# Retorna: Novo par de tokens.
+POST {{baseUrl}}/auth/refresh
+Content-Type: {{contentType}}
+Authorization: Bearer {{refreshToken}}
+
+{
+    "refreshToken": "{{refreshToken}}"
+}
+
+
+# ==============================================================================
+# 4. TESTES DE SEGURANÇA E REGISTRO (Opcionais)
+# ==============================================================================
+
+### Tentar Acessar Perfil SEM Token
+# Deve retornar 401 Unauthorized
+GET {{baseUrl}}/auth/profile
+
+### Tentar Acessar Perfil com Token Inválido/Expirado
+# Deve retornar 401 Unauthorized
+GET {{baseUrl}}/auth/profile
+Authorization: Bearer token_falso_123456
+

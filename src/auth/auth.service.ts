@@ -1,24 +1,24 @@
+/* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import {
-  BadRequestException,
-  ConflictException,
   Inject,
   Injectable,
   InternalServerErrorException,
   Logger,
-  NotFoundException,
-  UnauthorizedException,
+  UnauthorizedException
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { SimpleStatus, UserRole, UserStatus } from '@prisma/client';
-import { PrismaService } from 'src/prisma/prisma.service';
-import { CreateUserDto } from './dto/create-user.dto';
-import { LoginUserDto } from './dto/login-user.dto';
-import { AuthResponse, JwtPayload, UserProfile, UserTokens } from './types';
+import { UserStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
-import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
 import { randomUUID } from 'crypto';
+import { PrismaService } from 'src/prisma/prisma.service';
+import { LoginUserDto } from './dto/login-user.dto';
+import { AuthResponse, JwtPayload, UserProfile, UserTokens } from './types';
 
 
 
@@ -27,9 +27,7 @@ export class AuthService {
   private readonly logger = new Logger(AuthService.name);
   
   // Constantes de negócio
-  private readonly SALT_ROUNDS = 10;
   private readonly CACHE_TTL_SECONDS = 300; // 5 minutos
-  private readonly MAX_RETRIES = 3;
 
   constructor(
     private prisma: PrismaService,
@@ -53,131 +51,14 @@ export class AuthService {
       status: user.status,
       companyId: user.companyId,
       document: user.document || null,
-      phone: user.phone || 'Não informado',
-      isProfessional: user.isProfessional || false,
+      contact: user.phone || 'Não informado',
+      // isProfessional: user.isProfessional || false,
       professionalRole: user.professionalRole || null,
       company: user.company || null,
       createdAt: user.createdAt,
     };
   }
-
-  /**
-   * Padrão de Resiliência: Retry com Exponential Backoff simplificado
-   * Útil para falhas transientes de conexão com o Banco de Dados.
-   */
-  private async executeWithRetry<T>(
-    operation: () => Promise<T>,
-    context: string,
-  ): Promise<T> {
-    let lastError: any;
-    for (let i = 0; i < this.MAX_RETRIES; i++) {
-      try {
-        return await operation();
-      } catch (error) {
-        lastError = error;
-        // Se for erro de negócio (4xx), não tenta novamente
-        if (error instanceof BadRequestException || error instanceof ConflictException || error instanceof NotFoundException || error instanceof UnauthorizedException) {
-          throw error;
-        }
-        
-        const delay = Math.pow(2, i) * 100; // 100ms, 200ms, 400ms
-        this.logger.warn(`Tentativa ${i + 1} falhou para ${context}. Retentando em ${delay}ms...`);
-        await new Promise((resolve) => setTimeout(resolve, delay));
-      }
-    }
-    this.logger.error(`Todas as tentativas falharam para ${context}`, lastError);
-    throw lastError;
-  }
-
-  // --- Funcionalidades Públicas ---
-
-  async signUp(
-    createUserDto: CreateUserDto,
-    requestingUser?: UserProfile,
-  ): Promise<AuthResponse> {
-    const traceId = this.getTraceId();
-    const start = performance.now();
-    
-    this.logger.log({ traceId, method: 'signUp', message: 'Iniciando registro de usuário' });
-
-    const {
-      email,
-      password,
-      name,
-      companyId,
-      role = 'EMPLOYER',
-      phone,
-      document,
-      isProfessional = false,
-      professionalRole,
-    } = createUserDto;
-
-    // 1. Validação Robusta e Sanitização
-    if (!companyId) throw new BadRequestException('ID da empresa é obrigatório');
-    
-    // Validação de segurança: RBAC para criação de usuários privilegiados
-    if (!requestingUser && ['ADMIN', 'MASTER'].includes(role)) {
-      this.logger.warn({ traceId, message: 'Tentativa não autorizada de criar ADMIN/MASTER público' });
-      throw new UnauthorizedException('Permissão insuficiente para criar perfil administrativo');
-    }
-
-    if (requestingUser && !['MASTER', 'ADMIN'].includes(requestingUser.role)) {
-       throw new UnauthorizedException('Apenas MASTER ou ADMIN podem criar usuários');
-    }
-
-    return this.executeWithRetry(async () => {
-      try {
-        // Validações de Negócio (Check-First)
-        const [company, existingUser, existingDoc] = await Promise.all([
-          this.prisma.company.findUnique({ where: { id: companyId } }),
-          this.prisma.user.findUnique({ where: { email } }),
-          document ? this.prisma.user.findUnique({ where: { document } }) : null
-        ]);
-
-        if (!company) throw new NotFoundException('Empresa não encontrada');
-        if (company.status !== SimpleStatus.ACTIVE) throw new BadRequestException('Empresa inativa');
-        if (existingUser) throw new ConflictException('Email já cadastrado');
-        if (existingDoc) throw new ConflictException('Documento já cadastrado');
-
-        // Segurança: Hash de Senha
-        const hashedPassword = await bcrypt.hash(password, this.SALT_ROUNDS);
-
-        const user = await this.prisma.user.create({
-          data: {
-            email,
-            password: hashedPassword,
-            name,
-            document: document || null,
-            contact: phone || 'Não informado',
-            companyId,
-            role: role as UserRole,
-            status: UserStatus.ACTIVE,
-            professionalRole: isProfessional ? professionalRole : null,
-          },
-          include: {
-            company: { select: { id: true, name: true, status: true } },
-          },
-        });
-
-        const userProfile = this.mapToUserProfile(user);
-        const tokens = await this.generateTokens(userProfile);
-
-        this.logger.log({ 
-          traceId, 
-          method: 'signUp', 
-          duration: performance.now() - start, 
-          status: 'success', 
-          userId: user.id 
-        });
-
-        return { user: userProfile, ...tokens };
-
-      } catch (error) {
-        this.handlePrismaError(error);
-        throw error;
-      }
-    }, 'signUp');
-  }
+ 
 
   async login(loginUserDto: LoginUserDto): Promise<AuthResponse> {
     const traceId = this.getTraceId();
@@ -338,21 +219,4 @@ export class AuthService {
     return { accessToken, refreshToken };
   }
 
-  private handlePrismaError(error: any) {
-    // Tipagem segura para erro
-    const code = (error as any)?.code;
-    const meta = (error as any)?.meta;
-
-    this.logger.error(`Database Error: ${code}`, error);
-
-    if (code === 'P2002') {
-      const field = meta?.target?.[0];
-      if (field === 'email') throw new ConflictException('Este e-mail já está em uso.');
-      if (field === 'document') throw new ConflictException('Este documento já está cadastrado.');
-      throw new ConflictException('Registro duplicado detectado.');
-    }
-    if (code === 'P2025') {
-      throw new NotFoundException('Recurso solicitado não foi encontrado.');
-    }
-  }
 }

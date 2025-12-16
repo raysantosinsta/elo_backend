@@ -3,43 +3,35 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
-import { CacheModule } from '@nestjs/cache-manager'; // Já adicionado no passo anterior
-import { ThrottlerModule } from '@nestjs/throttler'; // <--- 1. Importe isso
+// REMOVIDO: CacheModule (Já é global no AppModule)
+// REMOVIDO: ThrottlerModule (Vamos mover pro AppModule para proteger tudo)
 
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './jwt.strategy';
-import { PrismaService } from 'src/prisma/prisma.service';
-import { JwtAuthGuard } from './jwt-auth.guard';
 import { RefreshTokenStrategy } from './refresh-token.strategy';
+import { JwtAuthGuard } from './jwt-auth.guard';
+
+// IMPORTANTE: Importe o Módulo, não o Service direto
+import { PrismaModule } from 'src/prisma/prisma.module'; 
 
 @Module({
   imports: [
     PassportModule,
-    // Configuração do Cache (que você já corrigiu)
-    CacheModule.register({
-        ttl: 300000, 
-        max: 100, 
-    }),
+    PrismaModule, // <--- Importando o módulo garante que usamos a MESMA conexão de banco
     
-    // 2. Adicione a configuração do Throttler (Rate Limit)
-    ThrottlerModule.forRoot([{
-      ttl: 60000, // Janela de tempo: 60 segundos (1 minuto)
-      limit: 100, // Limite padrão seguro: 100 requisições por minuto (os decorators no controller sobrescrevem isso)
-    }]),
-
     JwtModule.register({
       secret: process.env.JWT_SECRET,
-      signOptions: { expiresIn: '30m' },
+      signOptions: { expiresIn: '15m' }, // Ajustei para 15m conforme seu código anterior (segurança)
     }),
   ],
   controllers: [AuthController],
   providers: [
     AuthService,
     JwtStrategy,
-    PrismaService,
     JwtAuthGuard,
     RefreshTokenStrategy
+    // REMOVIDO: PrismaService (Já vem do PrismaModule)
   ],
   exports: [
     AuthService,

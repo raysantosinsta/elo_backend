@@ -11,21 +11,21 @@ export class AppController {
     return {
       status: 'ok',
       timestamp: new Date().toISOString(),
-      service: 'Highlander API',
+      service: 'ELO API',
     };
   }
 
-  @Public()
-  @Get('api/health')
-  apiHealthCheck() {
-    return {
-      status: 'ok',
-      timestamp: new Date().toISOString(),
-      endpoints: {
-        notifications: '/notifications',
-        tasks: '/tasks',
-        auth: '/auth',
-      },
-    };
-  }
+  // @Public()
+  // @Get('api/health')
+  // apiHealthCheck() {
+  //   return {
+  //     status: 'ok',
+  //     timestamp: new Date().toISOString(),
+  //     endpoints: {
+  //       notifications: '/notifications',
+  //       tasks: '/tasks',
+  //       auth: '/auth',
+  //     },
+  //   };
+  // }
 }

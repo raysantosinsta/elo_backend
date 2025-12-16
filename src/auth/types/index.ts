@@ -10,8 +10,8 @@ export interface UserProfile {
   status: UserStatus;
   companyId: string | null;
   document?: string | null;
-  phone: string;
-  isProfessional: boolean; // 🔥 ADICIONE ESTA LINHA
+  contact: string;
+  // isProfessional: boolean; // 🔥 ADICIONE ESTA LINHA
   professionalRole?: string | null; // 🔥 ADICIONE ESTA LINHA
   company?: {
     id: string;

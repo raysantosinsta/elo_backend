@@ -1,3 +1,6 @@
+/* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import {
     Prisma,
