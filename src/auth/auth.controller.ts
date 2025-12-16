@@ -10,7 +10,7 @@ import {
   Logger,
   Post,
   Request,
-  UseGuards,
+  UseGuards
 } from '@nestjs/common';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { UserRole } from '@prisma/client';
@@ -22,60 +22,76 @@ import { LoginUserDto } from './dto/login-user.dto';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { RefreshAuthGuard } from './refresh-auth.guard';
 
-// Interface para tipagem do Request autenticado
+// Interface auxiliar para garantir que o TypeScript saiba que req.user existe
 interface RequestWithUser {
   user: {
     id: string;
     role: UserRole;
     email: string;
-    [key: string]: any;
+    [key: string]: any; // Esse objeto pode ter outras propriedades com chave string, além das que já declarei.
   };
 }
 
+/**
+ * Controller de Autenticação (Porta de Entrada)
+ * * Responsável por receber as requisições HTTP de login, refresh e perfil.
+ * * ARQUITETURA DE SEGURANÇA (Guards):
+ * A ordem dentro do @UseGuards é crítica:
+ * 1. ThrottlerGuard: Para o ataque AQUI. Se fizer spam, nem processa o resto.
+ * 2. JwtAuthGuard: Verifica QUEM é o usuário (lê o token).
+ * 3. RolesGuard: Verifica O QUE o usuário pode fazer (lê o cargo).
+ */
 @Controller('auth')
-// Governança: Aplica Guards na ordem correta:
-// 1. Throttler (Rate Limit) -> Protege contra ataques
-// 2. JwtAuth (Autenticação) -> Garante quem é o usuário
-// 3. Roles (Autorização) -> Garante o que ele pode fazer
-@UseGuards(ThrottlerGuard, JwtAuthGuard, RolesGuard) 
+@UseGuards(ThrottlerGuard, JwtAuthGuard, RolesGuard)
 export class AuthController {
+  // Cria um logger para registrar eventos desta classe no terminal
   private readonly logger = new Logger(AuthController.name);
 
-  constructor(private readonly authService: AuthService) {}
+  constructor(private readonly authService: AuthService) { }
 
 
+  /**
+   * Rota de Login (POST /auth/login)
+   * * Objetivo: Trocar credenciais (email/senha) por Tokens (Access + Refresh).
+   * Segurança: 
+   * - @Public: Permite acesso sem token (obviamente, pois é o login).
+   * - @Throttle: Limita a 10 tentativas por minuto para evitar Brute Force (tentar senhas até acertar).
+   */
   @Public()
   @Throttle({ default: { limit: 10, ttl: 60000 } }) // Resiliência: Proteção contra Brute Force
   @Post('login')
-  @HttpCode(HttpStatus.OK)
+  @HttpCode(HttpStatus.OK) // Retorna 200 OK em vez de 201 Created (padrão do POST)
   async login(@Body() loginUserDto: LoginUserDto) {
-    const start = performance.now();
-    try {
-      const result = await this.authService.login(loginUserDto);
-      
-      this.logger.log({
-        action: 'login_success',
-        email: loginUserDto.email,
-        duration: `${(performance.now() - start).toFixed(2)}ms`
-      });
-      
-      return result;
-    } catch (error) {
-      this.logger.warn(`Login falha: ${loginUserDto.email} - ${error.message}`);
-      throw error;
-    }
+    return await this.authService.login(loginUserDto);
   }
 
   // --- GESTÃO DE SESSÃO (Tokens) ---
 
+
+  /**
+   * Rota de Refresh Token (POST /auth/refresh)
+   * * Objetivo: Obter um novo Access Token quando o antigo (15min) expirar.
+   * Segurança:
+   * - @Public: Ignora o JwtAuthGuard padrão (que exige access token).
+   * - @UseGuards(RefreshAuthGuard): Usa um Guard especial que sabe ler o Refresh Token (7 dias).
+   */
   @Public()
   @UseGuards(RefreshAuthGuard) // Usa especificamente o Guard de Refresh
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   async refreshTokens(@Body() dto: RefreshTokenDto) {
+    // O RefreshAuthGuard já validou a assinatura do token antes de chegar aqui.
+    // O Service vai verificar se o usuário ainda está ativo no banco.
     return this.authService.refreshTokens(dto.refreshToken);
   }
 
+
+  /**
+   * Rota de Verificação (POST /auth/verify-token)
+  * * Objetivo: Verificar se um Access Token é válido (assinatura + expiração).
+   * O Frontend chama isso para saber "Posso deixar o usuário entrar na página /dashboard?".
+   * Retorna true/false.
+   */
   @Public()
   @Post('verify-token')
   @HttpCode(HttpStatus.OK)
@@ -85,8 +101,16 @@ export class AuthController {
 
   // --- PERFIL ---
 
+  /**
+   * Rota de Perfil (GET /auth/profile)
+   * * Objetivo: Obter dados do usuário logado (ex: nome, empresa, foto).
+   * Segurança:
+   * - NÃO tem @Public: Logo, exige um Access Token válido no Header.
+   * - O objeto `req.user` é preenchido automaticamente pelo JwtStrategy.
+   */
   @Get('profile')
   async getProfile(@Request() req: RequestWithUser) {
+    // Usa o ID extraído do token para buscar os dados frescos no banco/cache
     return this.authService.getProfile(req.user.id);
   }
 }

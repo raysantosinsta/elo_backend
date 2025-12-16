@@ -1,7 +1,6 @@
 /* eslint-disable prettier/prettier */
 import { SimpleStatus, UserRole, UserStatus } from "@prisma/client";
 
-// auth/types/index.ts
 export interface UserProfile {
   id: string;
   email: string;
@@ -11,8 +10,7 @@ export interface UserProfile {
   companyId: string | null;
   document?: string | null;
   contact: string;
-  // isProfessional: boolean; // 🔥 ADICIONE ESTA LINHA
-  professionalRole?: string | null; // 🔥 ADICIONE ESTA LINHA
+  professionalRole?: string | null; 
   company?: {
     id: string;
     name: string;

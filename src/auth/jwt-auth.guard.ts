@@ -1,3 +1,5 @@
+/* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import {
@@ -10,6 +12,16 @@ import { Reflector } from '@nestjs/core';
 import { AuthGuard } from '@nestjs/passport';
 import { IS_PUBLIC_KEY } from './public.decorator'; // Importe do arquivo criado no passo anterior
 
+
+/**
+ * JwtAuthGuard (Guardião Global de Autenticação)
+ * * Este Guard é responsável por proteger todas as rotas da aplicação por padrão.
+ * Ele estende o 'AuthGuard' do NestJS/Passport usando a estratégia 'jwt'.
+ * * FUNCIONALIDADES:
+ * 1. Verifica se a rota possui o decorator @Public(). Se sim, deixa passar.
+ * 2. Se não for pública, aciona o JwtStrategy para validar o token.
+ * 3. Intercepta erros de validação para gerar logs de segurança e mensagens amigáveis.
+ */
 @Injectable()
 export class JwtAuthGuard extends AuthGuard('jwt') {
   private readonly logger = new Logger(JwtAuthGuard.name);
@@ -19,81 +31,98 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
   }
 
   /**
-   * Lógica Principal de Decisão (Gatekeeper)
-   */
+    * Lógica Principal de Decisão
+    * Este método roda ANTES da estratégia JWT tentar validar o token.
+    * * @param context O contexto da execução (contém Request, Response, etc)
+    * @returns true (acesso permitido) ou a Promise de validação do token
+    */
   canActivate(context: ExecutionContext) {
-    // 1. Governança: Verifica se a rota é Pública
+    // 1. Governança: Verifica metadados (Se a rota tem @Public)
+    // getAllAndOverride procura o decorator no Método e depois na Classe
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
       context.getHandler(),
       context.getClass(),
     ]);
 
     if (isPublic) {
-      // Se for pública, ignora a validação do token JWT e passa direto
+      // Se for pública, ignora a validação do token JWT e retorna true imediatamente
       return true;
     }
 
-    // 2. Se não for pública, delega para a estratégia do Passport (JwtStrategy)
+    // 2. Se não for pública, delega para a lógica padrão do AuthGuard
+    // Isso vai chamar o JwtStrategy.validate() internamente
     return super.canActivate(context);
   }
 
   /**
-   * Tratamento de Resultado da Estratégia
-   * Chamado após o JwtStrategy.validate() retornar ou falhar
-   */
+    * Tratamento de Resultado da Estratégia (Pós-Validação)
+    * Este método é chamado AUTOMATICAMENTE após o Passport tentar validar o token.
+    * Aqui decidimos o que fazer se o token for inválido, expirado ou inexistente.
+    * * @param err Erro técnico (se houver) retornado pelo Passport
+    * @param user O objeto usuário retornado pelo JwtStrategy.validate() (se sucesso)
+    * @param info Informações extras sobre o erro (ex: "TokenExpiredError")
+    * @param context O contexto da requisição
+    */
   handleRequest(err: any, user: any, info: any, context: ExecutionContext) {
-    // Contexto para logs
+    // Extrai dados para Logs de Observabilidade
     const request = context.switchToHttp().getRequest();
     const { method, url } = request;
 
-    // Se houver erro ou nenhum usuário foi retornado pelo Strategy
+    // Cenário de Falha: Se ocorreu erro técnico ou nenhum usuário foi encontrado
     if (err || !user) {
+      // Traduz o erro técnico para uma mensagem legível
       const errorMessage = this.getErrorMessage(err, info);
-      
-      // Observabilidade: Log estruturado de falha (apenas Warn para não poluir erro)
+
+      // Observabilidade: Log estruturado de falha (Nível WARN)
+      // Importante para detectar tentativas de invasão ou problemas de sessão
       this.logger.warn({
         message: 'Falha de Autenticação',
         route: `${method} ${url}`,
         error: errorMessage,
-        ip: request.ip,
+        ip: request.ip, // Registra o IP para eventual bloqueio no firewall
       });
 
-      throw err || new UnauthorizedException(errorMessage);
+      // Se já existe um erro estruturado (ex: do banco), lança ele.
+      if (err) {
+        throw err;
+      }
+      // Se não, lança 401 Unauthorized com a mensagem traduzida
+      throw new UnauthorizedException(errorMessage);
+
     }
 
-    // Sucesso silencioso em produção, debug em dev
-    /* Performance: Evitamos logs excessivos no "caminho feliz" em produção.
-       O log de acesso deve ser feito por um Middleware ou Interceptor de Logging, não pelo Guard.
-    */
-    
+    // Cenário de Sucesso:
+    // Retorna o usuário para ser injetado no `req.user` dos Controllers
     return user;
   }
 
   /**
-   * Tradução de Erros do Passport/JWT para mensagens amigáveis ao Client
-   */
+    * Tradutor de Erros
+    * Converte erros técnicos da biblioteca 'passport'
+    * em mensagens que o Frontend pode usar para decidir o que fazer (Refresh ou Logout).
+    */
   private getErrorMessage(err: any, info: any): string {
     if (err) {
       return err.message || 'Erro interno de autenticação';
     }
-    
+
     if (info) {
       if (info instanceof Error) {
         switch (info.name) {
           case 'TokenExpiredError':
             return 'Token expirado'; // Frontend deve disparar Refresh Token
           case 'JsonWebTokenError':
-            return 'Token inválido'; // Frontend deve fazer Logout
+            return 'Token inválido'; // Token malformado ou adulterado -> Logout
           case 'NotBeforeError':
-            return 'Token ainda não é válido';
+            return 'Token ainda não é válido'; // Relógio do servidor desincronizado
         }
       }
-      // Info pode ser string em alguns casos do passport
+      // Em alguns casos raros, o passport retorna uma string direta
       if (typeof info === 'string') {
-          return info; 
+        return info;
       }
     }
-    
-    return 'Não autenticado';
+
+    return 'Não autenticado'; // Token ausente
   }
 }

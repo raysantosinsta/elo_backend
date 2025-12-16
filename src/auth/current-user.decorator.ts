@@ -1,10 +1,20 @@
+/* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import { createParamDecorator, ExecutionContext } from '@nestjs/common';
 
-// Este decorator extrai o objeto 'user' anexado ao Request pelo seu Guard de Autenticação (ex: Passport/JWT)
+/**
+ * Decorator para extrair o usuário logado (ou uma propriedade dele) do Request.
+ * @example @CurrentUser() user: User
+ * @example @CurrentUser('id') userId: string
+ */
 export const CurrentUser = createParamDecorator(
-  (data: unknown, ctx: ExecutionContext) => {
+  (data: string | undefined, ctx: ExecutionContext) => {
     const request = ctx.switchToHttp().getRequest();
-    // Em produção, o Guard (AuthGuard) popula request.user
-    return request.user;
+    const user = request.user;
+
+    // Se passou um parâmetro (ex: 'email'), retorna só ele. Se não, retorna o objeto todo.
+    return data ? user?.[data] : user;
   },
 );
