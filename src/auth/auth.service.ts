@@ -12,7 +12,7 @@ import {
   Injectable,
   InternalServerErrorException,
   Logger,
-  UnauthorizedException
+  UnauthorizedException,
 } from '@nestjs/common';
 // JwtService: Utilitário para criar e ler tokens JWT.
 import { JwtService } from '@nestjs/jwt';
@@ -20,11 +20,9 @@ import { JwtService } from '@nestjs/jwt';
 import { UserStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import type { Cache } from 'cache-manager';
-import { randomUUID } from 'crypto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { LoginUserDto } from './dto/login-user.dto';
 import { AuthResponse, JwtPayload, UserProfile, UserTokens } from './types';
-
 
 /**
  * Responsável por toda a lógica de negócio de autenticação.
@@ -42,15 +40,15 @@ export class AuthService {
 
   constructor(
     private prisma: PrismaService, // Acesso ao Banco de Dados
-    private jwtService: JwtService, // Ferramenta de Tokens
+    private jwtService: JwtService, // Ferramenta para gerenciamento de Tokens
     @Inject(CACHE_MANAGER) private cacheManager: Cache, // Ferramenta de Cache
-  ) { }
+  ) {}
 
   // --- Auxiliares Privados ---
 
   /**
-   * Transforma o objeto bruto do Banco de Dados (que tem senha, hash, campos internos)
-   * em um objeto limpo e seguro para devolver ao Frontend (UserProfile).
+   * Transforma o objeto bruto do Banco de Dados (que tem senha)
+   * em um objeto limpo e seguro para devolver ao Frontend.
    */
   private mapToUserProfile(user: any): UserProfile {
     return {
@@ -68,6 +66,35 @@ export class AuthService {
     };
   }
 
+  // --- Infraestrutura e Helpers ---
+
+  /**
+   * GENERATE TOKENS
+   * Cria a dupla de chaves de acesso.
+   */
+  private async generateTokens(user: UserProfile): Promise<UserTokens> {
+    // O Payload é o conteúdo JSON que vai "dentro" do token criptografado.
+    const payload: JwtPayload = {
+      sub: user.id, // Subject (ID do usuário)
+      email: user.email,
+      role: user.role, // Permissões
+      companyId: user.companyId, // Empresa do usuário
+    };
+
+    // Promise.all executa as duas assinaturas em paralelo para otimizar tempo.
+    const [accessToken, refreshToken] = await Promise.all([
+      this.jwtService.signAsync(payload, {
+        secret: process.env.JWT_SECRET,
+        expiresIn: '15m', // Access Token: Vida curta para segurança. Se roubado, dura pouco.
+      }),
+      this.jwtService.signAsync(payload, {
+        secret: process.env.JWT_REFRESH_SECRET,
+        expiresIn: '7d', // Refresh Token: Vida longa para conveniência (Manter logado).
+      }),
+    ]);
+
+    return { accessToken, refreshToken };
+  }
 
   /**
    * LOGIN
@@ -76,7 +103,6 @@ export class AuthService {
    * 3. Gera tokens e salva perfil no cache para acessos futuros rápidos.
    */
   async login(loginUserDto: LoginUserDto): Promise<AuthResponse> {
-
     const { email, password } = loginUserDto;
 
     // Busca o usuário no banco pelo email.
@@ -84,7 +110,7 @@ export class AuthService {
     const user = await this.prisma.user.findUnique({
       where: { email },
       include: {
-        company: { select: { id: true, name: true, status: true } },
+        company: { select: { id: true, name: true, status: true } }, // em Multi-empresa quase tudo o que o usuário faz depende de qual empresa ele pertence
       },
     });
 
@@ -97,15 +123,21 @@ export class AuthService {
     const isPasswordValid = await bcrypt.compare(
       password,
       passwordHashToCompare,
-    );
+    ); // retorna true/false
 
-    // Validação unificada (tempo constante)
-    if (!user || user.status !== UserStatus.ACTIVE || !isPasswordValid) {
+    // Validação final: Usuário deve existir, estar ativo e senha deve ser válida.
+    if (!user || !isPasswordValid) {
       throw new UnauthorizedException('Credenciais inválidas');
+    } else if (user.status !== UserStatus.ACTIVE) {
+      throw new UnauthorizedException('Usuário Bloqueado');
+    } else if (user.company && user.company.status !== 'ACTIVE') {
+      throw new UnauthorizedException('Empresa Bloqueada');
     }
-
-    // Log seguro (só chega aqui se user existir)
-    this.logger.log({ message: 'Login realizado com sucesso', userId: user.id });
+    // TODO: apos implmentar assinatura detalhar motivo de blqueio de usuarios / empresa
+    this.logger.log({
+      message: 'Login realizado com sucesso',
+      userId: user.id,
+    });
 
     // Mapeia perfil limpo
     const userProfile = this.mapToUserProfile(user);
@@ -118,7 +150,7 @@ export class AuthService {
     await this.cacheManager.set(
       cacheKey,
       userProfile,
-      this.CACHE_TTL_SECONDS * 1000,
+      this.CACHE_TTL_SECONDS * 1000, // 5 minutos
     );
 
     // Retorno final
@@ -130,27 +162,30 @@ export class AuthService {
 
   // --- Otimização de Custo e Performance (Cache) ---
 
-
   /**
    * Verifica se um token é válido e retorna os dados do usuário.
    */
-  async verifyToken(token: string): Promise<{ valid: boolean; user?: UserProfile }> {
+  async verifyToken(
+    token: string,
+  ): Promise<{ valid: boolean; user?: UserProfile }> {
     try {
       const secret = process.env.JWT_SECRET;
-      if (!secret) throw new InternalServerErrorException('JWT_SECRET não configurado');
+      if (!secret)
+        throw new InternalServerErrorException('JWT_SECRET não configurado');
 
-      // 1. Verifica assinatura e expiração do token (matemática pura, sem banco)
+      // 1. Verifica assinatura e expiração do token JWT
       const payload: JwtPayload = this.jwtService.verify(token, { secret });
       const cacheKey = `user_profile:${payload.sub}`;
+      // TODO: para validar acho que nao precisa ir no banco de dados
 
-      // 2. Tentar Cache 
+      // 2. Tentar Cache
       // Pergunta: "Já tenho os dados desse usuário na memória?"
       const cachedUser = await this.cacheManager.get<UserProfile>(cacheKey);
       if (cachedUser) {
         return { valid: true, user: cachedUser };
       }
 
-      // 3. Fallback para Banco de Dados 
+      // 3. Fallback para Banco de Dados
       // Se não estava no cache (ou expirou), busca no banco.
       const user = await this.prisma.user.findUnique({
         where: { id: payload.sub },
@@ -168,10 +203,15 @@ export class AuthService {
 
       // 4. Salvar no Cache (Renovação)
       // Guarda na memória de novo para as próximas requisições serem rápidas.
-      await this.cacheManager.set(cacheKey, userProfile, this.CACHE_TTL_SECONDS * 1000);
+      await this.cacheManager.set(
+        cacheKey,
+        userProfile,
+        this.CACHE_TTL_SECONDS * 1000, // 5 minutos
+      );
 
       return { valid: true, user: userProfile };
     } catch (error) {
+      this.logger.warn(`Token inválido: ${error.message}`);
       // Se o token expirou ou é falso, o jwtService.verify lança erro.
       // Capturamos aqui e retornamos valid: false para o frontend saber que precisa deslogar/refresh.
       return { valid: false };
@@ -186,10 +226,13 @@ export class AuthService {
   async refreshTokens(refreshToken: string): Promise<UserTokens> {
     try {
       const secret = process.env.JWT_REFRESH_SECRET;
-      if (!secret) throw new InternalServerErrorException("JWT_REFRESH_SECRET missing");
+      if (!secret)
+        throw new InternalServerErrorException('JWT_REFRESH_SECRET missing');
 
       // Verifica se o refresh token é válido
-      const payload: JwtPayload = this.jwtService.verify(refreshToken, { secret });
+      const payload: JwtPayload = this.jwtService.verify(refreshToken, {
+        secret,
+      });
 
       // SEGURANÇA CRÍTICA:
       // Mesmo com token válido, precisamos ir no banco ver se o usuário NÃO foi bloqueado/demitido nesse meio tempo.
@@ -197,7 +240,14 @@ export class AuthService {
         where: { id: payload.sub },
         // Select Otimizado: Trazemos APENAS os campos necessários para gerar o novo token.
         // Isso torna a query muito mais leve e rápida.
-        select: { id: true, email: true, role: true, companyId: true, status: true, name: true }
+        select: {
+          id: true,
+          email: true,
+          role: true,
+          companyId: true,
+          status: true,
+          name: true,
+        },
       });
 
       if (!user || user.status !== UserStatus.ACTIVE) {
@@ -206,8 +256,7 @@ export class AuthService {
 
       // Hack técnico: Como usamos 'select' parcial, o TS reclama que não é um User completo.
       // Usamos 'as any' para forçar a criação dos tokens.
-      const partialProfile = { ...user } as any;
-
+      const partialProfile = { ...user } as any; // select nao traz todos os campos, mas o generateTokens so precisa desses campos
 
       // Gera tokens novos e devolve ao usuário.
       return this.generateTokens(partialProfile);
@@ -241,39 +290,12 @@ export class AuthService {
 
     const profile = this.mapToUserProfile(user);
     // Salva no cache para a próxima vez
-    await this.cacheManager.set(cacheKey, profile, this.CACHE_TTL_SECONDS * 1000);
+    await this.cacheManager.set(
+      cacheKey,
+      profile,
+      this.CACHE_TTL_SECONDS * 1000, // 5 minutos
+    );
 
     return profile;
   }
-
-  // --- Infraestrutura e Helpers ---
-
-  /**
-   * GENERATE TOKENS
-   * Cria a dupla de chaves de acesso.
-   */
-  private async generateTokens(user: UserProfile): Promise<UserTokens> {
-    // O Payload é o conteúdo JSON que vai "dentro" do token criptografado.
-    const payload: JwtPayload = {
-      sub: user.id, // Subject (ID do usuário)
-      email: user.email,
-      role: user.role, // Permissões
-      companyId: user.companyId // Empresa do usuário
-    };
-
-    // Promise.all executa as duas assinaturas em paralelo (mais rápido que uma depois da outra)
-    const [accessToken, refreshToken] = await Promise.all([
-      this.jwtService.signAsync(payload, {
-        secret: process.env.JWT_SECRET,
-        expiresIn: '15m', // Access Token: Vida curta para segurança. Se roubado, dura pouco.
-      }),
-      this.jwtService.signAsync(payload, {
-        secret: process.env.JWT_REFRESH_SECRET,
-        expiresIn: '7d', // Refresh Token: Vida longa para conveniência (Manter logado).
-      }),
-    ]);
-
-    return { accessToken, refreshToken };
-  }
-
 }

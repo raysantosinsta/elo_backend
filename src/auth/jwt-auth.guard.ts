@@ -12,7 +12,7 @@ import { Reflector } from '@nestjs/core';
 import { AuthGuard } from '@nestjs/passport';
 import { IS_PUBLIC_KEY } from './public.decorator'; // Importe do arquivo criado no passo anterior
 
-
+// TODO: verificar se ta validando token corretamente sempre que uma rota protegida for acessada
 /**
  * JwtAuthGuard (Guardião Global de Autenticação)
  * * Este Guard é responsável por proteger todas as rotas da aplicação por padrão.

@@ -1,6 +1,6 @@
 /* eslint-disable prettier/prettier */
 import { IsEmail, IsNotEmpty, IsString, MinLength } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger'; // Opcional, para documentação
+import { ApiProperty } from '@nestjs/swagger'; // para documentação
 
 export class LoginUserDto {
   @ApiProperty({ example: 'admin@empresa.com', description: 'E-mail do usuário' })

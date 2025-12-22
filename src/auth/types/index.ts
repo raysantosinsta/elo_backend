@@ -36,3 +36,12 @@ export interface AuthResponse {
   accessToken: string;
   refreshToken: string;
 }
+
+export interface RequestWithUser {
+  user: {
+    id: string;
+    role: UserRole;
+    email: string;
+    [key: string]: any; // Esse objeto pode ter outras propriedades com chave string, além das que já declarei.
+  };
+}

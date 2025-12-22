@@ -104,7 +104,7 @@ export class UsersController {
      * Remove fisicamente um usuário (MUITO RESTRITO).
      */
     @Delete(':id')
-    @Roles(UserRole.MASTER)
+    @Roles(UserRole.MASTER, UserRole.ADMIN)
     remove(@Param('id', ParseUUIDPipe) id: string) {
         return this.usersService.removeUser(id); 
     }
@@ -115,7 +115,7 @@ export class UsersController {
      * Lista usuários, com paginação e filtros.
      */
     @Get()
-    @Roles(UserRole.MASTER, UserRole.ADMIN)
+    @Roles(UserRole.MASTER, UserRole.ADMIN,)
     findAll(
         @Req() req: CustomRequest, // Colocado no início
         @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
@@ -137,7 +137,7 @@ export class UsersController {
      * Rota: GET /users/company/:companyId
      */
     @Get('company/:companyId')
-    // Defina quem pode acessar. Se usuários comuns puderem ver (ex: para select), adicione UserRole.USER ou remova o @Roles
+    // Defina quem pode acessar. Se usuários comuns puderem ver (ex: para select), adicione UserRole.EMPLOYER ou remova o @Roles
     @Roles(UserRole.MASTER, UserRole.ADMIN, UserRole.EMPLOYER) 
     async findByCompany(
         @Param('companyId', ParseUUIDPipe) companyId: string,

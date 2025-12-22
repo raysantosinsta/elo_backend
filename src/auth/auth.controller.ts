@@ -7,13 +7,11 @@ import {
   Get,
   HttpCode,
   HttpStatus,
-  Logger,
   Post,
   Request,
   UseGuards
 } from '@nestjs/common';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
-import { UserRole } from '@prisma/client';
 import { Public } from 'src/auth/public.decorator';
 import { RolesGuard } from 'src/auth/roles.guard';
 import { AuthService } from './auth.service';
@@ -21,16 +19,10 @@ import { RefreshTokenDto, VerifyTokenDto } from './dto/auth-payloads.dto';
 import { LoginUserDto } from './dto/login-user.dto';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { RefreshAuthGuard } from './refresh-auth.guard';
+import type { RequestWithUser } from './types';
 
 // Interface auxiliar para garantir que o TypeScript saiba que req.user existe
-interface RequestWithUser {
-  user: {
-    id: string;
-    role: UserRole;
-    email: string;
-    [key: string]: any; // Esse objeto pode ter outras propriedades com chave string, além das que já declarei.
-  };
-}
+
 
 /**
  * Controller de Autenticação (Porta de Entrada)
@@ -44,9 +36,7 @@ interface RequestWithUser {
 @Controller('auth')
 @UseGuards(ThrottlerGuard, JwtAuthGuard, RolesGuard)
 export class AuthController {
-  // Cria um logger para registrar eventos desta classe no terminal
-  private readonly logger = new Logger(AuthController.name);
-
+ 
   constructor(private readonly authService: AuthService) { }
 
 
