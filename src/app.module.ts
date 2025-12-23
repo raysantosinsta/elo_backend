@@ -22,6 +22,7 @@ import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { CacheModule } from '@nestjs/cache-manager';
 import { AppController } from './app.controller';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler'; // Importe o Guard
+import { RoutesModule } from './routes/routes.module';
 
 @Module({
   imports: [
@@ -51,6 +52,7 @@ import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler'; // Importe 
     ReportsTasksModule,
     ReportsFlowModule,
     CompaniesModule,
+    RoutesModule,
   ],
   // ADICIONE O CONTROLLER AQUI
   controllers: [AppController],

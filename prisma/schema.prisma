@@ -324,6 +324,9 @@ model TaskAddress {
   estado      String  @map("estado") @db.VarChar(2)
   complemento String? @map("complemento") @db.VarChar(100)
 
+  latitude  Float? @map("latitude")
+  longitude Float? @map("longitude")
+
   // Relacionamento com Task
   taskId String @unique @map("tarefa_id") @db.Uuid
   task   Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)

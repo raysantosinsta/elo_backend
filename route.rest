@@ -1,0 +1,66 @@
+@baseUrl = http://localhost:3000
+@contentType = application/json
+# Coloque seu Token JWT aqui (sem a palavra Bearer, apenas o hash)
+@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkMmRjM2M5Zi04N2JkLTQ3M2QtYjVhYy0zNzNhZjAyY2ZlZjkiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiIzMjhmNWYwOC1kOGEzLTQ2MzctYmJjYy1hOWQ1NmI2Zjg0NTYiLCJpYXQiOjE3NjY0Mzg5MDcsImV4cCI6MTc2NjQzOTgwN30.mMsg3kWcsfxCQ06AoGBVCHQ0_MG560Ojbc7j2etm2aI
+
+# --------------------------------------------------------
+# 1. LISTAR TAREFAS DISPONÍVEIS
+# Busca tarefas pendentes que têm latitude/longitude
+# Depende do token para identificar a empresa (companyId)
+# --------------------------------------------------------
+GET {{baseUrl}}/routes/available-tasks
+Authorization: Bearer {{token}}
+Content-Type: {{contentType}}
+
+###
+
+# --------------------------------------------------------
+# 2. CALCULAR MELHOR ROTA (OTIMIZAÇÃO)
+# Envia lista de IDs e posição do motorista.
+# Retorna a lista ordenada pela distância.
+# --------------------------------------------------------
+POST {{baseUrl}}/routes/calculate-best-path
+Authorization: Bearer {{token}}
+Content-Type: {{contentType}}
+
+{
+  "driverLatitude": -23.550520,
+  "driverLongitude": -46.633308,
+  "taskIds": [
+    "SUBSTITUA-POR-UUID-TAREFA-1",
+    "SUBSTITUA-POR-UUID-TAREFA-2",
+    "SUBSTITUA-POR-UUID-TAREFA-3"
+  ]
+}
+
+###
+
+# --------------------------------------------------------
+# 3. FINALIZAR TAREFA - SUCESSO
+# Marca como COMPLETED e agenda a próxima para daqui 30 dias.
+# --------------------------------------------------------
+@taskIdSucesso = SUBSTITUA-POR-UUID-TAREFA-REAL
+PATCH {{baseUrl}}/routes/tasks/{{taskIdSucesso}}/finalize
+Authorization: Bearer {{token}}
+Content-Type: {{contentType}}
+
+{
+  "status": "COMPLETED",
+  "finalComment": "Entrega realizada com sucesso, cliente recebeu."
+}
+
+###
+
+# --------------------------------------------------------
+# 4. FINALIZAR TAREFA - FALHA
+# Marca como FAILED e agenda reagendamento para amanhã.
+# --------------------------------------------------------
+@taskIdFalha = SUBSTITUA-POR-UUID-TAREFA-REAL
+PATCH {{baseUrl}}/routes/tasks/{{taskIdFalha}}/finalize
+Authorization: Bearer {{token}}
+Content-Type: {{contentType}}
+
+{
+  "status": "FAILED",
+  "finalComment": "Cliente não estava em casa. Ninguém atendeu."
+}

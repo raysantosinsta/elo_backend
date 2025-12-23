@@ -1,0 +1,3 @@
+ALTER TABLE "enderecos_tarefas"
+ADD COLUMN "latitude" DOUBLE PRECISION,
+ADD COLUMN "longitude" DOUBLE PRECISION;

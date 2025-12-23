@@ -22,7 +22,14 @@ import {
 } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiResponse, ApiConsumes, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
-import { TasksService, CreateTaskDto, UpdateTaskDto, UploadedFile } from './tasks.service';
+// Certifique-se de que CreateTaskAddressDto está sendo exportado do arquivo do service ou do arquivo de DTOs
+import { 
+    TasksService, 
+    CreateTaskDto, 
+    UpdateTaskDto, 
+    UploadedFile, 
+    CreateTaskAddressDto 
+} from './tasks.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { TaskStatus } from '@prisma/client';
 import type { User } from '@prisma/client';
@@ -40,7 +47,7 @@ export class TasksController {
     // --- WRITE OPERATIONS ---
 
     @Post()
-    @ApiOperation({ summary: 'Cria uma nova tarefa com uploads opcionais' })
+    @ApiOperation({ summary: 'Cria uma nova tarefa com endereço e uploads opcionais' })
     @ApiConsumes('multipart/form-data')
     @ApiResponse({ status: 201, description: 'Tarefa criada com sucesso.' })
     @UseInterceptors(FileFieldsInterceptor([
@@ -63,8 +70,18 @@ export class TasksController {
 
         this.logger.log(`Usuário ${user.id} criando tarefa: ${createTaskDto.title}`);
 
+        // --- TRATAMENTO DE MULTIPART ---
+        // Se o frontend enviar o objeto 'address' como string JSON dentro do FormData,
+        // precisamos fazer o parse manual aqui para garantir que o Service receba um objeto.
+        if (createTaskDto.address && typeof createTaskDto.address === 'string') {
+            try {
+                createTaskDto.address = JSON.parse(createTaskDto.address);
+            } catch (error) {
+                throw new BadRequestException('Formato inválido para o campo address (JSON esperado)');
+            }
+        }
+
         // Sobrescreve com dados do token para segurança
-        // Embora o DTO exija esses campos, eles são preenchidos pelo Controller
         createTaskDto.companyId = user.companyId;
         createTaskDto.createdById = user.id;
 
@@ -93,7 +110,6 @@ export class TasksController {
             throw new BadRequestException('Usuário não está vinculado a uma empresa.');
         }
 
-        // updateTaskDto já lida com remoção de arquivos via array de IDs
         return this.tasksService.update(
             id,
             updateTaskDto,
@@ -108,16 +124,18 @@ export class TasksController {
     @ApiResponse({ status: 200, description: 'Status e/ou coluna atualizados com sucesso.' })
     async updateStatus(
         @Param('id', ParseUUIDPipe) id: string,
-        @Body() body: { columnId?: string, status?: TaskStatus, columnOrder?: number }, // Adicionado columnOrder
+        @Body() body: { columnId?: string, status?: TaskStatus, columnOrder?: number }, 
         @CurrentUser() user: User
     ) {
         if (!user.companyId) throw new BadRequestException('Empresa não identificada.');
         
-        // CUIDADO: columnOrder precisa ser passado como number no DTO. O Nestjs fará a validação.
+        // Garante que columnOrder seja numérico se vier no body
+        const columnOrder = body.columnOrder !== undefined ? Number(body.columnOrder) : undefined;
+
         const updateData: Partial<UpdateTaskDto> = {
             columnId: body.columnId,
             status: body.status,
-            columnOrder: body.columnOrder,
+            columnOrder: columnOrder,
         };
 
         return this.tasksService.update(
@@ -185,7 +203,6 @@ export class TasksController {
     ) {
         if (!user.companyId) throw new BadRequestException('Empresa não identificada.');
 
-        // SEGURANÇA: Passamos o companyId do usuário logado
         return this.tasksService.findAllPaginated({
             companyId: user.companyId,
             page,
@@ -199,18 +216,17 @@ export class TasksController {
     @ApiOperation({ summary: 'Busca uma tarefa por ID (Apenas se pertencer à empresa)' })
     async findOne(
         @Param('id', ParseUUIDPipe) id: string,
-        @CurrentUser() user: User // Injetamos o usuário aqui
+        @CurrentUser() user: User 
     ) {
         if (!user.companyId) throw new BadRequestException('Empresa não identificada.');
 
-        // SEGURANÇA: Passamos o ID e o CompanyId para o service
         return this.tasksService.findOne(id, user.companyId);
     }
 
     // --- DELETE ---
 
     @Delete(':id')
-    @ApiOperation({ summary: 'Remove uma tarefa e seus arquivos (Requer confirmação de pertencimento à empresa)' })
+    @ApiOperation({ summary: 'Remove uma tarefa e seus arquivos' })
     @HttpCode(HttpStatus.NO_CONTENT)
     async remove(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: User) {
         if (!user.companyId) throw new BadRequestException('Empresa não identificada.');
@@ -218,16 +234,17 @@ export class TasksController {
         await this.tasksService.remove(id, user.companyId);
     }
 
-    // --- ADDRESS ---
+    // --- ADDRESS (Rota Específica) ---
+    // Útil se quiser adicionar endereço a uma tarefa que já existe e não tinha
     
     @Post(':id/address')
-    @ApiOperation({ summary: 'Adiciona ou atualiza o endereço de uma tarefa' })
+    @ApiOperation({ summary: 'Adiciona ou atualiza o endereço de uma tarefa existente' })
     async addAddress(
         @Param('id', ParseUUIDPipe) id: string,
-        @Body() addressData: any, // Idealmente usar um DTO de endereço (e.g., TaskAddressDto)
+        @Body() addressDto: CreateTaskAddressDto, // Agora tipado corretamente
         @CurrentUser() user: User
     ) {
         if (!user.companyId) throw new BadRequestException('Empresa não identificada.');
-        return this.tasksService.addAddress(id, user.companyId, addressData);
+        return this.tasksService.addAddress(id, user.companyId, addressDto);
     }
 }
