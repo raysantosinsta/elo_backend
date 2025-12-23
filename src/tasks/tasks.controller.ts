@@ -1,4 +1,9 @@
 /* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import {
     Body,
     Controller,
@@ -23,17 +28,24 @@ import {
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiResponse, ApiConsumes, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 // Certifique-se de que CreateTaskAddressDto está sendo exportado do arquivo do service ou do arquivo de DTOs
-import { 
-    TasksService, 
-    CreateTaskDto, 
-    UpdateTaskDto, 
-    UploadedFile, 
-    CreateTaskAddressDto 
+import {
+    TasksService,
+    CreateTaskDto,
+    UpdateTaskDto,
+    UploadedFile,
+    CreateTaskAddressDto
 } from './tasks.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { TaskStatus } from '@prisma/client';
 import type { User } from '@prisma/client';
 import { CurrentUser } from 'src/auth/current-user.decorator';
+
+// Adicione este DTO auxiliar ou use um Partial<UpdateTaskDto>
+export class FinalizeTaskDto {
+    status: TaskStatus;
+    finalComment: string;
+    scheduledAt?: string; // Nova data para reagendamento
+}
 
 @ApiTags('Tasks')
 @ApiBearerAuth()
@@ -42,7 +54,7 @@ import { CurrentUser } from 'src/auth/current-user.decorator';
 export class TasksController {
     private readonly logger = new Logger(TasksController.name);
 
-    constructor(private readonly tasksService: TasksService) {}
+    constructor(private readonly tasksService: TasksService) { }
 
     // --- WRITE OPERATIONS ---
 
@@ -124,11 +136,11 @@ export class TasksController {
     @ApiResponse({ status: 200, description: 'Status e/ou coluna atualizados com sucesso.' })
     async updateStatus(
         @Param('id', ParseUUIDPipe) id: string,
-        @Body() body: { columnId?: string, status?: TaskStatus, columnOrder?: number }, 
+        @Body() body: { columnId?: string, status?: TaskStatus, columnOrder?: number },
         @CurrentUser() user: User
     ) {
         if (!user.companyId) throw new BadRequestException('Empresa não identificada.');
-        
+
         // Garante que columnOrder seja numérico se vier no body
         const columnOrder = body.columnOrder !== undefined ? Number(body.columnOrder) : undefined;
 
@@ -152,7 +164,7 @@ export class TasksController {
     @ApiOperation({ summary: 'Define o status da tarefa como COMPLETED' })
     async completeTask(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: User) {
         if (!user.companyId) throw new BadRequestException('Empresa não identificada.');
-        
+
         // Passa o ID do usuário logado como quem completou
         return this.tasksService.update(
             id,
@@ -188,7 +200,7 @@ export class TasksController {
 
     // --- READ OPERATIONS ---
 
-   @Get()
+    @Get()
     @ApiOperation({ summary: 'Lista tarefas paginadas da empresa do usuário' })
     @ApiQuery({ name: 'page', required: false, type: Number })
     @ApiQuery({ name: 'limit', required: false, type: Number })
@@ -216,7 +228,7 @@ export class TasksController {
     @ApiOperation({ summary: 'Busca uma tarefa por ID (Apenas se pertencer à empresa)' })
     async findOne(
         @Param('id', ParseUUIDPipe) id: string,
-        @CurrentUser() user: User 
+        @CurrentUser() user: User
     ) {
         if (!user.companyId) throw new BadRequestException('Empresa não identificada.');
 
@@ -236,7 +248,7 @@ export class TasksController {
 
     // --- ADDRESS (Rota Específica) ---
     // Útil se quiser adicionar endereço a uma tarefa que já existe e não tinha
-    
+
     @Post(':id/address')
     @ApiOperation({ summary: 'Adiciona ou atualiza o endereço de uma tarefa existente' })
     async addAddress(
@@ -246,5 +258,35 @@ export class TasksController {
     ) {
         if (!user.companyId) throw new BadRequestException('Empresa não identificada.');
         return this.tasksService.addAddress(id, user.companyId, addressDto);
+    }
+
+    @Patch(':id/finalize')
+    @ApiOperation({ summary: 'Finaliza a tarefa, adiciona comentário e reagenda' })
+    async finalizeTask(
+        @Param('id', ParseUUIDPipe) id: string,
+        @Body() body: FinalizeTaskDto,
+        @CurrentUser() user: User
+    ) {
+        if (!user.companyId) throw new BadRequestException('Empresa não identificada.');
+
+        const updateData: any = {
+            status: body.status,
+            finalComment: body.finalComment,
+            // Se for completada, marca quem completou
+            userCompleted: body.status === TaskStatus.COMPLETED ? { connect: { id: user.id } } : undefined,
+            completionDate: body.status === TaskStatus.COMPLETED ? new Date() : undefined
+        };
+
+        // Se o motorista enviou uma data de reagendamento, atualizamos o scheduledDate
+        if (body.scheduledAt) {
+            updateData.scheduledDate = new Date(body.scheduledAt);
+        }
+
+        return this.tasksService.update(
+            id,
+            updateData, // Passamos o objeto direto pois o Service já trata a lógica
+            user.companyId,
+            user.id
+        );
     }
 }
