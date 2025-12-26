@@ -66,7 +66,7 @@ export class AuthController {
    * - @UseGuards(RefreshAuthGuard): Usa um Guard especial que sabe ler o Refresh Token (7 dias).
    */
   @Public()
-  @UseGuards(RefreshAuthGuard) // Usa especificamente o Guard de Refresh
+  // @UseGuards(RefreshAuthGuard) // Usa especificamente o Guard de Refresh
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   async refreshTokens(@Body() dto: RefreshTokenDto) {

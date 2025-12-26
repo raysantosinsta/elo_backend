@@ -1,4 +1,4 @@
-import { IsString, IsArray, IsNumber, IsOptional } from 'class-validator';
+import { IsString, IsArray, IsNumber, IsOptional, IsDateString } from 'class-validator';
 
 export class OptimizeRouteDto {
   @IsArray()
@@ -19,4 +19,8 @@ export class FinalizeTaskDto {
   @IsString()
   @IsOptional()
   finalComment?: string;
+
+   @IsOptional()
+  @IsDateString()
+  scheduledAt?: string; // Adicione este campo
 }

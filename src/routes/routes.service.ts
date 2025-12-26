@@ -2,9 +2,10 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { Task, TaskAddress, TaskStatus, type Prisma } from '@prisma/client';
+
 import { PrismaService } from '../prisma/prisma.service';
-import { OptimizeRouteDto, FinalizeTaskDto } from './dto/optimize-route.dto';
-import { TaskStatus, type Prisma } from '@prisma/client';
+import { FinalizeTaskDto, OptimizeRouteDto } from './dto/optimize-route.dto';
 
 @Injectable()
 export class RouteService {
@@ -42,13 +43,14 @@ export class RouteService {
       include: { taskAddress: true },
     });
 
-    if (tasks.length === 0) throw new NotFoundException('Nenhuma tarefa válida encontrada.');
+    if (tasks.length === 0)
+      throw new NotFoundException('Nenhuma tarefa válida encontrada.');
 
     // CORREÇÃO AQUI: Tipamos o array explicitamente usando o tipo de 'tasks'
     const optimizedOrder: typeof tasks = [];
-    
+
     let currentLocation = { lat: dto.driverLatitude, lng: dto.driverLongitude };
-    
+
     // Clonamos o array
     const remainingTasks = [...tasks];
 
@@ -56,12 +58,15 @@ export class RouteService {
       let nearestTaskIndex = -1; // Índice da tarefa mais próxima
       let minDistance = Infinity; // Distância mínima até a próxima tarefa
 
-
       for (let i = 0; i < remainingTasks.length; i++) {
         const t = remainingTasks[i]; // Tarefa atual
 
         // VERIFICAÇÃO DE SEGURANÇA
-        if (!t.taskAddress || t.taskAddress.latitude === null || t.taskAddress.longitude === null) {
+        if (
+          !t.taskAddress ||
+          t.taskAddress.latitude === null ||
+          t.taskAddress.longitude === null
+        ) {
           continue;
         }
 
@@ -80,13 +85,17 @@ export class RouteService {
 
       // Se não encontrou nenhuma
       if (nearestTaskIndex === -1) {
-        break; 
+        break;
       }
 
       const nearestTask = remainingTasks[nearestTaskIndex];
 
       // Segunda verificação para o TypeScript permitir a atribuição abaixo
-      if (nearestTask.taskAddress && nearestTask.taskAddress.latitude !== null && nearestTask.taskAddress.longitude !== null) {
+      if (
+        nearestTask.taskAddress &&
+        nearestTask.taskAddress.latitude !== null &&
+        nearestTask.taskAddress.longitude !== null
+      ) {
         optimizedOrder.push(nearestTask);
 
         // Atualiza a localização atual
@@ -103,86 +112,68 @@ export class RouteService {
     return optimizedOrder;
   }
 
-  // 3. Finalizar Visita
   async concludeVisit(taskId: string, userId: string, dto: FinalizeTaskDto) {
     const task = await this.prisma.task.findUnique({
       where: { id: taskId },
-      include: { taskAddress: true },
     });
 
     if (!task) throw new NotFoundException('Tarefa não encontrada');
 
-    const newStatus = dto.status === 'COMPLETED' ? TaskStatus.COMPLETED : TaskStatus.FAILED;
+    // Se o motorista definiu uma data, a tarefa deve voltar para PENDING para aparecer na lista futura
+    // Caso contrário, assume o status que o motorista escolheu (COMPLETED ou FAILED)
+    const statusFinal = dto.scheduledAt
+      ? TaskStatus.PENDING
+      : dto.status === 'COMPLETED'
+        ? TaskStatus.COMPLETED
+        : TaskStatus.FAILED;
 
-    await this.prisma.task.update({
+    const updatedTask = await this.prisma.task.update({
       where: { id: taskId },
       data: {
-        status: newStatus,
+        status: statusFinal,
         finalComment: dto.finalComment,
-        completionDate: new Date(),
+        // Se houver data, atualiza. Se não, mantém a atual ou limpa.
+        scheduledDate: dto.scheduledAt ? new Date(dto.scheduledAt) : undefined,
+        dueDate: dto.scheduledAt ? new Date(dto.scheduledAt) : undefined,
+        completionDate: dto.scheduledAt ? null : new Date(), // Só marca conclusão real se não houver reagendamento
         userCompletedId: userId,
       },
+      include: this.getTaskIncludeDetails(),
     });
-    
-    return this.rescheduleTask(task, dto.status);
+
+    return {
+      message: dto.scheduledAt
+        ? 'Tarefa reagendada com sucesso'
+        : 'Tarefa finalizada com sucesso',
+      task: updatedTask,
+    };
   }
 
-  // Helper de Reagendamento
- // Helper de Reagendamento
-  private async rescheduleTask(originalTask: any, outcome: 'COMPLETED' | 'FAILED') {
-    const daysToAdd = outcome === 'FAILED' ? 1 : 30; 
-    const nextDate = new Date();
-    nextDate.setDate(nextDate.getDate() + daysToAdd);
-
-    const newTitle = outcome === 'FAILED' 
-      ? `Reagendamento: ${originalTask.title}` 
-      : `Visita Periódica: ${originalTask.title}`;
-
-    // CORREÇÃO: Tipagem explícita para permitir undefined OU o objeto de criação
-    let addressCreateData: Prisma.TaskAddressCreateNestedOneWithoutTaskInput | undefined;
-
-    if (originalTask.taskAddress) {
-        addressCreateData = {
-          create: {
-            cep: originalTask.taskAddress.cep,
-            endereco: originalTask.taskAddress.endereco,
-            numero: originalTask.taskAddress.numero,
-            bairro: originalTask.taskAddress.bairro,
-            cidade: originalTask.taskAddress.cidade,
-            estado: originalTask.taskAddress.estado,
-            latitude: originalTask.taskAddress.latitude,
-            longitude: originalTask.taskAddress.longitude,
-            companyId: originalTask.companyId,
-          }
-        };
-    }
-
-    const newTask = await this.prisma.task.create({
-      data: {
-        title: newTitle,
-        description: `Gerado automaticamente.`,
-        status: TaskStatus.PENDING,
-        companyId: originalTask.companyId,
-        userCreateId: originalTask.userCreateId,
-        columnId: originalTask.columnId,
-        scheduledDate: nextDate,
-        dueDate: nextDate,
-        taskAddress: addressCreateData, // Agora o TypeScript aceita isso
-      },
-    });
-
-    return { message: 'Visita finalizada e nova tarefa reagendada.', newTask };
+  // Adicione este método para incluir detalhes da tarefa
+  private getTaskIncludeDetails() {
+    return {
+      taskAddress: true,
+      userAssigned: { select: { name: true } },
+      userCompleted: { select: { name: true } },
+    };
   }
 
   // Helper Matemático
-  private calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
-    const R = 6371; 
+  private calculateDistance(
+    lat1: number,
+    lon1: number,
+    lat2: number,
+    lon2: number,
+  ): number {
+    const R = 6371;
     const dLat = this.deg2rad(lat2 - lat1);
     const dLon = this.deg2rad(lon2 - lon1);
     const a =
       Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos(this.deg2rad(lat1)) * Math.cos(this.deg2rad(lat2)) *
-      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      Math.cos(this.deg2rad(lat1)) *
+        Math.cos(this.deg2rad(lat2)) *
+        Math.sin(dLon / 2) *
+        Math.sin(dLon / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c;
   }
