@@ -5,7 +5,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { Task, TaskAddress, TaskStatus, type Prisma } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
-import { FinalizeTaskDto, OptimizeRouteDto } from './dto/optimize-route.dto';
+import { FinalizeTaskDto, OptimizeRouteDto, RouteOrderType } from './dto/optimize-route.dto';
 
 @Injectable()
 export class RouteService {
@@ -41,28 +41,42 @@ export class RouteService {
           longitude: { not: null },
         },
       },
-      include: { taskAddress: true },
+      include: { 
+        taskAddress: true,
+        column: { select: { id: true } } // Importante para o Frontend
+      },
     });
 
     if (tasks.length === 0)
       throw new NotFoundException('Nenhuma tarefa válida encontrada.');
 
-    // CORREÇÃO AQUI: Tipamos o array explicitamente usando o tipo de 'tasks'
+    // --- CENÁRIO A: ORDENAÇÃO POR PRIORIDADE ---
+    if (dto.orderBy === RouteOrderType.PRIORITY) {
+        // Ordena: 1 (Alta) -> 2 (Média) -> 3 (Baixa) -> Null (Sem prioridade)
+        return tasks.sort((a, b) => {
+            const priorityA = a.priority ?? 999; // Se for null, joga pro fim
+            const priorityB = b.priority ?? 999;
+            return priorityA - priorityB;
+        });
+    }
+
+    // --- CENÁRIO B: ORDENAÇÃO POR PROXIMIDADE (Algoritmo Vizinho Mais Próximo) ---
+    // (Este é o padrão se orderBy for DISTANCE ou undefined)
+    
     const optimizedOrder: typeof tasks = [];
-
     let currentLocation = { lat: dto.driverLatitude, lng: dto.driverLongitude };
-
-    // Clonamos o array
+    
+    // Clonamos o array para ir removendo as tarefas visitadas
     const remainingTasks = [...tasks];
 
     while (remainingTasks.length > 0) {
-      let nearestTaskIndex = -1; // Índice da tarefa mais próxima
-      let minDistance = Infinity; // Distância mínima até a próxima tarefa
+      let nearestTaskIndex = -1;
+      let minDistance = Infinity;
 
       for (let i = 0; i < remainingTasks.length; i++) {
-        const t = remainingTasks[i]; // Tarefa atual
+        const t = remainingTasks[i];
 
-        // VERIFICAÇÃO DE SEGURANÇA
+        // Verificação de segurança (embora o 'where' do banco já garanta)
         if (
           !t.taskAddress ||
           t.taskAddress.latitude === null ||
@@ -84,29 +98,26 @@ export class RouteService {
         }
       }
 
-      // Se não encontrou nenhuma
+      // Se por algum motivo não achou (ex: array sobrou só com inválidos)
       if (nearestTaskIndex === -1) {
         break;
       }
 
       const nearestTask = remainingTasks[nearestTaskIndex];
 
-      // Segunda verificação para o TypeScript permitir a atribuição abaixo
-      if (
-        nearestTask.taskAddress &&
-        nearestTask.taskAddress.latitude !== null &&
-        nearestTask.taskAddress.longitude !== null
-      ) {
-        optimizedOrder.push(nearestTask);
+      // Adiciona na lista ordenada
+      optimizedOrder.push(nearestTask);
 
-        // Atualiza a localização atual
-        currentLocation = {
-          lat: nearestTask.taskAddress.latitude,
-          lng: nearestTask.taskAddress.longitude,
-        };
+      // Atualiza a "localização atual" para ser a desta tarefa
+      // (O motorista vai daqui para a próxima mais próxima)
+      if (nearestTask.taskAddress?.latitude && nearestTask.taskAddress?.longitude) {
+          currentLocation = {
+            lat: nearestTask.taskAddress.latitude,
+            lng: nearestTask.taskAddress.longitude,
+          };
       }
 
-      // Remove da lista
+      // Remove da lista de pendentes
       remainingTasks.splice(nearestTaskIndex, 1);
     }
 

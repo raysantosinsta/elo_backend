@@ -1,26 +1,48 @@
-import { IsString, IsArray, IsNumber, IsOptional, IsDateString } from 'class-validator';
+import { 
+  IsArray, 
+  IsDateString, 
+  IsEnum, 
+  IsIn, 
+  IsNumber, 
+  IsOptional, 
+  IsString, 
+  IsUUID 
+} from 'class-validator';
 
+// 1. Enum para definir o tipo de ordenação
+export enum RouteOrderType {
+  DISTANCE = 'DISTANCE',
+  PRIORITY = 'PRIORITY',
+}
+
+// 2. DTO para Otimizar a Rota
 export class OptimizeRouteDto {
   @IsArray()
-  @IsString({ each: true })
-  taskIds: string[]; // IDs das tarefas selecionadas no Front
+  @IsUUID('4', { each: true }) // Garante que são IDs válidos do banco
+  taskIds: string[]; 
 
   @IsNumber()
-  driverLatitude: number; // Onde o motorista está AGORA
+  driverLatitude: number; 
 
   @IsNumber()
   driverLongitude: number;
+
+  @IsOptional()
+  @IsEnum(RouteOrderType)
+  orderBy?: RouteOrderType; // Opcional: Se não enviar, usa DISTANCE por padrão no service
 }
 
+// 3. DTO para Finalizar a Tarefa (Visita)
 export class FinalizeTaskDto {
   @IsString()
-  status: 'COMPLETED' | 'FAILED'; // Usando strings para facilitar mapeamento
+  @IsIn(['COMPLETED', 'FAILED']) // Trava para aceitar apenas esses status
+  status: 'COMPLETED' | 'FAILED';
 
   @IsString()
   @IsOptional()
   finalComment?: string;
 
-   @IsOptional()
+  @IsOptional()
   @IsDateString()
-  scheduledAt?: string; // Adicione este campo
+  scheduledAt?: string; // Usado para reagendamento
 }
