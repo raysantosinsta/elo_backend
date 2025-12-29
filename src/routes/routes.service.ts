@@ -25,6 +25,7 @@ export class RouteService {
       include: {
         taskAddress: true,
         userAssigned: { select: { name: true } },
+        column: { select: { id: true } } // <--- Garante que a relação existe
       },
     });
   }
