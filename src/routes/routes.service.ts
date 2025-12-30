@@ -2,10 +2,14 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Task, TaskAddress, TaskStatus, type Prisma } from '@prisma/client';
+import { TaskStatus, type Task } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
-import { FinalizeTaskDto, OptimizeRouteDto, RouteOrderType } from './dto/optimize-route.dto';
+import {
+  FinalizeTaskDto,
+  OptimizeRouteDto,
+  RouteOrderType,
+} from './dto/optimize-route.dto';
 
 @Injectable()
 export class RouteService {
@@ -25,14 +29,14 @@ export class RouteService {
       include: {
         taskAddress: true,
         userAssigned: { select: { name: true } },
-        column: { select: { id: true } } // <--- Garante que a relação existe
+        column: { select: { id: true } }, // <--- Garante que a relação existe
       },
     });
   }
 
-  // 2. Otimizar Rota
+  // 2. Otimizar Rota (Completa e Ajustada)
   async optimizeRoute(dto: OptimizeRouteDto) {
-    // Busca as tarefas garantindo que latitude e longitude existem
+    // Busca as tarefas garantindo que latitude e longitude existem no banco
     const tasks = await this.prisma.task.findMany({
       where: {
         id: { in: dto.taskIds },
@@ -41,87 +45,175 @@ export class RouteService {
           longitude: { not: null },
         },
       },
-      include: { 
+      include: {
         taskAddress: true,
-        column: { select: { id: true } } // Importante para o Frontend
+        column: { select: { id: true } },
       },
     });
 
-    if (tasks.length === 0)
+    if (tasks.length === 0) {
       throw new NotFoundException('Nenhuma tarefa válida encontrada.');
+    }
+
+    let optimizedOrder: typeof tasks = [];
 
     // --- CENÁRIO A: ORDENAÇÃO POR PRIORIDADE ---
     if (dto.orderBy === RouteOrderType.PRIORITY) {
-        // Ordena: 1 (Alta) -> 2 (Média) -> 3 (Baixa) -> Null (Sem prioridade)
-        return tasks.sort((a, b) => {
-            const priorityA = a.priority ?? 999; // Se for null, joga pro fim
-            const priorityB = b.priority ?? 999;
-            return priorityA - priorityB;
-        });
+      // Ordena: 1 (Alta) -> 2 (Média) -> 3 (Baixa) -> Null (Sem prioridade)
+      optimizedOrder = tasks.sort((a, b) => {
+        const priorityA = a.priority ?? 999;
+        const priorityB = b.priority ?? 999;
+        return priorityA - priorityB;
+      });
     }
+    // --- CENÁRIO B: ORDENAÇÃO POR PROXIMIDADE (Vizinho Mais Próximo) ---
+    else {
+      let currentLocation = {
+        lat: dto.driverLatitude,
+        lng: dto.driverLongitude,
+      };
+      const remainingTasks = [...tasks];
 
-    // --- CENÁRIO B: ORDENAÇÃO POR PROXIMIDADE (Algoritmo Vizinho Mais Próximo) ---
-    // (Este é o padrão se orderBy for DISTANCE ou undefined)
-    
-    const optimizedOrder: typeof tasks = [];
-    let currentLocation = { lat: dto.driverLatitude, lng: dto.driverLongitude };
-    
-    // Clonamos o array para ir removendo as tarefas visitadas
-    const remainingTasks = [...tasks];
+      while (remainingTasks.length > 0) {
+        let nearestTaskIndex = -1;
+        let minDistance = Infinity;
 
-    while (remainingTasks.length > 0) {
-      let nearestTaskIndex = -1;
-      let minDistance = Infinity;
+        for (let i = 0; i < remainingTasks.length; i++) {
+          const t = remainingTasks[i];
 
-      for (let i = 0; i < remainingTasks.length; i++) {
-        const t = remainingTasks[i];
+          // --- CORREÇÃO DO TYPESCRIPT AQUI ---
+          const tLat = t.taskAddress?.latitude;
+          const tLng = t.taskAddress?.longitude;
 
-        // Verificação de segurança (embora o 'where' do banco já garanta)
-        if (
-          !t.taskAddress ||
-          t.taskAddress.latitude === null ||
-          t.taskAddress.longitude === null
-        ) {
-          continue;
+          // Validação explícita: se não for número, pula
+          if (
+            !t.taskAddress ||
+            typeof tLat !== 'number' ||
+            typeof tLng !== 'number'
+          ) {
+            continue;
+          }
+
+          const dist = this.calculateDistance(
+            currentLocation.lat,
+            currentLocation.lng,
+            tLat, // Agora o TS sabe que é number
+            tLng, // Agora o TS sabe que é number
+          );
+
+          if (dist < minDistance) {
+            minDistance = dist;
+            nearestTaskIndex = i;
+          }
         }
 
-        const dist = this.calculateDistance(
-          currentLocation.lat,
-          currentLocation.lng,
-          t.taskAddress.latitude,
-          t.taskAddress.longitude,
-        );
-
-        if (dist < minDistance) {
-          minDistance = dist;
-          nearestTaskIndex = i;
+        // Se não encontrou nenhuma válida restante (segurança)
+        if (nearestTaskIndex === -1) {
+          // Adiciona o que sobrou (se houver) e encerra para evitar loop infinito
+          optimizedOrder.push(...remainingTasks);
+          break;
         }
-      }
 
-      // Se por algum motivo não achou (ex: array sobrou só com inválidos)
-      if (nearestTaskIndex === -1) {
-        break;
-      }
+        const nearestTask = remainingTasks[nearestTaskIndex];
+        optimizedOrder.push(nearestTask);
 
-      const nearestTask = remainingTasks[nearestTaskIndex];
+        // Atualiza a "localização atual" para a próxima iteração
+        // Novamente, validamos antes de atribuir
+        const nextLat = nearestTask.taskAddress?.latitude;
+        const nextLng = nearestTask.taskAddress?.longitude;
 
-      // Adiciona na lista ordenada
-      optimizedOrder.push(nearestTask);
-
-      // Atualiza a "localização atual" para ser a desta tarefa
-      // (O motorista vai daqui para a próxima mais próxima)
-      if (nearestTask.taskAddress?.latitude && nearestTask.taskAddress?.longitude) {
+        if (typeof nextLat === 'number' && typeof nextLng === 'number') {
           currentLocation = {
-            lat: nearestTask.taskAddress.latitude,
-            lng: nearestTask.taskAddress.longitude,
+            lat: nextLat,
+            lng: nextLng,
           };
-      }
+        }
 
-      // Remove da lista de pendentes
-      remainingTasks.splice(nearestTaskIndex, 1);
+        remainingTasks.splice(nearestTaskIndex, 1);
+      }
     }
 
-    return optimizedOrder;
+    // --- CÁLCULO DE TEMPO TOTAL (NOVO) ---
+    const stats = await this.calculateRouteStats(
+      { lat: dto.driverLatitude, lng: dto.driverLongitude },
+      optimizedOrder,
+    );
+
+    return {
+      route: optimizedOrder,
+      stats: stats,
+    };
+  }
+
+  private async calculateRouteStats(
+    startPos: { lat: number; lng: number },
+    tasks: Task[],
+  ) {
+    try {
+      // Filtra tarefas sem lat/lng para não quebrar a URL
+      const validTasks = tasks.filter(
+        (t: any) =>
+          t.taskAddress?.latitude != null && t.taskAddress?.longitude != null,
+      );
+
+      // Monta string: lng,lat;lng,lat...
+      const coordinates = [
+        `${startPos.lng},${startPos.lat}`,
+        ...validTasks.map(
+          (t: any) => `${t.taskAddress.longitude},${t.taskAddress.latitude}`,
+        ),
+      ].join(';');
+
+      // Chama OSRM (Demo server)
+      const url = `https://router.project-osrm.org/route/v1/driving/${coordinates}?overview=false`;
+      const response = await fetch(url);
+      const data = await response.json();
+
+      if (data.code === 'Ok' && data.routes && data.routes.length > 0) {
+        const route = data.routes[0];
+        return {
+          totalDurationSeconds: route.duration,
+          totalDistanceMeters: route.distance,
+          formattedDuration: this.formatDuration(route.duration),
+          formattedDistance: `${(route.distance / 1000).toFixed(1)} km`,
+        };
+      }
+    } catch (error) {
+      console.error('Erro OSRM:', error);
+    }
+
+    // Fallback: Cálculo Linear se a API falhar
+    let totalDistKm = 0;
+    let current = startPos;
+
+    for (const task of tasks) {
+      const tAddr = (task as any).taskAddress;
+      if (tAddr?.latitude && tAddr?.longitude) {
+        totalDistKm += this.calculateDistance(
+          current.lat,
+          current.lng,
+          tAddr.latitude,
+          tAddr.longitude,
+        );
+        current = { lat: tAddr.latitude, lng: tAddr.longitude };
+      }
+    }
+
+    const estimatedSeconds = (totalDistKm * 1000) / 8.33; // ~30km/h
+
+    return {
+      totalDurationSeconds: estimatedSeconds,
+      totalDistanceMeters: totalDistKm * 1000,
+      formattedDuration: `~${this.formatDuration(estimatedSeconds)}`,
+      formattedDistance: `~${totalDistKm.toFixed(1)} km`,
+    };
+  }
+
+  private formatDuration(seconds: number): string {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    if (h > 0) return `${h}h ${m}min`;
+    return `${m}min`;
   }
 
   async concludeVisit(taskId: string, userId: string, dto: FinalizeTaskDto) {
