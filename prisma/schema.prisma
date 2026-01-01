@@ -879,8 +879,10 @@ model FlowItem {
   flow   ProductFlow @relation(fields: [flowId], references: [id])
 
   // Datas
-  dueDate   DateTime? @map("prazo")
-  enteredAt DateTime  @default(now()) @map("entrada_em")
+  dueDate             DateTime? @map("prazo")
+  enteredAt           DateTime  @default(now()) @map("entrada_em")
+  productionStartedAt DateTime? @map("data_do_inicio_da_producao")
+  deliveryAt          DateTime? @map("data_de_entrega_da_producao")
 
   // Responsável
   assignedToId String? @map("responsavel_id") @db.Uuid

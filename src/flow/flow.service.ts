@@ -17,7 +17,7 @@ import { SupabaseService } from '../supabase/supabase.service';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
 import { Counter, Histogram } from 'prom-client';
-import  { CreateFlowDto, CreateFlowItemDto } from './dto/create-flow.dto';
+import { CreateFlowDto, CreateFlowItemDto } from './dto/create-flow.dto';
 
 // Métricas
 const flowOpsCounter = new Counter({
@@ -94,7 +94,7 @@ export class FlowService {
     return flows;
   }
 
-  // Adicione isso dentro da classe FlowService
+  // ============ UPDATE ITEM (Com novos campos) ============
 
   async updateFlowItem(
     companyId: string,
@@ -114,15 +114,32 @@ export class FlowService {
       productRef: data.productRef,
       quantity: data.quantity,
       priority: data.priority,
-      description: data.description, // <--- ADICIONADO: Campo description
+      description: data.description,
       assignedToId: data.assignedToId || null,
       updatedAt: new Date(),
     };
 
+    // --- TRATAMENTO DE DATAS ---
+    
+    // 1. Data de Vencimento (Prazo)
     if (data.dueDate) {
       updateData.dueDate = new Date(data.dueDate);
     } else if (data.dueDate === null || data.dueDate === '') {
        updateData.dueDate = null;
+    }
+
+    // 2. Data Início Produção (NOVO)
+    if (data.productionStartedAt) {
+        updateData.productionStartedAt = new Date(data.productionStartedAt);
+    } else if (data.productionStartedAt === null || data.productionStartedAt === '') {
+        updateData.productionStartedAt = null;
+    }
+
+    // 3. Data Entrega Produção (NOVO)
+    if (data.deliveryAt) {
+        updateData.deliveryAt = new Date(data.deliveryAt);
+    } else if (data.deliveryAt === null || data.deliveryAt === '') {
+        updateData.deliveryAt = null;
     }
 
     if (data.stageId && data.stageId !== item.stageId) {
@@ -153,11 +170,9 @@ export class FlowService {
             items: {
               orderBy: { orderInStage: 'asc' },
               include: {
-                // --- ATENÇÃO AQUI: Adicione videos e audios ---
                 images: { select: { url: true, id: true }, take: 1 }, 
-                videos: { select: { url: true, id: true, filename: true } }, // Adicionar isso
-                audios: { select: { url: true, id: true, filename: true } }, // Adicionar isso
-                // ----------------------------------------------
+                videos: { select: { url: true, id: true, filename: true } },
+                audios: { select: { url: true, id: true, filename: true } },
                 assignedTo: { select: { name: true, email: true } },
                 _count: { select: { images: true, audios: true, videos: true } }
               }
@@ -169,12 +184,11 @@ export class FlowService {
 
     if (!board) throw new NotFoundException('Fluxo não encontrado');
 
-    await this.cacheManager.set(cacheKey, board, 10000); // Cache curto (10s) para board dinâmico
+    await this.cacheManager.set(cacheKey, board, 10000); 
     return board;
   }
 
   async deleteFlow(flowId: string, companyId: string) {
-    // 1. Verificar se o fluxo existe
     const flow = await this.prisma.productFlow.findFirst({
         where: { id: flowId, companyId },
         include: { 
@@ -184,39 +198,28 @@ export class FlowService {
 
     if (!flow) throw new NotFoundException('Fluxo não encontrado');
 
-    // 2. Limpeza de Arquivos no Storage (Supabase/S3)
-    // Fazemos isso antes ou de forma assíncrona ("fire and forget")
     this.cleanUpFlowFiles(flow.items).catch(err => 
         this.logger.error(`Erro ao limpar arquivos do fluxo ${flowId}`, err)
     );
 
-    // 3. Deleção Sequencial no Banco de Dados (Ordem é Importante!)
     await this.prisma.$transaction(async (tx) => {
-        // Passo A: Apagar todos os ITENS deste fluxo
-        // Isso remove as FKs que apontam para Stages e para o Flow
         await tx.flowItem.deleteMany({
             where: { flowId: flowId }
         });
 
-        // Passo B: Apagar todas as ETAPAS (Stages) deste fluxo
-        // Agora que não tem itens, podemos apagar as etapas
         await tx.flowStage.deleteMany({
             where: { flowId: flowId }
         });
 
-        // Passo C: Finalmente, apagar o FLUXO
         await tx.productFlow.delete({
             where: { id: flowId }
         });
     });
 
-    // 4. Invalidar Cache
     await this.invalidateFlowCache(companyId, flowId);
 
     return { success: true };
   }
-
- // Adicione este método dentro da classe FlowService em flow.service.ts
 
   // ============ DELETE MEDIA ============
   async deleteMedia(
@@ -225,7 +228,6 @@ export class FlowService {
     type: 'image' | 'audio' | 'video',
     mediaId: string
   ) {
-    // 1. Identificar o item e a mídia correta
     let mediaRecord;
     let modelDelegate;
 
@@ -239,7 +241,6 @@ export class FlowService {
       throw new BadRequestException('Tipo de mídia inválido');
     }
 
-    // Busca o registro garantindo que pertence à empresa e ao item
     mediaRecord = await modelDelegate.findFirst({
       where: { id: mediaId, itemId, companyId }
     });
@@ -248,19 +249,16 @@ export class FlowService {
       throw new NotFoundException('Mídia não encontrada');
     }
 
-    // 2. Deletar do Supabase (Storage)
     if (mediaRecord.url) {
       await this.supabase.deleteFlowFile(mediaRecord.url).catch(err => 
         this.logger.error(`Erro ao deletar arquivo do storage: ${mediaRecord.url}`, err)
       );
     }
 
-    // 3. Deletar do Banco de Dados (Prisma)
     await modelDelegate.delete({
       where: { id: mediaId }
     });
 
-    // 4. Invalidar Cache para atualizar o Frontend
     const item = await this.prisma.flowItem.findUnique({ 
         where: { id: itemId },
         select: { flowId: true }
@@ -272,6 +270,8 @@ export class FlowService {
 
     return { success: true };
   }
+
+  // ============ CREATE ITEM (Com novos campos) ============
 
   async createFlowItem(companyId: string, flowId: string, userId: string, dto: CreateFlowItemDto) {
     return this.prisma.$transaction(async (tx) => {
@@ -302,18 +302,23 @@ export class FlowService {
       const newItem = await tx.flowItem.create({
         data: {
           title: dto.title,
-          description: dto.description, // <--- ADICIONADO: Campo description
+          description: dto.description,
           orderNumber: dto.orderNumber || `ORD-${Date.now()}`,
           productRef: dto.productRef || 'N/A',
           quantity: dto.quantity || 1,
           priority: dto.priority || 3,
-          dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
           assignedToId: dto.assignedToId,
           flowId,
           companyId,
           stageId: targetStageId!,
           orderInStage: (lastItem?.orderInStage ?? -1) + 1,
-          enteredAt: new Date()
+          enteredAt: new Date(),
+
+          // --- NOVOS CAMPOS MAPEADOS AQUI ---
+          dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
+          productionStartedAt: dto.productionStartedAt ? new Date(dto.productionStartedAt) : null,
+          deliveryAt: dto.deliveryAt ? new Date(dto.deliveryAt) : null,
+          // ----------------------------------
         }
       });
 
@@ -327,16 +332,13 @@ export class FlowService {
     if (!item) throw new NotFoundException('Item não encontrado');
     if (item.stageId === newStageId) return item;
 
-    // Transação para garantir consistência da ordem
     const updated = await this.prisma.$transaction(async (tx) => {
-        // 1. Pega a última posição da nova coluna
         const lastItem = await tx.flowItem.findFirst({
             where: { stageId: newStageId },
             orderBy: { orderInStage: 'desc' },
             select: { orderInStage: true }
         });
 
-        // 2. Atualiza o item
         return tx.flowItem.update({
             where: { id: itemId },
             data: {
@@ -366,21 +368,16 @@ export class FlowService {
 
   // ============ STAGES ============
 
-  // ============ STAGES ============
-
-  // Atualizado para aceitar o parâmetro opcional 'color'
   async createStage(companyId: string, flowId: string, name: string, color?: string) {
     const end = dbLatency.labels('createStage').startTimer();
     
     try {
-      // 1. Verificar se o fluxo existe e pertence à empresa
       const flow = await this.prisma.productFlow.findFirst({
         where: { id: flowId, companyId }
       });
 
       if (!flow) throw new NotFoundException('Fluxo não encontrado');
 
-      // 2. Encontrar a última ordem para adicionar no final
       const lastStage = await this.prisma.flowStage.findFirst({
         where: { flowId },
         orderBy: { order: 'desc' },
@@ -389,18 +386,15 @@ export class FlowService {
 
       const newOrder = (lastStage?.order ?? -1) + 1;
 
-      // 3. Criar a etapa
       const stage = await this.prisma.flowStage.create({
         data: {
           name,
           flowId,
           order: newOrder,
-          // ALTERAÇÃO: Usa a cor enviada ou o Azul Escuro (#2C3E50) como padrão
           color: color || '#2C3E50' 
         }
       });
 
-      // 4. Invalidar cache e registrar métrica
       await this.invalidateFlowCache(companyId, flowId);
       flowOpsCounter.labels('createStage', 'success').inc();
       end();
@@ -414,12 +408,9 @@ export class FlowService {
     }
   }
 
- // ... outros métodos ...
-
   // ============ STAGE OPERATIONS ============
 
   async updateStage(companyId: string, stageId: string, data: { name?: string; color?: string; order?: number }) {
-    // Verifica propriedade
     const stage = await this.prisma.flowStage.findFirst({
         where: { id: stageId, flow: { companyId } }
     });
@@ -439,7 +430,6 @@ export class FlowService {
   }
 
   async deleteStage(stageId: string, companyId: string) {
-    // 1. Verificar se a etapa existe e pertence à empresa
     const stage = await this.prisma.flowStage.findFirst({
         where: { id: stageId, flow: { companyId } },
         include: { items: { include: { images: true, audios: true, videos: true } } }
@@ -447,29 +437,22 @@ export class FlowService {
 
     if (!stage) throw new NotFoundException('Etapa não encontrada');
 
-    // 2. Limpar arquivos do Storage (opcional, mas recomendado)
     this.cleanUpFlowFiles(stage.items).catch(console.error);
 
-    // 3. Transação para apagar Itens -> Depois a Etapa
     await this.prisma.$transaction(async (tx) => {
-        // A. Apaga os itens da etapa (para não dar erro de Foreign Key)
         await tx.flowItem.deleteMany({
             where: { stageId: stageId }
         });
 
-        // B. Apaga a etapa
         await tx.flowStage.delete({
             where: { id: stageId }
         });
     });
 
-    // 4. Cache
     await this.invalidateFlowCache(companyId, stage.flowId);
 
     return { success: true };
   }
-
- // ... imports existentes
 
   // ============ MEDIA UPLOAD ============
 
@@ -480,18 +463,14 @@ export class FlowService {
     type: 'image' | 'audio' | 'video',
     userId: string
   ) {
-    // 1. Verificar se o item existe e pertence à empresa
     const item = await this.prisma.flowItem.findFirst({
       where: { id: itemId, companyId }
     });
 
     if (!item) throw new NotFoundException('Item não encontrado');
 
-    // 2. Upload no Supabase (Usando seu método já existente)
-    // O SupabaseService detecta o bucket baseado no 'type'
     const uploadResult = await this.supabase.uploadFlowFile(itemId, file, type);
 
-    // 3. Salvar referência no Banco de Dados (Prisma)
     let mediaRecord;
 
     if (type === 'image') {
@@ -514,7 +493,7 @@ export class FlowService {
           url: uploadResult.url,
           filename: uploadResult.filename,
           size: uploadResult.size,
-          duration: 0 // Se quiser extrair duração, precisa de lib externa ou enviar do front
+          duration: 0 
         }
       });
     } else if (type === 'video') {
@@ -531,18 +510,14 @@ export class FlowService {
       });
     }
 
-    // 4. Invalidar cache para atualizar o board
     await this.invalidateFlowCache(companyId, item.flowId);
 
     return mediaRecord;
   }
   
-  // ... (Mantenha o método deleteItem que corrigimos antes)
-
   // ============ ITEM OPERATIONS ============
 
   async deleteItem(itemId: string, companyId: string) {
-    // 1. Buscar o item para garantir que existe e pertence à empresa
     const item = await this.prisma.flowItem.findFirst({
         where: { id: itemId, companyId },
         include: { images: true, audios: true, videos: true }
@@ -550,19 +525,14 @@ export class FlowService {
 
     if (!item) throw new NotFoundException('Item não encontrado');
 
-    // 2. Limpar arquivos do Storage (Imagens, Áudios, Vídeos)
-    // Usamos o helper que você já tem ou criamos um array com tudo
     this.cleanUpFlowFiles([item]).catch(err => 
         this.logger.error(`Erro ao limpar arquivos do item ${itemId}`, err)
     );
 
-    // 3. Deletar do Banco de Dados
-    // Como seu Schema tem "onDelete: Cascade" nas mídias, o Prisma apaga as tabelas filhas automaticamente.
     await this.prisma.flowItem.delete({
         where: { id: itemId }
     });
 
-    // 4. Atualizar o Cache para o Frontend ver a mudança
     await this.invalidateFlowCache(companyId, item.flowId);
 
     return { success: true };
