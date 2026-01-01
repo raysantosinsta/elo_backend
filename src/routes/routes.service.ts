@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { TaskStatus, type Task } from '@prisma/client';
+import { TaskStatus, type Prisma, type Task } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -16,20 +16,39 @@ export class RouteService {
   constructor(private prisma: PrismaService) {}
 
   // 1. Buscar tarefas disponíveis (apenas as que têm Lat/Lng válidas)
-  async getTasksWithLocation(companyId: string) {
-    return this.prisma.task.findMany({
-      where: {
-        companyId,
-        status: { in: [TaskStatus.PENDING, TaskStatus.IN_PROGRESS] },
-        taskAddress: {
-          latitude: { not: null }, // Garante que não é null
-          longitude: { not: null }, // Garante que não é null
-        },
+  async getTasksWithLocation(
+      companyId: string, 
+      filters: { startDate?: string; endDate?: string; assignedToId?: string }
+  ) {
+    // Construção dinâmica do WHERE
+    const where: Prisma.TaskWhereInput = {
+      companyId,
+      status: { in: [TaskStatus.PENDING, TaskStatus.IN_PROGRESS] },
+      taskAddress: {
+        latitude: { not: null },
+        longitude: { not: null },
       },
+    };
+
+    // Filtro de Data (Intervalo) no scheduledDate
+    if (filters.startDate || filters.endDate) {
+        where.scheduledDate = {
+            ...(filters.startDate && { gte: new Date(filters.startDate) }),
+            ...(filters.endDate && { lte: new Date(filters.endDate) }),
+        };
+    }
+
+    // Filtro de Responsável (ignora se for 'all' ou undefined)
+    if (filters.assignedToId && filters.assignedToId !== 'all') {
+        where.userAssignedId = filters.assignedToId;
+    }
+
+    return this.prisma.task.findMany({
+      where,
       include: {
         taskAddress: true,
         userAssigned: { select: { name: true } },
-        column: { select: { id: true } }, // <--- Garante que a relação existe
+        column: { select: { id: true } },
       },
     });
   }

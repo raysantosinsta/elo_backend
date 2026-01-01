@@ -1,20 +1,12 @@
 /* eslint-disable prettier/prettier */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
-import {
-  Body,
-  Controller,
-  Get,
-  Param,
-  Patch,
-  Post,
-  Req
-} from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import { FinalizeTaskDto, OptimizeRouteDto } from './dto/optimize-route.dto';
 import { RouteService } from './routes.service';
 
 // Descomente a linha abaixo se você tiver um Guard de Autenticação (ex: JwtAuthGuard)
-// @UseGuards(JwtAuthGuard) 
+// @UseGuards(JwtAuthGuard)
 @Controller('routes')
 export class RouteController {
   constructor(private readonly routeService: RouteService) {}
@@ -24,12 +16,21 @@ export class RouteController {
    * Busca todas as tarefas pendentes da empresa que possuem endereço (Lat/Lng) válido.
    */
   @Get('available-tasks')
-  async getAvailableTasks(@Req() req: any) {
-    // Estamos assumindo que o seu AuthGuard popula o req.user
-    // Se não tiver auth ainda, você pode passar o companyId manualmente para testar
-    const companyId = req.user?.companyId; 
-    
-    return this.routeService.getTasksWithLocation(companyId);
+  async getAvailableTasks(
+    @Req() req: any,
+    // Adicionar recebimento dos filtros da URL
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Query('assignedToId') assignedToId?: string,
+  ) {
+    const companyId = req.user?.companyId;
+
+    // Repassa os filtros para o Service
+    return this.routeService.getTasksWithLocation(companyId, {
+      startDate,
+      endDate,
+      assignedToId,
+    });
   }
 
   /**
@@ -48,12 +49,12 @@ export class RouteController {
    */
   @Patch('tasks/:id/finalize')
   async finalizeTask(
-    @Param('id') taskId: string, 
+    @Param('id') taskId: string,
     @Body() dto: FinalizeTaskDto,
-    @Req() req: any
+    @Req() req: any,
   ) {
     const userId = req.user?.id; // ID do usuário que está finalizando (motorista)
-    
+
     return this.routeService.concludeVisit(taskId, userId, dto);
   }
 }
