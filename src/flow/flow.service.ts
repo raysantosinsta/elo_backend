@@ -60,9 +60,8 @@ export class FlowService {
         data: {
           name: dto.name,
           companyId,
-          
         },
-        include: { stages: true }
+        include: { stages: true },
       });
 
       await this.invalidateFlowCache(companyId);
@@ -85,9 +84,9 @@ export class FlowService {
       where: { companyId },
       include: {
         stages: { orderBy: { order: 'asc' } },
-        _count: { select: { items: true, stages: true } }
+        _count: { select: { items: true, stages: true } },
       },
-      orderBy: { createdAt: 'desc' }
+      orderBy: { createdAt: 'desc' },
     });
 
     await this.cacheManager.set(cacheKey, flows, this.CACHE_TTL);
@@ -100,7 +99,7 @@ export class FlowService {
     companyId: string,
     itemId: string,
     userId: string,
-    data: any 
+    data: any,
   ) {
     const item = await this.prisma.flowItem.findFirst({
       where: { id: itemId, companyId },
@@ -117,33 +116,37 @@ export class FlowService {
       description: data.description,
       assignedToId: data.assignedToId || null,
       updatedAt: new Date(),
+      supplierId: data.supplierId || null, // <--- ATUALIZAR AQUI
     };
 
     // --- TRATAMENTO DE DATAS ---
-    
+
     // 1. Data de Vencimento (Prazo)
     if (data.dueDate) {
       updateData.dueDate = new Date(data.dueDate);
     } else if (data.dueDate === null || data.dueDate === '') {
-       updateData.dueDate = null;
+      updateData.dueDate = null;
     }
 
     // 2. Data Início Produção (NOVO)
     if (data.productionStartedAt) {
-        updateData.productionStartedAt = new Date(data.productionStartedAt);
-    } else if (data.productionStartedAt === null || data.productionStartedAt === '') {
-        updateData.productionStartedAt = null;
+      updateData.productionStartedAt = new Date(data.productionStartedAt);
+    } else if (
+      data.productionStartedAt === null ||
+      data.productionStartedAt === ''
+    ) {
+      updateData.productionStartedAt = null;
     }
 
     // 3. Data Entrega Produção (NOVO)
     if (data.deliveryAt) {
-        updateData.deliveryAt = new Date(data.deliveryAt);
+      updateData.deliveryAt = new Date(data.deliveryAt);
     } else if (data.deliveryAt === null || data.deliveryAt === '') {
-        updateData.deliveryAt = null;
+      updateData.deliveryAt = null;
     }
 
     if (data.stageId && data.stageId !== item.stageId) {
-       updateData.stageId = data.stageId;
+      updateData.stageId = data.stageId;
     }
 
     const updated = await this.prisma.flowItem.update({
@@ -154,6 +157,45 @@ export class FlowService {
     await this.invalidateFlowCache(companyId, item.flowId);
 
     return updated;
+  }
+
+  async getFilteredItems(companyId: string, filters: any) {
+    const { startDate, endDate, dateField, onlyOutsourced } = filters;
+
+    const whereClause: any = {
+      companyId,
+    };
+
+    // Lógica A: Se marcou "Apenas Terceirizados", filtra quem tem supplierId
+    if (onlyOutsourced === 'true') {
+      whereClause.supplierId = { not: null };
+    }
+
+    // Lógica B: Filtro de Data Combinado
+    if (startDate && endDate && dateField) {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999); // Garante o dia inteiro
+
+      whereClause[dateField] = {
+        gte: start,
+        lte: end,
+      };
+    }
+
+    // Busca e Retorna Lista
+    return this.prisma.flowItem.findMany({
+      where: whereClause,
+      include: {
+        supplier: { select: { name: true } },
+        assignedTo: { select: { name: true, email: true } },
+        images: { take: 1, select: { url: true } },
+        stage: { select: { name: true, color: true } },
+      },
+      orderBy: {
+        [dateField || 'createdAt']: 'asc', // Ordena pela data escolhida
+      },
+    });
   }
 
   async getKanbanBoard(flowId: string, companyId: string) {
@@ -170,50 +212,53 @@ export class FlowService {
             items: {
               orderBy: { orderInStage: 'asc' },
               include: {
-                images: { select: { url: true, id: true }, take: 1 }, 
+                images: { select: { url: true, id: true }, take: 1 },
                 videos: { select: { url: true, id: true, filename: true } },
                 audios: { select: { url: true, id: true, filename: true } },
                 assignedTo: { select: { name: true, email: true } },
-                _count: { select: { images: true, audios: true, videos: true } }
-              }
-            }
-          }
-        }
-      }
+                _count: {
+                  select: { images: true, audios: true, videos: true },
+                },
+                supplier: { select: { id: true, name: true } }, // <--- ADICIONAR
+              },
+            },
+          },
+        },
+      },
     });
 
     if (!board) throw new NotFoundException('Fluxo não encontrado');
 
-    await this.cacheManager.set(cacheKey, board, 10000); 
+    await this.cacheManager.set(cacheKey, board, 10000);
     return board;
   }
 
   async deleteFlow(flowId: string, companyId: string) {
     const flow = await this.prisma.productFlow.findFirst({
-        where: { id: flowId, companyId },
-        include: { 
-            items: { include: { images: true, audios: true, videos: true } } 
-        }
+      where: { id: flowId, companyId },
+      include: {
+        items: { include: { images: true, audios: true, videos: true } },
+      },
     });
 
     if (!flow) throw new NotFoundException('Fluxo não encontrado');
 
-    this.cleanUpFlowFiles(flow.items).catch(err => 
-        this.logger.error(`Erro ao limpar arquivos do fluxo ${flowId}`, err)
+    this.cleanUpFlowFiles(flow.items).catch((err) =>
+      this.logger.error(`Erro ao limpar arquivos do fluxo ${flowId}`, err),
     );
 
     await this.prisma.$transaction(async (tx) => {
-        await tx.flowItem.deleteMany({
-            where: { flowId: flowId }
-        });
+      await tx.flowItem.deleteMany({
+        where: { flowId: flowId },
+      });
 
-        await tx.flowStage.deleteMany({
-            where: { flowId: flowId }
-        });
+      await tx.flowStage.deleteMany({
+        where: { flowId: flowId },
+      });
 
-        await tx.productFlow.delete({
-            where: { id: flowId }
-        });
+      await tx.productFlow.delete({
+        where: { id: flowId },
+      });
     });
 
     await this.invalidateFlowCache(companyId, flowId);
@@ -226,7 +271,7 @@ export class FlowService {
     companyId: string,
     itemId: string,
     type: 'image' | 'audio' | 'video',
-    mediaId: string
+    mediaId: string,
   ) {
     let mediaRecord;
     let modelDelegate;
@@ -242,7 +287,7 @@ export class FlowService {
     }
 
     mediaRecord = await modelDelegate.findFirst({
-      where: { id: mediaId, itemId, companyId }
+      where: { id: mediaId, itemId, companyId },
     });
 
     if (!mediaRecord) {
@@ -250,22 +295,27 @@ export class FlowService {
     }
 
     if (mediaRecord.url) {
-      await this.supabase.deleteFlowFile(mediaRecord.url).catch(err => 
-        this.logger.error(`Erro ao deletar arquivo do storage: ${mediaRecord.url}`, err)
-      );
+      await this.supabase
+        .deleteFlowFile(mediaRecord.url)
+        .catch((err) =>
+          this.logger.error(
+            `Erro ao deletar arquivo do storage: ${mediaRecord.url}`,
+            err,
+          ),
+        );
     }
 
     await modelDelegate.delete({
-      where: { id: mediaId }
+      where: { id: mediaId },
     });
 
-    const item = await this.prisma.flowItem.findUnique({ 
-        where: { id: itemId },
-        select: { flowId: true }
+    const item = await this.prisma.flowItem.findUnique({
+      where: { id: itemId },
+      select: { flowId: true },
     });
-    
+
     if (item) {
-        await this.invalidateFlowCache(companyId, item.flowId);
+      await this.invalidateFlowCache(companyId, item.flowId);
     }
 
     return { success: true };
@@ -273,30 +323,36 @@ export class FlowService {
 
   // ============ CREATE ITEM (Com novos campos) ============
 
-  async createFlowItem(companyId: string, flowId: string, userId: string, dto: CreateFlowItemDto) {
+  async createFlowItem(
+    companyId: string,
+    flowId: string,
+    userId: string,
+    dto: CreateFlowItemDto,
+  ) {
     return this.prisma.$transaction(async (tx) => {
       let targetStageId = dto.stageId;
 
       if (targetStageId) {
         const stageExists = await tx.flowStage.findFirst({
-          where: { id: targetStageId, flowId }
+          where: { id: targetStageId, flowId },
         });
-        if (!stageExists) targetStageId = undefined; 
+        if (!stageExists) targetStageId = undefined;
       }
 
       if (!targetStageId) {
         const firstStage = await tx.flowStage.findFirst({
           where: { flowId },
-          orderBy: { order: 'asc' }
+          orderBy: { order: 'asc' },
         });
-        if (!firstStage) throw new BadRequestException('Este fluxo não possui etapas.');
+        if (!firstStage)
+          throw new BadRequestException('Este fluxo não possui etapas.');
         targetStageId = firstStage.id;
       }
 
       const lastItem = await tx.flowItem.findFirst({
         where: { stageId: targetStageId },
         orderBy: { orderInStage: 'desc' },
-        select: { orderInStage: true }
+        select: { orderInStage: true },
       });
 
       const newItem = await tx.flowItem.create({
@@ -316,10 +372,13 @@ export class FlowService {
 
           // --- NOVOS CAMPOS MAPEADOS AQUI ---
           dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
-          productionStartedAt: dto.productionStartedAt ? new Date(dto.productionStartedAt) : null,
+          productionStartedAt: dto.productionStartedAt
+            ? new Date(dto.productionStartedAt)
+            : null,
           deliveryAt: dto.deliveryAt ? new Date(dto.deliveryAt) : null,
           // ----------------------------------
-        }
+          supplierId: dto.supplierId || null, // <--- SALVAR AQUI
+        },
       });
 
       await this.invalidateFlowCache(companyId, flowId);
@@ -328,25 +387,27 @@ export class FlowService {
   }
 
   async moveItem(itemId: string, newStageId: string, userId: string) {
-    const item = await this.prisma.flowItem.findUnique({ where: { id: itemId } });
+    const item = await this.prisma.flowItem.findUnique({
+      where: { id: itemId },
+    });
     if (!item) throw new NotFoundException('Item não encontrado');
     if (item.stageId === newStageId) return item;
 
     const updated = await this.prisma.$transaction(async (tx) => {
-        const lastItem = await tx.flowItem.findFirst({
-            where: { stageId: newStageId },
-            orderBy: { orderInStage: 'desc' },
-            select: { orderInStage: true }
-        });
+      const lastItem = await tx.flowItem.findFirst({
+        where: { stageId: newStageId },
+        orderBy: { orderInStage: 'desc' },
+        select: { orderInStage: true },
+      });
 
-        return tx.flowItem.update({
-            where: { id: itemId },
-            data: {
-                stageId: newStageId,
-                orderInStage: (lastItem?.orderInStage ?? -1) + 1,
-                updatedAt: new Date()
-            }
-        });
+      return tx.flowItem.update({
+        where: { id: itemId },
+        data: {
+          stageId: newStageId,
+          orderInStage: (lastItem?.orderInStage ?? -1) + 1,
+          updatedAt: new Date(),
+        },
+      });
     });
 
     await this.invalidateFlowCache(item.companyId, item.flowId);
@@ -357,23 +418,28 @@ export class FlowService {
 
   private async cleanUpFlowFiles(items: any[]) {
     for (const item of items) {
-        const allMedia = [...item.images, ...item.audios, ...item.videos];
-        for (const media of allMedia) {
-            if (media.url) {
-                await this.supabase.deleteFlowFile(media.url);
-            }
+      const allMedia = [...item.images, ...item.audios, ...item.videos];
+      for (const media of allMedia) {
+        if (media.url) {
+          await this.supabase.deleteFlowFile(media.url);
         }
+      }
     }
   }
 
   // ============ STAGES ============
 
-  async createStage(companyId: string, flowId: string, name: string, color?: string) {
+  async createStage(
+    companyId: string,
+    flowId: string,
+    name: string,
+    color?: string,
+  ) {
     const end = dbLatency.labels('createStage').startTimer();
-    
+
     try {
       const flow = await this.prisma.productFlow.findFirst({
-        where: { id: flowId, companyId }
+        where: { id: flowId, companyId },
       });
 
       if (!flow) throw new NotFoundException('Fluxo não encontrado');
@@ -381,7 +447,7 @@ export class FlowService {
       const lastStage = await this.prisma.flowStage.findFirst({
         where: { flowId },
         orderBy: { order: 'desc' },
-        select: { order: true }
+        select: { order: true },
       });
 
       const newOrder = (lastStage?.order ?? -1) + 1;
@@ -391,16 +457,15 @@ export class FlowService {
           name,
           flowId,
           order: newOrder,
-          color: color || '#2C3E50' 
-        }
+          color: color || '#2C3E50',
+        },
       });
 
       await this.invalidateFlowCache(companyId, flowId);
       flowOpsCounter.labels('createStage', 'success').inc();
       end();
-      
-      return stage;
 
+      return stage;
     } catch (error) {
       flowOpsCounter.labels('createStage', 'error').inc();
       end();
@@ -410,19 +475,23 @@ export class FlowService {
 
   // ============ STAGE OPERATIONS ============
 
-  async updateStage(companyId: string, stageId: string, data: { name?: string; color?: string; order?: number }) {
+  async updateStage(
+    companyId: string,
+    stageId: string,
+    data: { name?: string; color?: string; order?: number },
+  ) {
     const stage = await this.prisma.flowStage.findFirst({
-        where: { id: stageId, flow: { companyId } }
+      where: { id: stageId, flow: { companyId } },
     });
     if (!stage) throw new NotFoundException('Etapa não encontrada');
 
     const updated = await this.prisma.flowStage.update({
-        where: { id: stageId },
-        data: {
-            name: data.name,
-            color: data.color,
-            order: data.order
-        }
+      where: { id: stageId },
+      data: {
+        name: data.name,
+        color: data.color,
+        order: data.order,
+      },
     });
 
     await this.invalidateFlowCache(companyId, stage.flowId);
@@ -431,8 +500,10 @@ export class FlowService {
 
   async deleteStage(stageId: string, companyId: string) {
     const stage = await this.prisma.flowStage.findFirst({
-        where: { id: stageId, flow: { companyId } },
-        include: { items: { include: { images: true, audios: true, videos: true } } }
+      where: { id: stageId, flow: { companyId } },
+      include: {
+        items: { include: { images: true, audios: true, videos: true } },
+      },
     });
 
     if (!stage) throw new NotFoundException('Etapa não encontrada');
@@ -440,13 +511,13 @@ export class FlowService {
     this.cleanUpFlowFiles(stage.items).catch(console.error);
 
     await this.prisma.$transaction(async (tx) => {
-        await tx.flowItem.deleteMany({
-            where: { stageId: stageId }
-        });
+      await tx.flowItem.deleteMany({
+        where: { stageId: stageId },
+      });
 
-        await tx.flowStage.delete({
-            where: { id: stageId }
-        });
+      await tx.flowStage.delete({
+        where: { id: stageId },
+      });
     });
 
     await this.invalidateFlowCache(companyId, stage.flowId);
@@ -461,10 +532,10 @@ export class FlowService {
     itemId: string,
     file: Express.Multer.File,
     type: 'image' | 'audio' | 'video',
-    userId: string
+    userId: string,
   ) {
     const item = await this.prisma.flowItem.findFirst({
-      where: { id: itemId, companyId }
+      where: { id: itemId, companyId },
     });
 
     if (!item) throw new NotFoundException('Item não encontrado');
@@ -481,8 +552,8 @@ export class FlowService {
           uploadedById: userId,
           url: uploadResult.url,
           filename: uploadResult.filename,
-          size: uploadResult.size
-        }
+          size: uploadResult.size,
+        },
       });
     } else if (type === 'audio') {
       mediaRecord = await this.prisma.flowAudio.create({
@@ -493,8 +564,8 @@ export class FlowService {
           url: uploadResult.url,
           filename: uploadResult.filename,
           size: uploadResult.size,
-          duration: 0 
-        }
+          duration: 0,
+        },
       });
     } else if (type === 'video') {
       mediaRecord = await this.prisma.flowVideo.create({
@@ -505,8 +576,8 @@ export class FlowService {
           url: uploadResult.url,
           filename: uploadResult.filename,
           size: uploadResult.size,
-          duration: 0
-        }
+          duration: 0,
+        },
       });
     }
 
@@ -514,23 +585,23 @@ export class FlowService {
 
     return mediaRecord;
   }
-  
+
   // ============ ITEM OPERATIONS ============
 
   async deleteItem(itemId: string, companyId: string) {
     const item = await this.prisma.flowItem.findFirst({
-        where: { id: itemId, companyId },
-        include: { images: true, audios: true, videos: true }
+      where: { id: itemId, companyId },
+      include: { images: true, audios: true, videos: true },
     });
 
     if (!item) throw new NotFoundException('Item não encontrado');
 
-    this.cleanUpFlowFiles([item]).catch(err => 
-        this.logger.error(`Erro ao limpar arquivos do item ${itemId}`, err)
+    this.cleanUpFlowFiles([item]).catch((err) =>
+      this.logger.error(`Erro ao limpar arquivos do item ${itemId}`, err),
     );
 
     await this.prisma.flowItem.delete({
-        where: { id: itemId }
+      where: { id: itemId },
     });
 
     await this.invalidateFlowCache(companyId, item.flowId);

@@ -7,6 +7,7 @@ import {
   IsUUID,
   IsDateString,
   Min,
+  IsEnum,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
@@ -72,12 +73,12 @@ export class CreateFlowItemDto {
   @ApiProperty({ required: false })
   @IsOptional()
   @IsDateString()
-  productionStartedAt?: string; 
+  productionStartedAt?: string;
 
   @ApiProperty({ required: false })
   @IsOptional()
   @IsDateString()
-  deliveryAt?: string; 
+  deliveryAt?: string;
 
   @ApiProperty({ required: false })
   @IsOptional()
@@ -97,4 +98,24 @@ export class CreateFlowItemDto {
   @IsOptional()
   @IsUUID()
   stageId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  supplierId?: string; // <--- Novo campo para salvar a oficina
+}
+
+// Crie o DTO de Filtro (Novo)
+export class FlowFilterDto {
+  @IsOptional()
+  startDate?: string;
+
+  @IsOptional()
+  endDate?: string;
+
+  @IsOptional()
+  @IsEnum(['dueDate', 'productionStartedAt', 'deliveryAt', 'enteredAt'])
+  dateField?: 'dueDate' | 'productionStartedAt' | 'deliveryAt' | 'enteredAt';
+
+  @IsOptional()
+  onlyOutsourced?: string; // Chega como string 'true' ou 'false' via query param
 }

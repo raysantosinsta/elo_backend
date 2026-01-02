@@ -14,6 +14,7 @@ import {
   ParseUUIDPipe,
   Logger,
   BadRequestException,
+  Query,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -24,7 +25,7 @@ import {
   ApiTags,
   ApiConsumes,
 } from '@nestjs/swagger';
-import { CreateFlowDto, CreateFlowItemDto } from './dto/create-flow.dto';
+import { CreateFlowDto, CreateFlowItemDto, type FlowFilterDto } from './dto/create-flow.dto';
 
 @ApiTags('Product Flow (Kanban)')
 @ApiBearerAuth()
@@ -32,7 +33,7 @@ import { CreateFlowDto, CreateFlowItemDto } from './dto/create-flow.dto';
 @Controller('flow')
 export class FlowController {
   private readonly logger = new Logger(FlowController.name); // Logger para debug
-  constructor(private readonly flowService: FlowService) { }
+  constructor(private readonly flowService: FlowService) {}
 
   @Post()
   @ApiOperation({ summary: 'Cria um novo fluxo de produção' })
@@ -49,7 +50,9 @@ export class FlowController {
   // No arquivo flow.controller.ts, adicione este método dentro da classe:
 
   @Delete('items/:itemId/media/:type/:mediaId')
-  @ApiOperation({ summary: 'Remove uma mídia específica (audio, video, image) de um item' })
+  @ApiOperation({
+    summary: 'Remove uma mídia específica (audio, video, image) de um item',
+  })
   async deleteMedia(
     @Req() req: any,
     @Param('itemId', ParseUUIDPipe) itemId: string,
@@ -57,21 +60,30 @@ export class FlowController {
     @Param('mediaId', ParseUUIDPipe) mediaId: string,
   ) {
     if (!['image', 'audio', 'video'].includes(type)) {
-       throw new BadRequestException('Tipo inválido');
+      throw new BadRequestException('Tipo inválido');
     }
 
     return this.flowService.deleteMedia(
       req.user.companyId,
       itemId,
       type as 'image' | 'audio' | 'video',
-      mediaId
+      mediaId,
     );
+  }
+
+  // Dentro da classe
+  @Get('filter/items')
+  @ApiOperation({ summary: 'Filtra itens por data e terceirização' })
+  async filterItems(@Req() req: any, @Query() query: FlowFilterDto) {
+    return this.flowService.getFilteredItems(req.user.companyId, query);
   }
 
   // Adicione isso dentro da classe FlowController
 
   @Put('items/:itemId')
-  @ApiOperation({ summary: 'Atualiza dados de um item (título, descrição, etc)' })
+  @ApiOperation({
+    summary: 'Atualiza dados de um item (título, descrição, etc)',
+  })
   async updateItem(
     @Req() req: any,
     @Param('itemId', ParseUUIDPipe) itemId: string,
@@ -166,7 +178,12 @@ export class FlowController {
     @Body() body: { name: string; color?: string },
   ) {
     // ALTERAÇÃO: Passando a cor para o serviço
-    return this.flowService.createStage(req.user.companyId, flowId, body.name, body.color);
+    return this.flowService.createStage(
+      req.user.companyId,
+      flowId,
+      body.name,
+      body.color,
+    );
   }
 
   @Put('stages/:stageId')
@@ -183,7 +200,7 @@ export class FlowController {
   @ApiOperation({ summary: 'Remove uma etapa e seus itens' })
   async deleteStage(
     @Req() req: any,
-    @Param('stageId', ParseUUIDPipe) stageId: string
+    @Param('stageId', ParseUUIDPipe) stageId: string,
   ) {
     return this.flowService.deleteStage(stageId, req.user.companyId);
   }
@@ -194,7 +211,7 @@ export class FlowController {
   @ApiOperation({ summary: 'Remove um item do fluxo' })
   async deleteItem(
     @Req() req: any,
-    @Param('itemId', ParseUUIDPipe) itemId: string
+    @Param('itemId', ParseUUIDPipe) itemId: string,
   ) {
     // Passamos o ID do item e o ID da empresa para garantir segurança
     return this.flowService.deleteItem(itemId, req.user.companyId);
@@ -211,11 +228,13 @@ export class FlowController {
     @Req() req: any,
     @Param('itemId', ParseUUIDPipe) itemId: string,
     @Param('type') type: string,
-    @UploadedFile() file: Express.Multer.File
+    @UploadedFile() file: Express.Multer.File,
   ) {
     // Validação simples do tipo
     if (!['image', 'audio', 'video'].includes(type)) {
-      throw new BadRequestException('Tipo de mídia inválido. Use image, audio ou video.');
+      throw new BadRequestException(
+        'Tipo de mídia inválido. Use image, audio ou video.',
+      );
     }
 
     if (!file) {
@@ -227,7 +246,7 @@ export class FlowController {
       itemId,
       file,
       type as 'image' | 'audio' | 'video',
-      req.user.id
+      req.user.id,
     );
   }
 }

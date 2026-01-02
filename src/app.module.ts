@@ -23,6 +23,7 @@ import { CacheModule } from '@nestjs/cache-manager';
 import { AppController } from './app.controller';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler'; // Importe o Guard
 import { RoutesModule } from './routes/routes.module';
+import { SuppliersModule } from './suppliers/suppliers.module';
 
 @Module({
   imports: [
@@ -53,6 +54,7 @@ import { RoutesModule } from './routes/routes.module';
     ReportsFlowModule,
     CompaniesModule,
     RoutesModule,
+    SuppliersModule,
   ],
   // ADICIONE O CONTROLLER AQUI
   controllers: [AppController],

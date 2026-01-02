@@ -483,6 +483,13 @@ model UserNotification {
   @@map("notificacoes_usuario")
 }
 
+// 1. Enum para diferenciar quem vende tecido de quem costura
+enum SupplierCategory {
+  MATERIAL_ONLY // Só vende materiais
+  SERVICE_ONLY // Só presta serviço (Oficinas/Facções)
+  HYBRID // Faz os dois
+}
+
 model Supplier {
   id     String       @id @default(uuid()) @map("id") @db.Uuid
   status SimpleStatus @default(ACTIVE) @map("status")
@@ -491,6 +498,8 @@ model Supplier {
   document String? @unique @db.VarChar(18)
   email    String? @db.VarChar(120)
   phone    String? @db.VarChar(20)
+
+  category SupplierCategory @default(MATERIAL_ONLY) @map("categoria")
 
   address    String? @db.VarChar(200)
   city       String? @db.VarChar(100)
@@ -513,6 +522,7 @@ model Supplier {
 
   // Relacionamentos Reversos
   supplierMaterials SupplierMaterial[]
+  flowItems         FlowItem[]
 
   @@map("suppliers")
 }
@@ -877,6 +887,10 @@ model FlowItem {
   // Fluxo
   flowId String      @map("fluxo_id") @db.Uuid
   flow   ProductFlow @relation(fields: [flowId], references: [id])
+
+  // Novo Campo de Relacionamento
+  supplier   Supplier? @relation(fields: [supplierId], references: [id])
+  supplierId String?   @map("fornecedor_id") @db.Uuid
 
   // Datas
   dueDate             DateTime? @map("prazo")

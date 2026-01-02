@@ -1,74 +1,95 @@
-/* eslint-disable prettier/prettier */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
-import { PrismaClient, UserRole, UserStatus, SimpleStatus } from '@prisma/client';
-import * as bcrypt from 'bcrypt';
+import { PrismaClient, UserRole, SupplierCategory } from '@prisma/client'
 
-const prisma = new PrismaClient();
-
-async function hashPassword(password: string): Promise<string> {
-  const saltRounds = 10;
-  return bcrypt.hash(password, saltRounds);
-}
+const prisma = new PrismaClient()
 
 async function main() {
-  console.log('🌱 Iniciando seed do banco de dados...');
+  console.log('🌱 Iniciando o seed...')
 
-  // 1. Criar a empresa
-  console.log('🏢 Criando empresa...');
-  const company = await prisma.company.upsert({
-    where: { cnpj: '12.345.678/0001-90' },
+  // -------------------------------------------------------
+  // 1. CRIAR USUÁRIO MASTER (Necessário para userCreate)
+  // -------------------------------------------------------
+  const user = await prisma.user.upsert({
+    where: { email: 'admin@exemplo.com' },
     update: {},
     create: {
-      status: SimpleStatus.ACTIVE,
-      name: 'Empresa Demo',
-      cnpj: '12.345.678/0001-90',
-      telefone: '(11) 99999-9999',
-      email: 'contato@empresademo.com',
-      endereco: 'Rua das Flores',
-      numero: '123',
-      bairro: 'Centro',
+      name: 'Admin Master',
+      email: 'admin@exemplo.com',
+      password: 'senha123', // Em produção, use bcrypt ou argon2
+      role: UserRole.MASTER,
+      contact: '11999999999', // Campo obrigatório no seu schema
+    },
+  })
+  
+  console.log(`👤 Usuário criado/encontrado: ${user.name}`)
+
+  // -------------------------------------------------------
+  // 2. CRIAR EMPRESA (Company)
+  // -------------------------------------------------------
+  // Usando cnpj como chave única para o upsert
+  const company = await prisma.company.upsert({
+    where: { cnpj: '00.000.000/0001-91' },
+    update: {},
+    create: {
+      name: 'Minha Confecção Têxtil',
+      cnpj: '00.000.000/0001-91',
+      
+      // Campos Obrigatórios definidos no Schema
+      telefone: '1133334444',
+      email: 'contato@confeccao.com',
+      endereco: 'Rua da Moda',
+      numero: '100',
+      bairro: 'Bom Retiro',
       cidade: 'São Paulo',
       estado: 'SP',
-      cep: '01234-567',
-      ramoAtividade: 'Tecnologia',
-    },
-  });
-  console.log(`✅ Empresa criada: ${company.name} (ID: ${company.id})`);
+      cep: '01122-000',
 
-  // 2. Criar usuário MASTER
-  console.log('👑 Criando usuário MASTER...');
-  const masterPassword = await hashPassword('Blessedhr10@');
-  
-  const masterUser = await prisma.user.upsert({
-    where: { email: 'santosray62@gmail.com' },
-    update: {}, // Não faz nada se já existir
+      // RELACIONAMENTO (Opção 1: Connect)
+      userCreate: {
+        connect: { id: user.id }
+      }
+    },
+  })
+
+  console.log(`🏢 Empresa criada/encontrada: ${company.name}`)
+
+  // -------------------------------------------------------
+  // 3. CRIAR FORNECEDOR (Supplier) - A CORREÇÃO
+  // -------------------------------------------------------
+  // Usando 'document' para o where, pois 'email' não é @unique no schema
+  await prisma.supplier.upsert({
+    where: { document: '11.111.111/0001-11' },
+    update: {},
     create: {
-      name: 'Ray Santos',
-      email: 'santosray62@gmail.com',
-      password: masterPassword,
-      role: UserRole.MASTER,
-      status: UserStatus.ACTIVE,
-      contact: '(11) 99999-9999',
-      professionalRole: 'Desenvolvedor Full Stack',
-      companyId: company.id, // Vincula à empresa criada acima
-    },
-  });
-  console.log(`✅ Usuário MASTER criado: ${masterUser.name} (${masterUser.email})`);
+      // Dados escalares
+      name: 'Tecidos Brasil Ltda',
+      email: 'vendas@tecidosbrasil.com',
+      document: '11.111.111/0001-11',
+      phone: '11988887777',
+      address: 'Av. Industrial, 500',
+      category: SupplierCategory.MATERIAL_ONLY, // Usando o Enum importado
 
-  console.log('🎉 Seed concluído com sucesso!');
-  console.log('');
-  console.log('📋 RESUMO DA SEED:');
-  console.log(`🏢 Empresa: ${company.name} (CNPJ: ${company.cnpj})`);
-  console.log(`👑 Usuário MASTER: santosray62@gmail.com / Blessedhr10@`);
-  console.log('');
-  console.log('🚀 Banco de dados pronto para uso (Mínimo Viável)!');
+      // RELACIONAMENTOS (Opção 1: Tudo via connect)
+      // Não usamos 'companyId' aqui, usamos o objeto 'company'
+      company: {
+        connect: { id: company.id }
+      },
+      
+      // Não usamos 'userCreateId' aqui, usamos o objeto 'userCreate'
+      userCreate: {
+        connect: { id: user.id }
+      }
+    },
+  })
+
+  console.log(`🚚 Fornecedor criado com sucesso!`)
+  console.log('✅ Seed finalizado com sucesso, gostosão! 🚀')
 }
 
 main()
   .catch((e) => {
-    console.error('❌ Erro durante o seed:', e);
-    process.exit(1);
+    console.error('❌ Erro no seed:', e)
+    process.exit(1)
   })
   .finally(async () => {
-    await prisma.$disconnect();
-  });
+    await prisma.$disconnect()
+  })
