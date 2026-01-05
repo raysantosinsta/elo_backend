@@ -1,8 +1,10 @@
 /* eslint-disable prettier/prettier */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Logger, Inject } from '@nestjs/common'; // Adicionei Logger
 import { TaskStatus, type Prisma, type Task } from '@prisma/client';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import type { Cache } from 'cache-manager';
 
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -13,14 +15,19 @@ import {
 
 @Injectable()
 export class RouteService {
-  constructor(private prisma: PrismaService) {}
+  private readonly logger = new Logger(RouteService.name);
+
+  constructor(
+    private prisma: PrismaService,
+    // Se usar cache em algum lugar, injete aqui, senão pode remover
+    @Inject(CACHE_MANAGER) private cacheManager: Cache, 
+  ) {}
 
   // 1. Buscar tarefas disponíveis (apenas as que têm Lat/Lng válidas)
   async getTasksWithLocation(
       companyId: string, 
       filters: { startDate?: string; endDate?: string; assignedToId?: string }
   ) {
-    // Construção dinâmica do WHERE
     const where: Prisma.TaskWhereInput = {
       companyId,
       status: { in: [TaskStatus.PENDING, TaskStatus.IN_PROGRESS] },
@@ -30,7 +37,6 @@ export class RouteService {
       },
     };
 
-    // Filtro de Data (Intervalo) no scheduledDate
     if (filters.startDate || filters.endDate) {
         where.scheduledDate = {
             ...(filters.startDate && { gte: new Date(filters.startDate) }),
@@ -38,7 +44,6 @@ export class RouteService {
         };
     }
 
-    // Filtro de Responsável (ignora se for 'all' ou undefined)
     if (filters.assignedToId && filters.assignedToId !== 'all') {
         where.userAssignedId = filters.assignedToId;
     }
@@ -53,9 +58,8 @@ export class RouteService {
     });
   }
 
-  // 2. Otimizar Rota (Completa e Ajustada)
+  // 2. Otimizar Rota (Corrigido conversão de tipos)
   async optimizeRoute(dto: OptimizeRouteDto) {
-    // Busca as tarefas garantindo que latitude e longitude existem no banco
     const tasks = await this.prisma.task.findMany({
       where: {
         id: { in: dto.taskIds },
@@ -67,6 +71,7 @@ export class RouteService {
       include: {
         taskAddress: true,
         column: { select: { id: true } },
+        userAssigned: { select: { id: true, name: true } } // Incluindo para exibir no front
       },
     });
 
@@ -78,7 +83,6 @@ export class RouteService {
 
     // --- CENÁRIO A: ORDENAÇÃO POR PRIORIDADE ---
     if (dto.orderBy === RouteOrderType.PRIORITY) {
-      // Ordena: 1 (Alta) -> 2 (Média) -> 3 (Baixa) -> Null (Sem prioridade)
       optimizedOrder = tasks.sort((a, b) => {
         const priorityA = a.priority ?? 999;
         const priorityB = b.priority ?? 999;
@@ -88,8 +92,8 @@ export class RouteService {
     // --- CENÁRIO B: ORDENAÇÃO POR PROXIMIDADE (Vizinho Mais Próximo) ---
     else {
       let currentLocation = {
-        lat: dto.driverLatitude,
-        lng: dto.driverLongitude,
+        lat: Number(dto.driverLatitude),
+        lng: Number(dto.driverLongitude),
       };
       const remainingTasks = [...tasks];
 
@@ -100,24 +104,20 @@ export class RouteService {
         for (let i = 0; i < remainingTasks.length; i++) {
           const t = remainingTasks[i];
 
-          // --- CORREÇÃO DO TYPESCRIPT AQUI ---
-          const tLat = t.taskAddress?.latitude;
-          const tLng = t.taskAddress?.longitude;
+          // CORREÇÃO CRÍTICA: Converter explicitamente para Number
+          const tLat = Number(t.taskAddress?.latitude);
+          const tLng = Number(t.taskAddress?.longitude);
 
-          // Validação explícita: se não for número, pula
-          if (
-            !t.taskAddress ||
-            typeof tLat !== 'number' ||
-            typeof tLng !== 'number'
-          ) {
+          // Validação robusta (isNaN verifica se a conversão falhou)
+          if (!t.taskAddress || isNaN(tLat) || isNaN(tLng)) {
             continue;
           }
 
           const dist = this.calculateDistance(
             currentLocation.lat,
             currentLocation.lng,
-            tLat, // Agora o TS sabe que é number
-            tLng, // Agora o TS sabe que é number
+            tLat,
+            tLng,
           );
 
           if (dist < minDistance) {
@@ -126,9 +126,8 @@ export class RouteService {
           }
         }
 
-        // Se não encontrou nenhuma válida restante (segurança)
         if (nearestTaskIndex === -1) {
-          // Adiciona o que sobrou (se houver) e encerra para evitar loop infinito
+          // Se sobrou algo mas as coordenadas são inválidas, adiciona ao final
           optimizedOrder.push(...remainingTasks);
           break;
         }
@@ -136,25 +135,21 @@ export class RouteService {
         const nearestTask = remainingTasks[nearestTaskIndex];
         optimizedOrder.push(nearestTask);
 
-        // Atualiza a "localização atual" para a próxima iteração
-        // Novamente, validamos antes de atribuir
-        const nextLat = nearestTask.taskAddress?.latitude;
-        const nextLng = nearestTask.taskAddress?.longitude;
+        // Atualiza a "localização atual"
+        const nextLat = Number(nearestTask.taskAddress?.latitude);
+        const nextLng = Number(nearestTask.taskAddress?.longitude);
 
-        if (typeof nextLat === 'number' && typeof nextLng === 'number') {
-          currentLocation = {
-            lat: nextLat,
-            lng: nextLng,
-          };
+        if (!isNaN(nextLat) && !isNaN(nextLng)) {
+          currentLocation = { lat: nextLat, lng: nextLng };
         }
 
         remainingTasks.splice(nearestTaskIndex, 1);
       }
     }
 
-    // --- CÁLCULO DE TEMPO TOTAL (NOVO) ---
+    // --- CÁLCULO DE TEMPO TOTAL ---
     const stats = await this.calculateRouteStats(
-      { lat: dto.driverLatitude, lng: dto.driverLongitude },
+      { lat: Number(dto.driverLatitude), lng: Number(dto.driverLongitude) },
       optimizedOrder,
     );
 
@@ -169,56 +164,66 @@ export class RouteService {
     tasks: Task[],
   ) {
     try {
-      // Filtra tarefas sem lat/lng para não quebrar a URL
-      const validTasks = tasks.filter(
-        (t: any) =>
-          t.taskAddress?.latitude != null && t.taskAddress?.longitude != null,
-      );
+      // Filtra e converte para garantir números
+      const validTasks = tasks.filter((t: any) => {
+         const lat = Number(t.taskAddress?.latitude);
+         const lng = Number(t.taskAddress?.longitude);
+         return !isNaN(lat) && !isNaN(lng);
+      });
 
-      // Monta string: lng,lat;lng,lat...
+      // Monta string para OSRM: lng,lat;lng,lat...
       const coordinates = [
         `${startPos.lng},${startPos.lat}`,
         ...validTasks.map(
-          (t: any) => `${t.taskAddress.longitude},${t.taskAddress.latitude}`,
+          (t: any) => `${Number(t.taskAddress.longitude)},${Number(t.taskAddress.latitude)}`,
         ),
       ].join(';');
 
-      // Chama OSRM (Demo server)
+      // Chama OSRM (Demo server) - Nota: OSRM público pode falhar, por isso o fallback é importante
       const url = `https://router.project-osrm.org/route/v1/driving/${coordinates}?overview=false`;
+      
+      // Fetch nativo do Node 18+
       const response = await fetch(url);
-      const data = await response.json();
-
-      if (data.code === 'Ok' && data.routes && data.routes.length > 0) {
-        const route = data.routes[0];
-        return {
-          totalDurationSeconds: route.duration,
-          totalDistanceMeters: route.distance,
-          formattedDuration: this.formatDuration(route.duration),
-          formattedDistance: `${(route.distance / 1000).toFixed(1)} km`,
-        };
+      
+      if (response.ok) {
+          const data = await response.json();
+          if (data.code === 'Ok' && data.routes && data.routes.length > 0) {
+            const route = data.routes[0];
+            return {
+              totalDurationSeconds: route.duration,
+              totalDistanceMeters: route.distance,
+              formattedDuration: this.formatDuration(route.duration),
+              formattedDistance: `${(route.distance / 1000).toFixed(1)} km`,
+            };
+          }
       }
     } catch (error) {
-      console.error('Erro OSRM:', error);
+      this.logger.warn('Erro ao consultar OSRM, usando cálculo linear fallback.', error);
     }
 
-    // Fallback: Cálculo Linear se a API falhar
+    // Fallback: Cálculo Linear (Haversine)
     let totalDistKm = 0;
     let current = startPos;
 
     for (const task of tasks) {
       const tAddr = (task as any).taskAddress;
-      if (tAddr?.latitude && tAddr?.longitude) {
+      const lat = Number(tAddr?.latitude);
+      const lng = Number(tAddr?.longitude);
+
+      if (!isNaN(lat) && !isNaN(lng)) {
         totalDistKm += this.calculateDistance(
           current.lat,
           current.lng,
-          tAddr.latitude,
-          tAddr.longitude,
+          lat,
+          lng,
         );
-        current = { lat: tAddr.latitude, lng: tAddr.longitude };
+        current = { lat, lng };
       }
     }
 
-    const estimatedSeconds = (totalDistKm * 1000) / 8.33; // ~30km/h
+    // Estimativa: 30km/h (8.33 m/s)
+    const averageSpeedKmH = 30; 
+    const estimatedSeconds = (totalDistKm / averageSpeedKmH) * 3600;
 
     return {
       totalDurationSeconds: estimatedSeconds,
@@ -242,8 +247,6 @@ export class RouteService {
 
     if (!task) throw new NotFoundException('Tarefa não encontrada');
 
-    // Se o motorista definiu uma data, a tarefa deve voltar para PENDING para aparecer na lista futura
-    // Caso contrário, assume o status que o motorista escolheu (COMPLETED ou FAILED)
     const statusFinal = dto.scheduledAt
       ? TaskStatus.PENDING
       : dto.status === 'COMPLETED'
@@ -255,10 +258,9 @@ export class RouteService {
       data: {
         status: statusFinal,
         finalComment: dto.finalComment,
-        // Se houver data, atualiza. Se não, mantém a atual ou limpa.
         scheduledDate: dto.scheduledAt ? new Date(dto.scheduledAt) : undefined,
         dueDate: dto.scheduledAt ? new Date(dto.scheduledAt) : undefined,
-        completionDate: dto.scheduledAt ? null : new Date(), // Só marca conclusão real se não houver reagendamento
+        completionDate: dto.scheduledAt ? null : new Date(),
         userCompletedId: userId,
       },
       include: this.getTaskIncludeDetails(),
@@ -272,7 +274,6 @@ export class RouteService {
     };
   }
 
-  // Adicione este método para incluir detalhes da tarefa
   private getTaskIncludeDetails() {
     return {
       taskAddress: true,
@@ -281,14 +282,8 @@ export class RouteService {
     };
   }
 
-  // Helper Matemático
-  private calculateDistance(
-    lat1: number,
-    lon1: number,
-    lat2: number,
-    lon2: number,
-  ): number {
-    const R = 6371; // Radius of the Earth in km
+  private calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    const R = 6371; 
     const dLat = this.deg2rad(lat2 - lat1);
     const dLon = this.deg2rad(lon2 - lon1);
     const a =
@@ -298,7 +293,7 @@ export class RouteService {
         Math.sin(dLon / 2) *
         Math.sin(dLon / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c; // Distance in km
+    return R * c;
   }
 
   private deg2rad(deg: number): number {
