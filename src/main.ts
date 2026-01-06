@@ -6,6 +6,7 @@ import helmet from 'helmet';
 import { AppModule } from './app.module';
 // import compression = require('compression');
 import { json, urlencoded } from 'express';
+import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 
 async function bootstrap() {
   // 1. Logger de Inicialização (Observabilidade)
@@ -53,14 +54,17 @@ async function bootstrap() {
   // Bloqueia dados que não estão nos DTOs (whitelist) e transforma payloads (transform)
   app.useGlobalPipes(
     new ValidationPipe({
-      // whitelist: true, // Remove propriedades não decoradas no DTO (Sanitização)
-      // forbidNonWhitelisted: true, // Retorna erro se enviar campo extra (Segurança estrita)
+      whitelist: true, // Remove propriedades não decoradas no DTO (Sanitização)
+      forbidNonWhitelisted: true, // Retorna erro se enviar campo extra (Segurança estrita)
       transform: true, // Converte tipos automaticamente (ex: string "1" -> number 1)
       transformOptions: {
         enableImplicitConversion: true,
       },
     }),
   );
+
+  // Ativa filtro de erro global
+  app.useGlobalFilters(new AllExceptionsFilter());
 
   // 6. Resiliência (Resilience)
   // Garante que a aplicação ouça sinais de encerramento (SIGTERM) para fechar conexões de banco graciosamente
@@ -84,6 +88,8 @@ async function bootstrap() {
     });
     logger.log('Swagger is running on: /api/docs');
   }
+
+  app.enableCors();
 
   const port = process.env.PORT ?? 3000;
   await app.listen(port);
