@@ -1,16 +1,9 @@
 /* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
-import { CACHE_MANAGER } from '@nestjs/cache-manager';
-import {
-  Inject,
-  Injectable,
-  InternalServerErrorException,
-  Logger,
-  NotFoundException,
-} from '@nestjs/common';
-import { NotificationType, Prisma, TaskStatus } from '@prisma/client';
-import type { Cache } from 'cache-manager';
 import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
@@ -24,14 +17,16 @@ import {
   IsUUID,
   ValidateNested,
 } from 'class-validator';
-import { Counter } from 'prom-client';
-import { NotificationUserGateway } from 'src/notification-user/notification-user.gateway';
+import { NotificationType, Prisma, TaskStatus } from '@prisma/client';
+import { Inject, Injectable, InternalServerErrorException, Logger, NotFoundException } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { SupabaseService } from 'src/supabase/supabase.service';
+import { NotificationUserGateway } from 'src/notification-user/notification-user.gateway';
+import { Counter } from 'prom-client';
+import type { Cache } from 'cache-manager';
 
-// =================================================================================================
-// 1. DTOs (Data Transfer Objects)
-// =================================================================================================
+
 
 export class CreateTaskAddressDto {
   @IsString() @IsNotEmpty() cep: string;
@@ -40,12 +35,9 @@ export class CreateTaskAddressDto {
   @IsString() @IsNotEmpty() bairro: string;
   @IsString() @IsNotEmpty() cidade: string;
   @IsString() @IsNotEmpty() estado: string;
-
   @IsOptional() @IsString() complemento?: string;
-
   @IsOptional() @Type(() => Number) @IsNumber() latitude?: number;
   @IsOptional() @Type(() => Number) @IsNumber() longitude?: number;
-
   @IsOptional() companyId?: string;
 }
 
@@ -56,15 +48,10 @@ export class CreateTaskDto {
   @IsOptional() @IsDateString() dueDate?: string | Date;
   @IsOptional() @IsUUID() assignedToId?: string;
 
-  // Transforma a string JSON do FormData em Objeto para validação
   @IsOptional()
   @Transform(({ value }) => {
     if (typeof value === 'string') {
-      try {
-        return JSON.parse(value);
-      } catch {
-        return value;
-      }
+      try { return JSON.parse(value); } catch (e) { return null; }
     }
     return value;
   })
@@ -77,13 +64,14 @@ export class CreateTaskDto {
   @IsOptional() @IsInt() @Type(() => Number) priority?: number;
   @IsOptional() @IsInt() @Type(() => Number) columnOrder?: number;
   @IsOptional() @IsUUID() routeId?: string;
-
-  // IDs injetados pelo Controller (Opcionais na entrada)
-  @IsOptional() @IsUUID() companyId: string;
-  @IsOptional() @IsUUID() createdById: string;
-
-  // Status (Opcional para evitar erro se o front enviar)
+  @IsOptional() @IsUUID() companyId?: string;
+  @IsOptional() @IsUUID() createdById?: string;
   @IsOptional() status?: any;
+
+  // 🔥 CRÍTICO: Estes campos permitem o upload passar pelo ValidationPipe
+  @IsOptional() images?: any;
+  @IsOptional() audios?: any;
+  @IsOptional() videos?: any;
 }
 
 export class UpdateTaskDto {
@@ -102,24 +90,26 @@ export class UpdateTaskDto {
 
   @IsOptional()
   @IsArray()
-  @Transform(({ value }) =>
-    typeof value === 'string' ? JSON.parse(value) : value,
-  )
+  @Transform(({ value }) => (typeof value === 'string' ? JSON.parse(value) : value))
   removeImageIds?: string[];
+
   @IsOptional()
   @IsArray()
-  @Transform(({ value }) =>
-    typeof value === 'string' ? JSON.parse(value) : value,
-  )
+  @Transform(({ value }) => (typeof value === 'string' ? JSON.parse(value) : value))
   removeAudioIds?: string[];
+
   @IsOptional()
   @IsArray()
-  @Transform(({ value }) =>
-    typeof value === 'string' ? JSON.parse(value) : value,
-  )
+  @Transform(({ value }) => (typeof value === 'string' ? JSON.parse(value) : value))
   removeVideoIds?: string[];
+
+  // 🔥 CRÍTICO TAMBÉM NO UPDATE
+  @IsOptional() images?: any;
+  @IsOptional() audios?: any;
+  @IsOptional() videos?: any;
 }
 
+// Interface para tipar o arquivo vindo do Interceptor/Multer
 export interface UploadedFile {
   fieldname: string;
   originalname: string;
@@ -128,10 +118,6 @@ export interface UploadedFile {
   size: number;
   buffer: Buffer;
 }
-
-// =================================================================================================
-// SERVICE
-// =================================================================================================
 
 const taskCreationCounter = new Counter({
   name: 'business_task_creation_total',
@@ -177,7 +163,6 @@ export class TasksService {
     };
   }
 
-  // --- CREATE ---
   async create(
     dto: CreateTaskDto,
     files?: {
@@ -186,10 +171,14 @@ export class TasksService {
       videos?: UploadedFile[];
     },
   ) {
-    const { title, companyId, createdById, assignedToId, columnId, address } =
-      dto;
+    this.logger.debug(`[Create] Iniciando. Título: ${dto.title}`);
+    
+    if (files) {
+      this.logger.debug(`[Create] Arquivos: Imagens: ${files.images?.length || 0}, Áudios: ${files.audios?.length || 0}`);
+    }
 
-    // 1. Validação de Existência
+    const { title, companyId, createdById, assignedToId, columnId, address } = dto;
+
     const [company, creator] = await Promise.all([
       this.prisma.company.findUnique({ where: { id: companyId } }),
       this.prisma.user.findUnique({ where: { id: createdById } }),
@@ -198,15 +187,16 @@ export class TasksService {
     if (!company) throw new NotFoundException('Empresa não encontrada');
     if (!creator) throw new NotFoundException('Criador não encontrado');
 
+    const safeCompanyId = companyId!;
     let task;
+
     try {
-      // 2. Criação da Task com SANITIZAÇÃO (Previne erro P2000 - Value too long)
       task = await this.prisma.task.create({
         data: {
           title: title.trim(),
           description: dto.description?.trim(),
-          companyId,
-          userCreateId: createdById,
+          companyId: safeCompanyId,
+          userCreateId: createdById!,
           userAssignedId: assignedToId,
           columnId: columnId,
           routeId: dto.routeId,
@@ -215,60 +205,52 @@ export class TasksService {
           status: TaskStatus.PENDING,
           finalComment: dto.finalComment,
           dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
-          scheduledDate: dto.scheduledAt
-            ? new Date(dto.scheduledAt)
-            : new Date(),
-
-          // Nested Write do Endereço com TRATAMENTO DE STRINGS
+          scheduledDate: dto.scheduledAt ? new Date(dto.scheduledAt) : new Date(),
           taskAddress: address
             ? {
                 create: {
-                  // Remove caracteres não numéricos e limita tamanho
                   cep: address.cep.replace(/\D/g, '').slice(0, 8),
-
-                  // Corta strings para caber nas colunas do banco
                   endereco: address.endereco.slice(0, 200),
                   numero: address.numero.slice(0, 10),
                   bairro: address.bairro.slice(0, 100),
                   cidade: address.cidade.slice(0, 100),
-                  estado: address.estado.slice(0, 2).toUpperCase(), // Garante UF de 2 letras
+                  estado: address.estado.slice(0, 2).toUpperCase(),
                   complemento: address.complemento
                     ? address.complemento.slice(0, 100)
                     : null,
-
                   latitude: address.latitude,
                   longitude: address.longitude,
-
-                  companyId: companyId,
+                  companyId: safeCompanyId,
                 },
               }
             : undefined,
         },
         include: this.getTaskIncludeDetails(),
       });
-    } catch (e) {
+      this.logger.debug(`[Create] Tarefa criada no banco ID: ${task.id}`);
+    } catch (e: any) {
       this.logger.error('Erro ao salvar tarefa no banco', e);
-      // Lança erro legível
       throw new InternalServerErrorException(
         `Erro ao salvar dados no banco: ${e.message}`,
       );
     }
 
-    // 3. Uploads
     if (
       files &&
       (files.images?.length || files.audios?.length || files.videos?.length)
     ) {
       try {
-        await this.handleFileUploads(task.id, companyId, createdById, files);
-        // Recarregar task com arquivos
+        this.logger.debug(`[Create] Iniciando uploads para tarefa ${task.id}`);
+        await this.handleFileUploads(task.id, safeCompanyId, createdById!, files);
+        
         task = await this.prisma.task.findUniqueOrThrow({
           where: { id: task.id },
           include: this.getTaskIncludeDetails(),
         });
+
+        this.logger.debug(`[Create] Uploads finalizados. Imagens salvas: ${task.taskImages.length}`);
       } catch (uploadError) {
-        this.logger.error(`Falha no upload. Rollback iniciado.`, uploadError);
-        // Se falhar upload, apaga a task para não deixar lixo
+        this.logger.error(`[Create] Falha no upload. ROLLBACK.`, uploadError);
         await this.prisma.task.delete({ where: { id: task.id } });
         throw new InternalServerErrorException(
           'Erro ao processar arquivos. Tarefa cancelada.',
@@ -276,47 +258,24 @@ export class TasksService {
       }
     }
 
-    taskCreationCounter.labels(companyId).inc();
-    await this.cacheManager.del(`tasks_list_${companyId}`);
+    taskCreationCounter.labels(safeCompanyId).inc();
+    await this.cacheManager.del(`tasks_list_${safeCompanyId}`);
 
     if (assignedToId) this.notifyAssignment(task, assignedToId, creator.name);
 
     return task;
   }
 
-  // --- ADD ADDRESS (Endpoint separado) ---
-  async addAddress(taskId: string, companyId: string, addressData: any) {
-    const task = await this.prisma.task.findFirst({
-      where: { id: taskId, companyId },
-    });
-    if (!task) throw new NotFoundException('Task não encontrada');
-
-    // Sanitização também no update isolado
-    const cleanData = {
-      ...addressData,
-      cep: addressData.cep?.replace(/\D/g, '').slice(0, 8),
-      endereco: addressData.endereco?.slice(0, 200),
-      numero: addressData.numero?.slice(0, 10),
-      bairro: addressData.bairro?.slice(0, 100),
-      cidade: addressData.cidade?.slice(0, 100),
-      estado: addressData.estado?.slice(0, 2).toUpperCase(),
-      complemento: addressData.complemento?.slice(0, 100),
-    };
-
-    return this.prisma.taskAddress.upsert({
-      where: { taskId },
-      update: { ...cleanData, companyId },
-      create: { ...cleanData, taskId, companyId },
-    });
-  }
-
-  // --- UPDATE ---
   async update(
     id: string,
-    dto: Partial<UpdateTaskDto>,
+    dto: UpdateTaskDto,
     companyId: string,
     updaterId: string,
-    files?: any,
+    files?: {
+      images?: UploadedFile[];
+      audios?: UploadedFile[];
+      videos?: UploadedFile[];
+    },
   ) {
     const existing = await this.prisma.task.findFirst({
       where: { id, companyId },
@@ -333,8 +292,7 @@ export class TasksService {
     if (dto.columnId) data.column = { connect: { id: dto.columnId } };
     if (dto.routeId) data.route = { connect: { id: dto.routeId } };
     if (dto.priority !== undefined) data.priority = Number(dto.priority);
-    if (dto.columnOrder !== undefined)
-      data.columnOrder = Number(dto.columnOrder);
+    if (dto.columnOrder !== undefined) data.columnOrder = Number(dto.columnOrder);
     if (dto.finalComment !== undefined) data.finalComment = dto.finalComment;
 
     if (dto.dueDate) data.dueDate = new Date(dto.dueDate);
@@ -360,7 +318,6 @@ export class TasksService {
     if (dto.completedById)
       data.userCompleted = { connect: { id: dto.completedById } };
 
-    // Remoções
     if (
       dto.removeImageIds?.length ||
       dto.removeAudioIds?.length ||
@@ -375,8 +332,9 @@ export class TasksService {
       );
     }
 
-    // Uploads
-    if (files) await this.handleFileUploads(id, companyId, updaterId, files);
+    if (files) {
+      await this.handleFileUploads(id, companyId, updaterId, files);
+    }
 
     const updated = await this.prisma.task.update({
       where: { id },
@@ -390,72 +348,105 @@ export class TasksService {
     return updated;
   }
 
-  // --- Métodos Auxiliares ---
-
   private async handleFileUploads(
     taskId: string,
     companyId: string,
     uploadedById: string,
-    files: any,
+    files: {
+      images?: UploadedFile[];
+      audios?: UploadedFile[];
+      videos?: UploadedFile[];
+    },
   ) {
     const promises: Promise<any>[] = [];
-    const uploadToSupabase = async (file: UploadedFile, bucket: string) => {
+
+    const processUpload = async (
+      file: UploadedFile,
+      bucket: 'task-images' | 'task-audios' | 'task-videos',
+    ) => {
       const ext = file.originalname.split('.').pop();
       const filename = `${Date.now()}-${Math.random().toString(36).substring(7)}.${ext}`;
       const path = `tasks/${taskId}/${bucket.split('-')[1]}/${filename}`;
-      return this.supabaseService
-        .uploadFile(bucket as any, path, file.buffer, {
+
+      this.logger.debug(`[Upload] Enviando ${file.originalname} para ${bucket}`);
+
+      const result = await this.supabaseService.uploadFile(
+        bucket,
+        path,
+        file.buffer,
+        {
           contentType: file.mimetype,
-        })
-        .then((res) => ({
-          url: res.fullPath,
-          filename: file.originalname,
-          size: file.size,
-        }));
+          overwrite: true,
+        },
+      );
+
+      this.logger.debug(`[Upload] Sucesso. URL: ${result.fullPath}`);
+
+      return {
+        url: result.fullPath,
+        filename: file.originalname,
+        size: file.size,
+      };
     };
 
-    if (files.images?.length)
-      files.images.forEach((f) =>
+    if (files.images?.length) {
+      files.images.forEach((f) => {
         promises.push(
-          uploadToSupabase(f, 'task-images').then((d) =>
+          processUpload(f, 'task-images').then((data) =>
             this.prisma.taskImage.create({
-              data: { ...d, taskId, companyId, userUploadedId: uploadedById },
+              data: {
+                taskId,
+                companyId,
+                userUploadedId: uploadedById,
+                url: data.url,
+                filename: data.filename,
+                size: data.size,
+              },
             }),
           ),
-        ),
-      );
-    if (files.audios?.length)
-      files.audios.forEach((f) =>
+        );
+      });
+    }
+
+    if (files.audios?.length) {
+      files.audios.forEach((f) => {
         promises.push(
-          uploadToSupabase(f, 'task-audios').then((d) =>
+          processUpload(f, 'task-audios').then((data) =>
             this.prisma.taskAudio.create({
               data: {
-                ...d,
-                duration: 0,
                 taskId,
                 companyId,
                 userUploadedId: uploadedById,
+                url: data.url,
+                filename: data.filename,
+                size: data.size,
+                duration: 0,
               },
             }),
           ),
-        ),
-      );
-    if (files.videos?.length)
-      files.videos.forEach((f) =>
+        );
+      });
+    }
+
+    if (files.videos?.length) {
+      files.videos.forEach((f) => {
         promises.push(
-          uploadToSupabase(f, 'task-videos').then((d) =>
+          processUpload(f, 'task-videos').then((data) =>
             this.prisma.taskVideo.create({
               data: {
-                ...d,
-                duration: 0,
                 taskId,
                 companyId,
                 userUploadedId: uploadedById,
+                url: data.url,
+                filename: data.filename,
+                size: data.size,
+                duration: 0,
               },
             }),
           ),
-        ),
-      );
+        );
+      });
+    }
 
     await Promise.all(promises);
   }
@@ -468,6 +459,7 @@ export class TasksService {
     videoIds: string[] = [],
   ) {
     const deleteOps: Promise<any>[] = [];
+
     const deleteFromStorage = (url: string, bucket: string) => {
       const path = url.split(`${bucket}/`).pop();
       if (path)
@@ -508,8 +500,6 @@ export class TasksService {
     await Promise.all(deleteOps);
   }
 
-
-
   async findAllPaginated(params: any) {
     const {
       companyId,
@@ -520,53 +510,40 @@ export class TasksService {
       startDate,
       endDate,
       assignedToId,
-      hasLocation, // Agora é boolean | undefined
+      hasLocation,
     } = params;
 
     const skip = (page - 1) * limit;
 
-    // 1. Construção dinâmica do objeto WHERE
     const where: Prisma.TaskWhereInput = {
       companyId,
       ...(columnId && { columnId }),
-
-      // Busca textual
       ...(search && {
         OR: [
           { title: { contains: search, mode: 'insensitive' } },
           { description: { contains: search, mode: 'insensitive' } },
         ],
       }),
-
-      // Filtro de Data
       ...((startDate || endDate) && {
         scheduledDate: {
           ...(startDate && { gte: new Date(startDate) }),
           ...(endDate && { lte: new Date(endDate) }),
         },
       }),
-
-      // Filtro de Responsável
       ...(assignedToId && { userAssignedId: assignedToId }),
-
-      // --- CORREÇÃO E LÓGICA DE LOCALIZAÇÃO ---
-      
-      // Caso 1: Quero APENAS tarefas COM localização (hasLocation = true)
       ...(hasLocation === true && {
         taskAddress: {
-          is: { // <--- AQUI ESTAVA O ERRO. O 'is' é obrigatório.
+          is: {
             latitude: { not: null },
             longitude: { not: null },
           },
         },
       }),
-
-      // Caso 2: Quero APENAS tarefas SEM localização (hasLocation = false)
       ...(hasLocation === false && {
         OR: [
-          { taskAddress: null }, // Não tem endereço cadastrado
-          { taskAddress: { is: { latitude: null } } }, // Tem endereço, mas lat é null
-          { taskAddress: { is: { longitude: null } } }, // Tem endereço, mas long é null
+          { taskAddress: null },
+          { taskAddress: { is: { latitude: null } } },
+          { taskAddress: { is: { longitude: null } } },
         ],
       }),
     };
@@ -603,7 +580,7 @@ export class TasksService {
       include: { taskImages: true, taskAudios: true, taskVideos: true },
     });
     if (!t) throw new NotFoundException('Not found');
-    // Limpa arquivos
+
     await this.handleFileRemovals(
       id,
       companyId,
@@ -611,9 +588,34 @@ export class TasksService {
       t.taskAudios.map((a) => a.id),
       t.taskVideos.map((v) => v.id),
     );
+
     await this.prisma.task.delete({ where: { id } });
     await this.cacheManager.del(`tasks_list_${companyId}`);
     await this.cacheManager.del(`task_${id}`);
+  }
+
+  async addAddress(taskId: string, companyId: string, addressData: any) {
+    const task = await this.prisma.task.findFirst({
+      where: { id: taskId, companyId },
+    });
+    if (!task) throw new NotFoundException('Task não encontrada');
+
+    const cleanData = {
+      ...addressData,
+      cep: addressData.cep?.replace(/\D/g, '').slice(0, 8),
+      endereco: addressData.endereco?.slice(0, 200),
+      numero: addressData.numero?.slice(0, 10),
+      bairro: addressData.bairro?.slice(0, 100),
+      cidade: addressData.cidade?.slice(0, 100),
+      estado: addressData.estado?.slice(0, 2).toUpperCase(),
+      complemento: addressData.complemento?.slice(0, 100),
+    };
+
+    return this.prisma.taskAddress.upsert({
+      where: { taskId },
+      update: { ...cleanData, companyId },
+      create: { ...cleanData, taskId, companyId },
+    });
   }
 
   private notifyAssignment(

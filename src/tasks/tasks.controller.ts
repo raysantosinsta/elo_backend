@@ -1,4 +1,5 @@
 /* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/restrict-template-expressions */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unused-vars */
@@ -61,7 +62,7 @@ export class FinalizeTaskDto {
 export class TasksController {
   private readonly logger = new Logger(TasksController.name);
 
-  constructor(private readonly tasksService: TasksService) {}
+  constructor(private readonly tasksService: TasksService) { }
 
   // --- WRITE OPERATIONS ---
 
@@ -88,6 +89,18 @@ export class TasksController {
       videos?: UploadedFile[];
     },
   ) {
+
+    // 🔥 LOG DE DEBUG NO CONTROLLER
+    this.logger.log(`[Controller] Recebido request de ${user.email}`);
+    this.logger.log(`[Controller] DTO Title: ${createTaskDto.title}`);
+
+    if (files) {
+      this.logger.log(`[Controller] Files object keys: ${Object.keys(files)}`);
+      this.logger.log(`[Controller] Images count: ${files.images?.length}`);
+    } else {
+      this.logger.error(`[Controller] Objeto 'files' é undefined! O Interceptor falhou ou o Header está errado.`);
+    }
+
     if (!user.companyId) {
       throw new BadRequestException(
         'Usuário não está vinculado a uma empresa.',
