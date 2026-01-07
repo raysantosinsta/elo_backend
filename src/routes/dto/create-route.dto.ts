@@ -1,3 +1,4 @@
+/* eslint-disable prettier/prettier */
 export class CreateRouteDto {
   driverLat: number;
   driverLng: number;
