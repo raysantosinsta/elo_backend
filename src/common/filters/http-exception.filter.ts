@@ -19,20 +19,24 @@ export class AllExceptionsFilter implements ExceptionFilter {
       status = exception.getStatus();
       const res: any = exception.getResponse();
 
-      // Tratamento para Class-Validator (array de strings) ou erro simples
-      if (typeof res === 'object' && res !== null) {
+      // --- NOVA LÓGICA PARA PERMISSÃO ---
+      if (status === HttpStatus.FORBIDDEN) {
+        message = 'Você não tem permissão para realizar esta ação.';
+      } 
+      // --- MANTER LÓGICA EXISTENTE ---
+      else if (typeof res === 'object' && res !== null) {
         if (Array.isArray(res.message)) {
-            message = 'Erros de validação encontrados';
-            errors = res.message;
+          message = 'Erros de validação encontrados';
+          errors = res.message;
         } else {
-            message = res.message || res.error || message;
+          message = res.message || res.error || message;
         }
       } else {
         message = res;
       }
     }
 
-    // O Contrato JSON final
+    // O Contrato JSON final permanece o mesmo para não quebrar o seu Front-end
     response.status(status).json({
       statusCode: status,
       message,
@@ -41,4 +45,3 @@ export class AllExceptionsFilter implements ExceptionFilter {
     });
   }
 }
-// Não esqueça de registrar no main.ts com app.useGlobalFilters(new AllExceptionsFilter());
