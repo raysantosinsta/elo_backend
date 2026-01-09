@@ -41,12 +41,12 @@ import {
 export class CompaniesController {
   private readonly logger = new Logger(CompaniesController.name);
 
-  constructor(private readonly companiesService: CompaniesService) {}
+  constructor(private readonly companiesService: CompaniesService) { }
 
   // --- ESCRITA (Apenas MASTER) ---
 
   @Post()
-  @Roles(UserRole.MASTER) 
+  @Roles(UserRole.MASTER)
   @ApiOperation({ summary: 'Cria uma nova empresa (Apenas MASTER)' })
   @ApiResponse({ status: 201, description: 'Empresa criada com sucesso.' })
   @HttpCode(HttpStatus.CREATED)
@@ -62,18 +62,18 @@ export class CompaniesController {
   }
 
   @Patch(':id')
-  @Roles(UserRole.MASTER) // 🔒 Bloqueado para Admin
-  @ApiOperation({ summary: 'Atualiza dados de uma empresa (Apenas MASTER)' })
+  @Roles(UserRole.MASTER, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Atualiza dados (ADMIN só altera a própria)' })
   async update(
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() updateCompanyDto: UpdateCompanyDto,
     @CurrentUser() user: User,
   ): Promise<Company> {
-    return this.companiesService.update(id, updateCompanyDto, user.role);
+    return this.companiesService.update(id, updateCompanyDto, user);
   }
 
   @Delete(':id')
-  @Roles(UserRole.MASTER) 
+  @Roles(UserRole.MASTER)
   @ApiOperation({ summary: 'Inativa (Soft Delete) uma empresa (Apenas MASTER)' })
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(@Param('id', new ParseUUIDPipe()) id: string): Promise<void> {
@@ -83,29 +83,31 @@ export class CompaniesController {
   // --- LEITURA (MASTER e ADMIN) ---
 
   @Get()
-  @Roles(UserRole.MASTER, UserRole.ADMIN) // ✅ Liberado para Admin (para usar no filtro)
-  @ApiOperation({ summary: 'Lista empresas (MASTER vê todas, ADMIN vê para filtro)' })
+  @Roles(UserRole.MASTER, UserRole.ADMIN) // ✅ Liberado para Admin (mas o Service garante que ele só vê a dele)
+  @ApiOperation({ summary: 'Lista empresas (MASTER vê todas, ADMIN vê apenas a sua)' })
   @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
   @ApiQuery({ name: 'limit', required: false, type: Number, example: 10 })
   async findAll(
     @Query() pagination: PaginationDto,
-    // @CurrentUser() user: User, // Se quiser filtrar no futuro, use isso
+    @CurrentUser() user: User, // 🔥 OBRIGATÓRIO: Injetamos o usuário logado aqui
   ): Promise<{
     data: Partial<Company>[];
     total: number;
     page: number;
     lastPage: number;
   }> {
-    // Admin poderá listar empresas para popular o combobox.
-    // Se quiser que o Admin veja APENAS a dele, precisa filtrar aqui ou no service.
-    // Por enquanto, liberamos a listagem geral para o filtro funcionar.
-    return this.companiesService.findAll(pagination, undefined);
+    // Passamos o usuário para o Service.
+    // Lá dentro, o Service vai checar:
+    // 1. É MASTER? -> Busca tudo.
+    // 2. É ADMIN? -> Busca WHERE id = user.companyId (retorna array com 1 item).
+    return this.companiesService.findAll(pagination, user);
   }
 
   @Get(':id')
   @Roles(UserRole.MASTER, UserRole.ADMIN) // ✅ Liberado para Admin
-  @ApiOperation({ summary: 'Busca uma empresa por ID' })
-  async findOne(@Param('id', new ParseUUIDPipe()) id: string): Promise<Company> {
-    return this.companiesService.findOne(id);
+  @ApiOperation({ summary: 'Busca uma empresa (Com trava de segurança para ADMIN)' })
+  async findOne(@Param('id', new ParseUUIDPipe()) id: string, @CurrentUser() user: User,): Promise<Company> {
+    // Passamos o usuário inteiro para o service validar a "posse" do dado
+    return this.companiesService.findOne(id, user);
   }
 }

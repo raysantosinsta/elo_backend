@@ -1,40 +1,46 @@
 /* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { SimpleStatus } from '@prisma/client';
-import { 
-  IsEmail, 
-  IsEnum, 
-  IsNotEmpty, 
-  IsOptional, 
-  IsString, 
-  Length, 
-  MaxLength 
+import { Transform } from 'class-transformer';
+import {
+  IsEmail,
+  IsEnum,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  Length,
+  MaxLength
 } from 'class-validator';
+import { IsCNPJ } from 'src/common/validators/is-cnpj.validator';
 
 export class CreateCompanyDto {
-  @ApiProperty({ 
-    description: 'Razão Social ou Nome Fantasia', 
+  @ApiProperty({
+    description: 'Razão Social ou Nome Fantasia',
     example: 'Confecções Silva Ltda',
-    maxLength: 150 
+    maxLength: 150
   })
   @IsNotEmpty({ message: 'O nome da empresa é obrigatório.' })
   @IsString()
   @MaxLength(150, { message: 'O nome deve ter no máximo 150 caracteres.' })
   name: string;
 
-  @ApiProperty({ 
-    description: 'CNPJ da empresa (formatado ou apenas números)', 
+  @ApiProperty({
+    description: 'CNPJ da empresa',
     example: '12.345.678/0001-90',
     maxLength: 18
   })
   @IsNotEmpty({ message: 'O CNPJ é obrigatório.' })
   @IsString()
-  // Nota: A limpeza de caracteres não numéricos geralmente é feita no Service ou Controller antes de salvar
-  @MaxLength(18, { message: 'O CNPJ deve ter no máximo 18 caracteres.' })
+  // Limpa caracteres especiais antes de validar e salvar
+  @Transform(({ value }) => value.replace(/\D/g, ''))
+  @IsCNPJ({ message: 'CNPJ inválido. Verifique os números digitados.' }) // <--- NOSSO VALIDADOR
   cnpj: string;
 
-  @ApiProperty({ 
-    description: 'E-mail corporativo principal', 
+  @ApiProperty({
+    description: 'E-mail corporativo principal',
     example: 'contato@empresa.com',
     maxLength: 255
   })
@@ -43,8 +49,8 @@ export class CreateCompanyDto {
   @MaxLength(255)
   email: string;
 
-  @ApiProperty({ 
-    description: 'Telefone ou WhatsApp de contato', 
+  @ApiProperty({
+    description: 'Telefone ou WhatsApp de contato',
     example: '(11) 99999-9999',
     maxLength: 20
   })
@@ -99,20 +105,20 @@ export class CreateCompanyDto {
 
   // --- Outros ---
 
-  @ApiPropertyOptional({ 
-    description: 'Ramo de atividade da empresa', 
+  @ApiPropertyOptional({
+    description: 'Ramo de atividade da empresa',
     example: 'Confecção de Moda Praia',
-    maxLength: 100 
+    maxLength: 100
   })
   @IsOptional()
   @IsString()
   @MaxLength(100)
   ramoAtividade?: string;
 
-  @ApiPropertyOptional({ 
-    description: 'Status da empresa', 
-    enum: SimpleStatus, 
-    default: SimpleStatus.ACTIVE 
+  @ApiPropertyOptional({
+    description: 'Status da empresa',
+    enum: SimpleStatus,
+    default: SimpleStatus.ACTIVE
   })
   @IsOptional()
   @IsEnum(SimpleStatus, { message: 'Status inválido. Use ATIVO ou INATIVO.' })
