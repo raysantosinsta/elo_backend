@@ -24,10 +24,15 @@ import { AppController } from './app.controller';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler'; // Importe o Guard
 import { RoutesModule } from './routes/routes.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
+import { ClsModule } from 'nestjs-cls';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }), // carrega .env
+    ClsModule.forRoot({
+      global: true,
+      middleware: { mount: true }, // Monta o middleware para toda requisição
+    }),
     CacheModule.register({
       isGlobal: true,
       ttl: 60000, // Configuração padrão

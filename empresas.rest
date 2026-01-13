@@ -1,19 +1,26 @@
 @baseUrl = http://localhost:3000
-# Substitua abaixo pelos tokens reais gerados no login
-@tokenMaster = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkMmRjM2M5Zi04N2JkLTQ3M2QtYjVhYy0zNzNhZjAyY2ZlZjkiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiIzMjhmNWYwOC1kOGEzLTQ2MzctYmJjYy1hOWQ1NmI2Zjg0NTYiLCJpYXQiOjE3Njc5ODQwMzYsImV4cCI6MTc2Nzk4NDkzNn0.uRz5MJdTT0uiw8mpT-1PJZOxpOjNh7JbTpYVTvd4iGo
-@tokenAdmin = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIwOTgyNDQ5OS0yNDFmLTQ3ZTgtYjlkMS05NDBkNjY3ZWQxMWYiLCJlbWFpbCI6ImhpZ2hhZG1AZ21haWwuY29tIiwicm9sZSI6IkFETUlOIiwiY29tcGFueUlkIjoiMzI4ZjVmMDgtZDhhMy00NjM3LWJiY2MtYTlkNTZiNmY4NDU2IiwiaWF0IjoxNzY3OTg0MTI3LCJleHAiOjE3Njc5ODUwMjd9.uzuDJll653_Tyv1r3eDmap8YdY0BsEZcErIoG1JYLQs
-@tokenEmployer = SEU_TOKEN_JWT_DO_EMPLOYER_AQUI
 
-# ID de uma empresa para testes (pegue uma criada pelo Master)
+# --- VARIÁVEIS DE AMBIENTE ---
+# Dica: Após fazer o login, copie o token da resposta e cole aqui manualmente
+# ou use scripts do REST Client se souber configurar.
+
+@tokenMaster = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkMmRjM2M5Zi04N2JkLTQ3M2QtYjVhYy0zNzNhZjAyY2ZlZjkiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiIzMjhmNWYwOC1kOGEzLTQ2MzctYmJjYy1hOWQ1NmI2Zjg0NTYiLCJpYXQiOjE3NjgzMjY2NDgsImV4cCI6MTc2ODMyNzU0OH0.1Cpl4kChUg1p4EJhxG7IANOubEo9iUkOasVhboZheus
+
+@tokenAdmin = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIwOTgyNDQ5OS0yNDFmLTQ3ZTgtYjlkMS05NDBkNjY3ZWQxMWYiLCJlbWFpbCI6ImhpZ2hhZG1AZ21haWwuY29tIiwicm9sZSI6IkFETUlOIiwiY29tcGFueUlkIjoiMzI4ZjVmMDgtZDhhMy00NjM3LWJiY2MtYTlkNTZiNmY4NDU2IiwiaWF0IjoxNzY4MzI2NTYwLCJleHAiOjE3NjgzMjc0NjB9.OrDAp5gi6X128VUPfSU1LtNJXEvIF3U3h94UnrPWOWk
+@tokenEmployer = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxNTIxNmEzZi1hNDI3LTRlNTQtYTFlOS1iZTgyMmZjNDljOTkiLCJlbWFpbCI6ImhpZ2hmdW5jQGdtYWlsLmNvbSIsInJvbGUiOiJFTVBMT1lFUiIsImNvbXBhbnlJZCI6IjMyOGY1ZjA4LWQ4YTMtNDYzNy1iYmNjLWE5ZDU2YjZmODQ1NiIsImlhdCI6MTc2ODMyNjU4MSwiZXhwIjoxNzY4MzI3NDgxfQ._HBIzET8UB1eski5Tr7Y8XOzGFJHkDVQUIGSWH0hgRk
+
+# ID de uma empresa criada (Para testes de sucesso e update)
 @companyId = 328f5f08-d8a3-4637-bbcc-a9d56b6f8456
-# ID de OUTRA empresa (para testar IDOR com Admin)
+
+# ID de OUTRA empresa (Para testar IDOR - Ataque)
+# Se não tiver outra, crie uma segunda empresa com o Master e pegue o ID dela
 @otherCompanyId = substitua-pelo-uuid-de-outra-empresa
 
-### -------------------------------------------------------
-### 1. AUTENTICAÇÃO (Para gerar os tokens)
-### -------------------------------------------------------
+### ============================================================================
+### 1. AUTENTICAÇÃO
+### ============================================================================
 
-# Login MASTER (Ajuste as credenciais)
+# Login MASTER
 POST {{baseUrl}}/auth/login
 Content-Type: application/json
 
@@ -24,7 +31,7 @@ Content-Type: application/json
 
 ###
 
-# Login ADMIN (Ajuste as credenciais)
+# Login ADMIN
 POST {{baseUrl}}/auth/login
 Content-Type: application/json
 
@@ -35,7 +42,7 @@ Content-Type: application/json
 
 ###
 
-# Login Employer (Ajuste as credenciais)
+# Login EMPLOYER
 POST {{baseUrl}}/auth/login
 Content-Type: application/json
 
@@ -44,9 +51,9 @@ Content-Type: application/json
   "password": "senha123"
 }
 
-### -------------------------------------------------------
-### 2. CRIAÇÃO (POST) - Apenas MASTER
-### -------------------------------------------------------
+### ============================================================================
+### 2. CRIAÇÃO DE EMPRESA (POST)
+### ============================================================================
 
 # [SUCESSO] Criar Empresa como MASTER
 # Deve retornar 201 Created
@@ -55,9 +62,9 @@ Content-Type: application/json
 Authorization: Bearer {{tokenMaster}}
 
 {
-  "name": "Confecções Ltda",
+  "name": "Confecções Elite Ltda",
   "cnpj": "47.960.950/0001-21", 
-  "email": "contato@gostosao.com",
+  "email": "contato@elite.com",
   "telefone": "11999999999",
   "cep": "01001000",
   "endereco": "Praça da Sé",
@@ -70,7 +77,50 @@ Authorization: Bearer {{tokenMaster}}
 
 ###
 
-# [ERRO] Tentar Criar Empresa como ADMIN
+# [ERRO] Validação de CNPJ Duplicado (Regra de Negócio)
+# Tente rodar o request acima duas vezes.
+# Deve retornar 400 Bad Request (CNPJ já cadastrado)
+POST {{baseUrl}}/companies
+Content-Type: application/json
+Authorization: Bearer {{tokenMaster}}
+
+{
+  "name": "Empresa Clone",
+  "cnpj": "47.960.950/0001-21", 
+  "email": "clone@teste.com",
+  "telefone": "11999999999",
+  "cep": "01001000",
+  "endereco": "Rua X",
+  "numero": "1",
+  "bairro": "B",
+  "cidade": "SP",
+  "estado": "SP"
+}
+
+###
+
+# [ERRO] Validação de Dados Inválidos (DTO)
+# Deve retornar 400 Bad Request (CNPJ inválido e Email inválido)
+POST {{baseUrl}}/companies
+Content-Type: application/json
+Authorization: Bearer {{tokenMaster}}
+
+{
+  "name": "E",
+  "cnpj": "123", 
+  "email": "email-invalido",
+  "telefone": "123",
+  "cep": "000",
+  "endereco": "Rua",
+  "numero": "1",
+  "bairro": "B",
+  "cidade": "S",
+  "estado": "S"
+}
+
+###
+
+# [ERRO] ADMIN tenta criar empresa (RBAC)
 # Deve retornar 403 Forbidden
 POST {{baseUrl}}/companies
 Content-Type: application/json
@@ -89,58 +139,63 @@ Authorization: Bearer {{tokenAdmin}}
   "estado": "SP"
 }
 
-### -------------------------------------------------------
-### 3. LISTAGEM (GET ALL) - Filtro de Segurança
-### -------------------------------------------------------
+### ============================================================================
+### 3. LISTAGEM (GET ALL)
+### ============================================================================
 
 # [SUCESSO] Listar Tudo como MASTER
-# Deve retornar TODAS as empresas
+# Deve ver TODAS as empresas cadastradas
 GET {{baseUrl}}/companies?page=1&limit=10
 Authorization: Bearer {{tokenMaster}}
 
 ###
 
-# [SUCESSO PARCIAL] Listar como ADMIN
-# O Controller permite, mas o Service deve filtrar e retornar APENAS a empresa do Admin.
-# Verifique se o array 'data' contém apenas 1 item (a empresa dele).
+# [SUCESSO PARCIAL] Listar como ADMIN (Filtro Automático)
+# Deve retornar array com APENAS 1 item (a empresa dele)
 GET {{baseUrl}}/companies?page=1&limit=10
 Authorization: Bearer {{tokenAdmin}}
 
-### -------------------------------------------------------
-### 4. BUSCA POR ID (GET ONE) - Teste de IDOR
-### -------------------------------------------------------
+###
 
-# [SUCESSO] Buscar ID Específico como MASTER
-# O Master pode ver qualquer ID.
+# [ERRO] Listar como EMPLOYER (RBAC)
+# Funcionário não deve ter acesso a lista de empresas (geralmente)
+# Deve retornar 403 Forbidden
+GET {{baseUrl}}/companies
+Authorization: Bearer {{tokenEmployer}}
+
+### ============================================================================
+### 4. BUSCA POR ID (GET ONE)
+### ============================================================================
+
+# [SUCESSO] MASTER busca qualquer empresa
 GET {{baseUrl}}/companies/{{companyId}}
 Authorization: Bearer {{tokenMaster}}
 
 ###
 
-# [SUCESSO] Buscar a PRÓPRIA empresa como ADMIN
-# O ID na URL deve ser igual ao companyId dentro do token do Admin.
+# [SUCESSO] ADMIN busca SUA própria empresa
 GET {{baseUrl}}/companies/{{companyId}}
 Authorization: Bearer {{tokenAdmin}}
 
 ###
 
-# [ERRO DE SEGURANÇA] Buscar OUTRA empresa como ADMIN (IDOR)
+# [ERRO DE SEGURANÇA - IDOR] ADMIN busca OUTRA empresa
 # O Admin tenta acessar o ID de outra empresa.
-# Deve retornar 403 Forbidden (Nossa regra de segurança no Service).
+# Deve retornar 403 Forbidden (Bloqueado pelo Service/Contexto)
 GET {{baseUrl}}/companies/{{otherCompanyId}}
 Authorization: Bearer {{tokenAdmin}}
 
-### -------------------------------------------------------
-### 5. ATUALIZAÇÃO (PATCH) - Regras de Negócio
-### -------------------------------------------------------
+### ============================================================================
+### 5. ATUALIZAÇÃO (PATCH)
+### ============================================================================
 
-# [SUCESSO] MASTER atualiza qualquer dado
+# [SUCESSO] MASTER atualiza dados
 PATCH {{baseUrl}}/companies/{{companyId}}
 Content-Type: application/json
 Authorization: Bearer {{tokenMaster}}
 
 {
-  "name": "Nome Alterado pelo Master",
+  "name": "Nome Atualizado pelo Master",
   "ramoAtividade": "Alta Costura"
 }
 
@@ -158,9 +213,8 @@ Authorization: Bearer {{tokenAdmin}}
 
 ###
 
-# [ERRO] ADMIN tenta INATIVAR a própria empresa
-# Regra de Negócio: Só Master pode inativar (cancelar contrato).
-# Deve retornar 403 Forbidden.
+# [ERRO] ADMIN tenta INATIVAR a própria empresa (Regra de Negócio)
+# Só Master pode inativar. Deve retornar 403 Forbidden.
 PATCH {{baseUrl}}/companies/{{companyId}}
 Content-Type: application/json
 Authorization: Bearer {{tokenAdmin}}
@@ -171,7 +225,7 @@ Authorization: Bearer {{tokenAdmin}}
 
 ###
 
-# [ERRO] ADMIN tenta alterar OUTRA empresa (IDOR)
+# [ERRO - IDOR] ADMIN tenta alterar OUTRA empresa
 PATCH {{baseUrl}}/companies/{{otherCompanyId}}
 Content-Type: application/json
 Authorization: Bearer {{tokenAdmin}}
@@ -180,14 +234,21 @@ Authorization: Bearer {{tokenAdmin}}
   "name": "Hacked by Admin"
 }
 
-### -------------------------------------------------------
-### 6. REMOÇÃO (DELETE) - Soft Delete
-### -------------------------------------------------------
+### ============================================================================
+### 6. REMOÇÃO (DELETE)
+### ============================================================================
 
-# [ERRO] ADMIN tenta deletar empresa
+# [ERRO] ADMIN tenta deletar empresa (Mesmo sendo a dele)
 # Deve retornar 403 Forbidden
 DELETE {{baseUrl}}/companies/{{companyId}}
 Authorization: Bearer {{tokenAdmin}}
+
+###
+
+# [ERRO] EMPLOYER tenta deletar empresa
+# Deve retornar 403 Forbidden
+DELETE {{baseUrl}}/companies/{{companyId}}
+Authorization: Bearer {{tokenEmployer}}
 
 ###
 

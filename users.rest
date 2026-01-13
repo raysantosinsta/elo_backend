@@ -1,0 +1,224 @@
+@baseUrl = http://localhost:3000
+
+# VARIÁVEIS GLOBAIS
+# IDs fixos para testes de IDOR (Você deve preencher com um ID real de OUTRA empresa para testar a segurança)
+@otherCompanyId = substitua-pelo-uuid-de-outra-empresa
+@otherUserId = substitua-pelo-uuid-de-um-usuario-de-outra-empresa
+
+### ============================================================================
+### 1. AUTENTICAÇÃO E SETUP (Tokens Automáticos)
+### ============================================================================
+
+# @name loginMaster
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "santosray62@gmail.com",
+  "password": "Blessedhr10@"
+}
+
+###
+@tokenMaster = {{loginMaster.response.body.accessToken}}
+
+###
+
+# @name loginAdmin
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "highadm@gmail.com",
+  "password": "senha123"
+}
+
+###
+@tokenAdmin = {{loginAdmin.response.body.accessToken}}
+# O ID da empresa do Admin é pego automaticamente do token decodificado (simulado aqui, o backend ja sabe)
+
+###
+
+# @name loginEmployer
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "highfunc@gmail.com",
+  "password": "senha123"
+}
+
+###
+@tokenEmployer = {{loginEmployer.response.body.accessToken}}
+
+### ============================================================================
+### 2. CRIAÇÃO DE USUÁRIOS (POST)
+### ============================================================================
+
+# [SUCESSO] MASTER cria usuário (Obrigatório informar companyId)
+# @name createUserMaster
+POST {{baseUrl}}/users
+Content-Type: application/json
+Authorization: Bearer {{tokenMaster}}
+
+{
+  "name": "Gerente Criado Pelo Master",
+  "email": "gerente.master@teste.com",
+  "password": "senha123",
+  "role": "ADMIN",
+  "contact": "11999999999",
+  "companyId": "328f5f08-d8a3-4637-bbcc-a9d56b6f8456" 
+}
+
+###
+@createdUserIdMaster = {{createUserMaster.response.body.id}}
+
+###
+
+# [SUCESSO] ADMIN cria usuário (companyId injetado automaticamente)
+# @name createUserAdmin
+POST {{baseUrl}}/users
+Content-Type: application/json
+Authorization: Bearer {{tokenAdmin}}
+
+{
+  "name": "Vendedor da Loja",
+  "email": "vendedor.loja@teste.com",
+  "password": "senha123",
+  "role": "EMPLOYER",
+  "contact": "11888888888",
+  "professionalRole": "Vendedor Senior"
+}
+
+###
+@createdUserIdAdmin = {{createUserAdmin.response.body.id}}
+
+###
+
+# [ERRO] EMPLOYER tenta criar usuário (RBAC)
+# Deve retornar 403 Forbidden
+POST {{baseUrl}}/users
+Content-Type: application/json
+Authorization: Bearer {{tokenEmployer}}
+
+{
+  "name": "Hacker",
+  "email": "hacker@teste.com",
+  "password": "123",
+  "role": "ADMIN",
+  "contact": "00000000000"
+}
+
+###
+
+# [ERRO] Conflito de E-mail
+# Tentar criar o mesmo e-mail novamente. Deve retornar 409 Conflict.
+POST {{baseUrl}}/users
+Content-Type: application/json
+Authorization: Bearer {{tokenAdmin}}
+
+{
+  "name": "Clone",
+  "email": "vendedor.loja@teste.com", 
+  "password": "123",
+  "role": "EMPLOYER",
+  "contact": "00000000000"
+}
+
+### ============================================================================
+### 3. LISTAGEM E BUSCA (GET)
+### ============================================================================
+
+# [SUCESSO] MASTER lista TUDO (paginado)
+GET {{baseUrl}}/users?page=1&limit=20
+Authorization: Bearer {{tokenMaster}}
+
+###
+
+# [SUCESSO] ADMIN lista APENAS sua empresa (Isolamento)
+# Backend injeta filtro companyId automaticamente.
+# Verifique se NÃO aparecem usuários de outras empresas.
+GET {{baseUrl}}/users?page=1&limit=20
+Authorization: Bearer {{tokenAdmin}}
+
+###
+
+# [SUCESSO] ADMIN filtra por Role dentro da sua empresa
+GET {{baseUrl}}/users?role=EMPLOYER
+Authorization: Bearer {{tokenAdmin}}
+
+###
+
+# [SUCESSO] Busca Textual (Search) - Admin
+GET {{baseUrl}}/users/search?query=Vendedor
+Authorization: Bearer {{tokenAdmin}}
+
+###
+
+# [SUCESSO] Busca por ID (Admin busca usuário que ele criou)
+GET {{baseUrl}}/users/{{createdUserIdAdmin}}
+Authorization: Bearer {{tokenAdmin}}
+
+###
+
+# [ERRO DE SEGURANÇA - IDOR] Admin busca usuário de OUTRA empresa
+# Deve retornar 404 Not Found (pois o filtro companyId esconde o registro) 
+# ou 403 Forbidden dependendo da implementação exata do findUnique.
+GET {{baseUrl}}/users/{{otherUserId}}
+Authorization: Bearer {{tokenAdmin}}
+
+### ============================================================================
+### 4. ATUALIZAÇÃO (PATCH)
+### ============================================================================
+
+# [SUCESSO] ADMIN atualiza dados de seu funcionário
+PATCH {{baseUrl}}/users/{{createdUserIdAdmin}}
+Content-Type: application/json
+Authorization: Bearer {{tokenAdmin}}
+
+{
+  "name": "Vendedor Promovido",
+  "professionalRole": "Gerente de Vendas"
+}
+
+###
+
+# [SUCESSO] ADMIN inativa usuário (Toggle Status)
+PATCH {{baseUrl}}/users/{{createdUserIdAdmin}}/status/INACTIVE
+Authorization: Bearer {{tokenAdmin}}
+
+###
+
+# [SUCESSO] ADMIN reativa usuário
+PATCH {{baseUrl}}/users/{{createdUserIdAdmin}}/status/ACTIVE
+Authorization: Bearer {{tokenAdmin}}
+
+###
+
+# [ERRO - IDOR] ADMIN tenta atualizar usuário de OUTRA empresa
+PATCH {{baseUrl}}/users/{{otherUserId}}
+Content-Type: application/json
+Authorization: Bearer {{tokenAdmin}}
+
+{
+  "name": "Hacked User"
+}
+
+### ============================================================================
+### 5. REMOÇÃO (DELETE)
+### ============================================================================
+
+# [ERRO] EMPLOYER tenta deletar (RBAC)
+DELETE {{baseUrl}}/users/{{createdUserIdAdmin}}
+Authorization: Bearer {{tokenEmployer}}
+
+###
+
+# [SUCESSO] ADMIN deleta seu funcionário
+DELETE {{baseUrl}}/users/{{createdUserIdAdmin}}
+Authorization: Bearer {{tokenAdmin}}
+
+###
+
+# [SUCESSO] MASTER deleta o usuário que criou
+DELETE {{baseUrl}}/users/{{createdUserIdMaster}}
+Authorization: Bearer {{tokenMaster}}

@@ -12,7 +12,8 @@ import {
   Patch,
   Post,
   Query,
-  UseGuards
+  UseGuards,
+  UseInterceptors // <--- Importante
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -27,6 +28,7 @@ import { CurrentUser } from 'src/auth/current-user.decorator';
 import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
 import { Roles } from 'src/auth/roles.decorator';
 import { RolesGuard } from 'src/auth/roles.guard';
+import { TenantInterceptor } from 'src/common/interceptors/tenant.interceptor'; // <--- Importe seu interceptor
 import {
   CompaniesService,
   CreateCompanyDto,
@@ -37,6 +39,7 @@ import {
 @ApiTags('Companies')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
+@UseInterceptors(TenantInterceptor) // 🔥 ATIVA O CONTEXTO AUTOMÁTICO (CLS)
 @Controller('companies')
 export class CompaniesController {
   private readonly logger = new Logger(CompaniesController.name);
@@ -52,12 +55,15 @@ export class CompaniesController {
   @HttpCode(HttpStatus.CREATED)
   async create(
     @Body() createCompanyDto: CreateCompanyDto,
-    @CurrentUser() user: User,
+    @CurrentUser() user: User, // Mantive apenas para o log abaixo
   ): Promise<Company> {
     this.logger.log(
       `MASTER ${user.id} criando empresa: ${createCompanyDto.cnpj}`,
     );
-    createCompanyDto.userCreateId = user.id;
+    
+    // 🔥 MUDANÇA: Não precisamos mais setar userCreateId manualmente.
+    // O Service pega o ID do contexto (CLS) automaticamente.
+    
     return this.companiesService.create(createCompanyDto);
   }
 
@@ -67,47 +73,52 @@ export class CompaniesController {
   async update(
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() updateCompanyDto: UpdateCompanyDto,
-    @CurrentUser() user: User,
+    // @CurrentUser() user: User, -> Não precisa mais injetar aqui
   ): Promise<Company> {
-    return this.companiesService.update(id, updateCompanyDto, user);
+    // 🔥 O Service já sabe quem é o usuário pelo contexto
+    return this.companiesService.update(id, updateCompanyDto);
   }
 
   @Delete(':id')
   @Roles(UserRole.MASTER)
   @ApiOperation({ summary: 'Inativa (Soft Delete) uma empresa (Apenas MASTER)' })
   @HttpCode(HttpStatus.NO_CONTENT)
-  async remove(@Param('id', new ParseUUIDPipe()) id: string): Promise<void> {
+  async remove(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    // @CurrentUser() user: User -> Não precisa mais injetar aqui
+  ): Promise<void> {
+    // 🔥 O Service valida a permissão via contexto
     await this.companiesService.remove(id);
   }
 
   // --- LEITURA (MASTER e ADMIN) ---
 
   @Get()
-  @Roles(UserRole.MASTER, UserRole.ADMIN) // ✅ Liberado para Admin (mas o Service garante que ele só vê a dele)
+  @Roles(UserRole.MASTER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Lista empresas (MASTER vê todas, ADMIN vê apenas a sua)' })
   @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
   @ApiQuery({ name: 'limit', required: false, type: Number, example: 10 })
   async findAll(
     @Query() pagination: PaginationDto,
-    @CurrentUser() user: User, // 🔥 OBRIGATÓRIO: Injetamos o usuário logado aqui
+    // @CurrentUser() user: User, -> Removido
   ): Promise<{
     data: Partial<Company>[];
     total: number;
     page: number;
     lastPage: number;
   }> {
-    // Passamos o usuário para o Service.
-    // Lá dentro, o Service vai checar:
-    // 1. É MASTER? -> Busca tudo.
-    // 2. É ADMIN? -> Busca WHERE id = user.companyId (retorna array com 1 item).
-    return this.companiesService.findAll(pagination, user);
+    // 🔥 O Service aplica o filtro "WHERE companyId" automaticamente se não for Master
+    return this.companiesService.findAll(pagination);
   }
 
   @Get(':id')
-  @Roles(UserRole.MASTER, UserRole.ADMIN) // ✅ Liberado para Admin
+  @Roles(UserRole.MASTER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Busca uma empresa (Com trava de segurança para ADMIN)' })
-  async findOne(@Param('id', new ParseUUIDPipe()) id: string, @CurrentUser() user: User,): Promise<Company> {
-    // Passamos o usuário inteiro para o service validar a "posse" do dado
-    return this.companiesService.findOne(id, user);
+  async findOne(
+    @Param('id', new ParseUUIDPipe()) id: string, 
+    // @CurrentUser() user: User, -> Removido
+  ): Promise<Company> {
+    // 🔥 O Service valida se o ID pertence ao contexto do usuário
+    return this.companiesService.findOne(id);
   }
 }

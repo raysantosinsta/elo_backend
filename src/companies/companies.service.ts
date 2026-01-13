@@ -1,7 +1,7 @@
 /* eslint-disable prettier/prettier */
-/* eslint-disable @typescript-eslint/no-unsafe-return */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import {
@@ -13,7 +13,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { Company, SimpleStatus, User, UserRole } from '@prisma/client'; // Importando Enums gerados
+import { Company, SimpleStatus } from '@prisma/client';
 import type { Cache } from 'cache-manager';
 import {
   IsEmail,
@@ -26,18 +26,16 @@ import {
   Max,
   Min
 } from 'class-validator';
+import { ClsService } from 'nestjs-cls';
 import { Counter, Histogram } from 'prom-client';
 import { PrismaService } from 'src/prisma/prisma.service';
 
-// --- DTOs Ajustados ao Schema ---
-
+// --- DTOs (Mantidos) ---
 export class CreateCompanyDto {
   @IsNotEmpty() @IsString() name: string;
   @IsNotEmpty() @IsString() cnpj: string;
-  @IsNotEmpty() @IsString() telefone: string; // Obrigatório no Schema
+  @IsNotEmpty() @IsString() telefone: string;
   @IsNotEmpty() @IsEmail() email: string;
-
-  // Endereço (Obrigatórios no Schema)
   @IsNotEmpty() @IsString() endereco: string;
   @IsNotEmpty() @IsString() numero: string;
   @IsOptional() @IsString() complemento?: string;
@@ -45,12 +43,8 @@ export class CreateCompanyDto {
   @IsNotEmpty() @IsString() cidade: string;
   @IsNotEmpty() @IsString() estado: string;
   @IsNotEmpty() @IsString() cep: string;
-
   @IsOptional() @IsString() ramoAtividade?: string;
-
   @IsOptional() @IsUUID() userCreateId?: string;
-
-  // Status é opcional na criação, pois o banco tem default(ATIVO)
   @IsOptional() @IsEnum(SimpleStatus) status?: SimpleStatus;
 }
 
@@ -67,7 +61,6 @@ export class UpdateCompanyDto {
   @IsOptional() @IsString() estado?: string;
   @IsOptional() @IsString() cep?: string;
   @IsOptional() @IsString() ramoAtividade?: string;
-
   @IsOptional() @IsUUID() userUpdateId?: string;
   @IsOptional() @IsEnum(SimpleStatus) status?: SimpleStatus;
 }
@@ -95,11 +88,10 @@ export class CompaniesService {
   constructor(
     private readonly prisma: PrismaService,
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
+    private readonly cls: ClsService,
   ) { }
 
-  /**
-   * Wrapper de Resiliência: Retry com Backoff Exponencial + Timeout
-   */
+  // Wrapper de Resiliência (Mantido)
   private async executeWithResilience<T>(
     operation: string,
     fn: () => Promise<T>,
@@ -126,32 +118,34 @@ export class CompaniesService {
         if (attempt >= retries) {
           endTimer();
           this.logger.error(`Falha crítica em ${operation} após ${retries} tentativas.`);
-          // Repassa o erro original se for conhecido, ou lança genérico
           throw error instanceof Error ? error : new InternalServerErrorException('Database unavailable');
         }
 
         await new Promise((res) => setTimeout(res, 100 * Math.pow(2, attempt)));
       }
     }
-    // Correção do erro TS2366: Retorno garantido caso o loop termine de forma inesperada
     throw new InternalServerErrorException('Unexpected execution flow in resilience wrapper');
   }
 
   async create(createCompanyDto: CreateCompanyDto): Promise<Company> {
+    // 🔥 SANITIZAÇÃO: Remove tudo que não é dígito do CNPJ e do TELEFONE
     const sanitizedCnpj = createCompanyDto.cnpj.replace(/\D/g, '');
+    const sanitizedPhone = createCompanyDto.telefone.replace(/\D/g, ''); // <--- ADICIONADO
 
-    // Idempotência
     const existing = await this.prisma.company.findUnique({ where: { cnpj: sanitizedCnpj } });
     if (existing) {
-      throw new BadRequestException('Empresa já cadastrada com este CNPJ.'); // ISSO GERA O 400
+      throw new BadRequestException('Empresa já cadastrada com este CNPJ.');
     }
+
+    const userId = this.cls.get<string>('userId');
 
     const company = await this.executeWithResilience('create_company', () =>
       this.prisma.company.create({
         data: {
           ...createCompanyDto,
           cnpj: sanitizedCnpj,
-          // Garante que o status usa o Enum correto se não for passado
+          telefone: sanitizedPhone, // <--- USA O VALOR LIMPO
+          userCreateId: userId,
           status: createCompanyDto.status || SimpleStatus.ACTIVE,
         },
       })
@@ -163,56 +157,41 @@ export class CompaniesService {
     return company;
   }
 
-  // --- LISTAGEM COM CACHE, RESILIÊNCIA E SEGURANÇA MULTI-TENANT ---
+  // --- LISTAGEM (Mantida) ---
   async findAll(
-    pagination: PaginationDto,
-    currentUser: User 
+    pagination: PaginationDto
   ): Promise<{ data: Partial<Company>[]; total: number; page: number; lastPage: number }> {
     
     const { page = 1, limit = 10 } = pagination;
     const skip = (page - 1) * limit;
 
-    // 1. Definição do Escopo (Quem é você?)
-    const isMaster = currentUser.role === UserRole.MASTER;
-    const tenantId = currentUser.companyId;
+    const isMaster = this.cls.get<boolean>('isMaster');
+    const tenantId = this.cls.get<string>('tenantId');
 
-    // 2. Chave de Cache Contextualizada (CRÍTICO PARA SEGURANÇA)
-    // Se for Master, a chave é 'master'. Se for Tenant, a chave tem o ID da empresa.
-    // Isso impede que a empresa A veja o cache da empresa B.
     const cacheScope = isMaster ? 'master_view' : `tenant_${tenantId}`;
     const cacheKey = `companies_list_${cacheScope}_${page}_${limit}`;
 
-    // 3. Tenta pegar do Cache
     const cached = await this.cacheManager.get(cacheKey);
     if (cached) {
       return cached as any;
     }
 
-    // 4. Construção do Filtro (WHERE)
-    const where: any = { 
-      status: SimpleStatus.ACTIVE 
-    };
+    const where: any = { status: SimpleStatus.ACTIVE };
 
-    // 🔥 A CORREÇÃO DE OURO:
-    // Não filtramos por quem CRIOU (userCreateId), mas sim por quem PERTENCE (companyId).
     if (!isMaster) {
       if (!tenantId) {
-        // Usuário sem empresa não vê nada
         return { data: [], total: 0, page, lastPage: 0 }; 
       }
-      // O Admin só pode ver a empresa cujo ID bate com o companyId dele
       where.id = tenantId; 
     }
 
-    // 5. Execução no Banco com Resiliência
     const [data, total] = await this.executeWithResilience('find_all_companies', () => 
       this.prisma.$transaction([
         this.prisma.company.findMany({
           skip,
           take: limit,
-          where, // <--- Filtro Seguro Aplicado
+          where,
           orderBy: { name: 'asc' },
-          // Projeção para economizar banda e memória
           select: {
             id: true,
             name: true,
@@ -222,7 +201,6 @@ export class CompaniesService {
             telefone: true,
             cidade: true,
             estado: true,
-            // Adicione outros campos visíveis na tabela se precisar
           }
         }),
         this.prisma.company.count({ where }),
@@ -230,111 +208,86 @@ export class CompaniesService {
     );
 
     const result = { data, total, page, lastPage: Math.ceil(total / limit) };
-    
-    // 6. Salva no Cache (TTL 1 minuto para listas é saudável)
     await this.cacheManager.set(cacheKey, result, 60000);
-
     return result;
   }
 
-  async findOne(id: string, user?: User): Promise<Company> {
+  // --- BUSCA UNITÁRIA (Mantida) ---
+  async findOne(id: string): Promise<Company> {
     const cacheKey = `company_${id}`;
-
-    // 1. Tenta pegar do Cache
     let company: Company | null | undefined = await this.cacheManager.get<Company>(cacheKey);
 
-    // 2. Se não estiver no cache, busca no banco com Resiliência
     if (!company) {
       company = await this.executeWithResilience('find_one', () =>
         this.prisma.company.findUnique({ where: { id } })
       );
     }
 
-    // 3. Validação: Existe?
     if (!company) {
       throw new NotFoundException(`Empresa ${id} não encontrada.`);
     }
 
-    // 4. 🔥 SEGURANÇA MULTI-TENANT (Ajuste Crítico) 🔥
-    // Verifica se o usuário tem permissão para ver ESTA empresa específica
-    if (user) {
-      const isMaster = user.role === UserRole.MASTER;
-      const belongsToCompany = user.companyId === company.id;
+    const isMaster = this.cls.get<boolean>('isMaster');
+    const tenantId = this.cls.get<string>('tenantId');
 
-      if (!isMaster && !belongsToCompany) {
-        // Se não for Master e o ID da empresa não bater com o do usuário -> BLOQUEIA
-        throw new ForbiddenException('Você não tem permissão para acessar os dados desta empresa.');
-      }
+    if (!isMaster && company.id !== tenantId) {
+       this.logger.warn(`Acesso negado: Tenant ${tenantId} tentou acessar Empresa ${id}`);
+       throw new ForbiddenException('Você não tem permissão para acessar os dados desta empresa.');
     }
 
-    // 5. Salva no cache se veio do banco (TTL 5 minutos)
-    // Verificamos se 'cached' era null para evitar setar novamente sem necessidade, 
-    // mas a lógica simplificada aqui garante que sempre renova ou seta.
     await this.cacheManager.set(cacheKey, company, 300000);
-
     return company;
   }
 
-  /**
-   * U - Update with RBAC permission check
-   * Accepts optional currentUserRole
-   */
+  // --- ATUALIZAÇÃO (Ajustado para limpar telefone) ---
   async update(
     id: string, 
-    updateCompanyDto: UpdateCompanyDto, 
-    currentUser: User // 🔥 Recebemos o usuário completo agora
+    updateCompanyDto: UpdateCompanyDto
   ): Promise<Company> {
     
-    // 1. Segurança e Existência (IDOR Protection)
-    // Ao passar o 'currentUser' para o findOne, ele valida automaticamente:
-    // Se for ADMIN, verifica se id == currentUser.companyId. Se não for, lança Forbidden.
-    const currentCompanyData = await this.findOne(id, currentUser);
+    const currentCompanyData = await this.findOne(id);
+    const isMaster = this.cls.get<boolean>('isMaster');
+    const userId = this.cls.get<string>('userId');
 
-    // 2. Validação de Regra de Negócio Específica
-    // Impedir que um ADMIN inative a empresa (apenas MASTER pode cancelar contrato)
     if (
       updateCompanyDto.status === SimpleStatus.INACTIVE && 
-      currentUser.role !== UserRole.MASTER
+      !isMaster
     ) {
       throw new ForbiddenException('Apenas usuários Master podem inativar uma empresa.');
     }
 
-    // 3. Sanitização de Dados
+    // 🔥 LIMPEZA DE DADOS
     if (updateCompanyDto.cnpj) {
       updateCompanyDto.cnpj = updateCompanyDto.cnpj.replace(/\D/g, '');
-      
-      // Opcional: Verificar se o novo CNPJ já existe em outra empresa (exceto a atual)
       if (updateCompanyDto.cnpj !== currentCompanyData.cnpj) {
          const exists = await this.prisma.company.findUnique({ 
              where: { cnpj: updateCompanyDto.cnpj } 
          });
-         if (exists) throw new BadRequestException('Este CNPJ já está em uso por outra empresa.');
+         if (exists) throw new BadRequestException('Este CNPJ já está em uso.');
       }
     }
 
-    // 4. Persistência com Resiliência
+    // 🔥 Limpa telefone se foi enviado na atualização
+    if (updateCompanyDto.telefone) {
+        updateCompanyDto.telefone = updateCompanyDto.telefone.replace(/\D/g, '');
+    }
+
     const updated = await this.executeWithResilience('update_company', () =>
       this.prisma.company.update({
         where: { id },
         data: {
           ...updateCompanyDto,
-          // Auditoria: Quem fez a alteração
-          userUpdateId: currentUser.id,
-          // Só atualiza status se foi enviado
+          userUpdateId: userId,
           ...(updateCompanyDto.status && { status: updateCompanyDto.status }),
         },
       })
     );
 
-    // 5. Invalidação de Cache
-    // Remove o item específico
     await this.cacheManager.del(`company_${id}`);
-
-    // Remove as listas para forçar atualização na listagem
+    
     try {
       const store = (this.cacheManager as any).store;
       if (store && typeof store.keys === 'function') {
-        // Padrão do Redis para buscar chaves
         const keys: string[] = await store.keys('companies_list_*');
         if (keys.length > 0) {
             await Promise.all(keys.map(k => this.cacheManager.del(k)));
@@ -347,11 +300,13 @@ export class CompaniesService {
     return updated;
   }
 
-  /**
-   * D - Soft Delete
-   */
+  // --- REMOÇÃO (Mantida) ---
   async remove(id: string): Promise<void> {
     await this.findOne(id);
+    const isMaster = this.cls.get<boolean>('isMaster');
+    if (!isMaster) {
+        throw new ForbiddenException('Permissão insuficiente para remover empresas.');
+    }
 
     await this.executeWithResilience('soft_delete_company', () =>
       this.prisma.company.update({
@@ -364,7 +319,6 @@ export class CompaniesService {
 
     await this.cacheManager.del(`company_${id}`);
 
-    // Invalidação de Listas (Pattern Delete)
     try {
       const store = (this.cacheManager as any).store;
       if (store && typeof store.keys === 'function') {
