@@ -1,126 +1,149 @@
 /* eslint-disable prettier/prettier */
 /* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
-/* eslint-disable @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
+
 /* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable prettier/prettier */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable prettier/prettier */
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+/* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { ClsService } from 'nestjs-cls';
 
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   private _extendedClient: any;
+  private readonly logger = new Logger('PrismaExtension');
 
   constructor(private readonly cls: ClsService) {
     super({
-      log: ['warn', 'error'],
-      errorFormat: 'minimal',
+      log: ['error'], 
     });
   }
 
   get extended() {
     if (!this._extendedClient) {
-      // Captura o CLS no escopo externo
-      const cls = this.cls; 
+      const cls = this.cls;
+      const logger = this.logger;
 
       this._extendedClient = this.$extends({
         query: {
           $allModels: {
             async $allOperations({ model, operation, args, query }) {
-              // 1. Recupera Contexto
-              const tenantId = cls.get('tenantId');
-              const isMaster = cls.get('isMaster');
-              const userId = cls.get('userId');
+              try {
+                const tenantId = cls.get('tenantId');
+                const userId = cls.get('userId');
+                const isMaster = cls.get('isMaster'); // Deve ser boolean
 
-              // 🔥 O SEGREDO ESTÁ AQUI: Cast para 'any' para permitir injeção dinâmica
-              const safeArgs = args as any;
+                // Models que são públicos ou globais
+                const publicModels = ['Plan', 'Subscription', 'AuditLog']; 
+                const safeArgs = (args as any) || {};
 
-              // Lista de modelos que NÃO devem sofrer injeção automática de tenant
-              // (Geralmente tabelas de configuração global ou logs puros)
-              const publicModels = ['Plan', 'Subscription']; 
-
-              // ============================================================
-              // 1. AUDITORIA AUTOMÁTICA (User ID)
-              // ============================================================
-              if (userId) {
-                // Injeta userCreateId na criação
-                if (operation === 'create') {
-                   if (!safeArgs.data) safeArgs.data = {};
-                   safeArgs.data.userCreateId = userId;
+                // ============================================================
+                // 1. AUDITORIA (Sempre roda se tiver usuário)
+                // ============================================================
+                if (userId) {
+                  // Create / CreateMany
+                  if (operation === 'create') {
+                    if (!safeArgs.data) safeArgs.data = {};
+                    (safeArgs.data as any).userCreateId = userId;
+                    (safeArgs.data as any).userUpdateId = userId;
+                  }
+                  if (operation === 'createMany' && safeArgs.data) {
+                    const list = Array.isArray(safeArgs.data) ? safeArgs.data : [safeArgs.data];
+                    list.forEach((item: any) => item.userCreateId = userId);
+                  }
+                  // Update / Upsert
+                  if (['update', 'updateMany', 'upsert'].includes(operation)) {
+                     if (operation !== 'upsert' && !safeArgs.data) safeArgs.data = {};
+                     if (operation === 'upsert') {
+                        if (!safeArgs.create) safeArgs.create = {};
+                        if (!safeArgs.update) safeArgs.update = {};
+                        (safeArgs.create as any).userCreateId = userId;
+                        (safeArgs.create as any).userUpdateId = userId;
+                        (safeArgs.update as any).userUpdateId = userId;
+                     } else {
+                        (safeArgs.data as any).userUpdateId = userId;
+                     }
+                  }
                 }
+
+                // ============================================================
+                // 2. MULTITENANT (AQUI ESTAVA O PROBLEMA)
+                // ============================================================
                 
-                // Injeta userCreateId em createMany
-                if (operation === 'createMany' && safeArgs.data) {
-                   if (Array.isArray(safeArgs.data)) {
-                      safeArgs.data = safeArgs.data.map((item: any) => ({ ...item, userCreateId: userId }));
-                   } else {
-                      safeArgs.data = { ...safeArgs.data, userCreateId: userId };
-                   }
+                // Se for Master, NÃO aplica filtro de tenant. Ponto final.
+                if (isMaster) {
+                    // Log apenas para debug se for criação de usuário
+                    if (model === 'User' && operation === 'create') {
+                        logger.log(`👑 [Prisma] Master operando em ${model}.${operation}. Mantendo companyId original: ${(safeArgs.data as any)?.companyId}`);
+                    }
+                    return await query(safeArgs);
                 }
 
-                // Injeta userUpdateId na atualização
-                if (['update', 'updateMany'].includes(operation)) {
-                   if (!safeArgs.data) safeArgs.data = {};
-                   safeArgs.data.userUpdateId = userId;
-                }
+                // Se não for Master, e tiver Tenant, e não for model público
+                if (tenantId && !publicModels.includes(model)) {
+                  
+                  // CREATE: Força o ID da empresa do usuário logado
+                  if (operation === 'create') {
+                     if (!safeArgs.data) safeArgs.data = {};
+                     
+                     // Se for User criando outro User (Admin criando Colaborador)
+                     // O Admin SÓ pode criar na empresa dele.
+                     // Mas se o Service já mandou o ID certo, a gente garante aqui.
+                     safeArgs.data.companyId = tenantId;
+                     
+                     // Remove connect para evitar conflito
+                     if (safeArgs.data.company) delete safeArgs.data.company;
+                  }
 
-                // Injeta ambos no Upsert
-                if (operation === 'upsert') {
-                   safeArgs.create = { ...safeArgs.create, userCreateId: userId };
-                   safeArgs.update = { ...safeArgs.update, userUpdateId: userId };
-                }
-              }
+                  // CREATE MANY
+                  if (operation === 'createMany' && safeArgs.data) {
+                     const list = Array.isArray(safeArgs.data) ? safeArgs.data : [safeArgs.data];
+                     list.forEach((item: any) => item.companyId = tenantId);
+                  }
 
-              // ============================================================
-              // 2. MULTITENANCY (Company ID)
-              // ============================================================
-              // Regra: Se tem tenantId, não é Master, e o modelo não é público...
-              
-              // Exceção: User.create (quem lida é o Service, pois Master pode criar user pra outros)
-              const isUserCreation = model === 'User' && operation === 'create';
+                  // READ / UPDATE / DELETE (Filtra pelo tenant)
+                  const operationsWithWhere = [
+                    'findMany', 'findFirst', 'findUnique', 'findUniqueOrThrow', 
+                    'count', 'update', 'updateMany', 'delete', 'deleteMany', 
+                    'aggregate', 'groupBy'
+                  ];
 
-              if (tenantId && !isMaster && !publicModels.includes(model) && !isUserCreation) {
-                
-                // A. Filtro Automático (Leitura/Update/Delete)
-                if (
-                  ['findMany', 'findFirst', 'count', 'update', 'updateMany', 'delete', 'deleteMany', 'aggregate', 'groupBy'].includes(operation)
-                ) {
-                  safeArgs.where = { ...safeArgs.where, companyId: tenantId };
-                }
-
-                // B. Tratamento findUnique -> findFirst (Para segurança IDOR)
-                if (operation === 'findUnique' || operation === 'findUniqueOrThrow') {
-                    // Convertemos findUnique em findFirst para poder injetar o companyId no where
-                    safeArgs.where = { ...safeArgs.where, companyId: tenantId };
+                  if (operationsWithWhere.includes(operation)) {
+                    if (!safeArgs.where) safeArgs.where = {};
                     
-                    if (operation === 'findUnique') {
-                        return (this as any)[model].findFirst(safeArgs);
-                    } else {
-                        return (this as any)[model].findFirstOrThrow(safeArgs);
+                    // Injeta filtro de segurança
+                    safeArgs.where.companyId = tenantId;
+
+                    // Ajuste findUnique -> findFirst
+                    if (operation === 'findUnique' || operation === 'findUniqueOrThrow') {
+                      if (operation === 'findUnique') return (this as any)[model].findFirst(safeArgs);
+                      return (this as any)[model].findFirstOrThrow(safeArgs);
                     }
+                  }
                 }
 
-                // C. Injeção Automática no Create (Segurança na Escrita)
-                if (operation === 'create') {
-                   safeArgs.data.companyId = tenantId;
-                }
-                
-                if (operation === 'createMany' && safeArgs.data) {
-                    if (Array.isArray(safeArgs.data)) {
-                        safeArgs.data = safeArgs.data.map((item: any) => ({ ...item, companyId: tenantId }));
-                    } else {
-                        safeArgs.data.companyId = tenantId;
-                    }
-                }
+                return await query(safeArgs);
+
+              } catch (error) {
+                logger.error(`💥 [Prisma Fatal Error] Falha em ${model}.${operation}`, error);
+                throw error;
               }
-
-              return query(safeArgs);
             },
           },
         },
@@ -130,12 +153,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
   }
 
   async onModuleInit() {
-    try {
-      await this.$connect();
-      console.log('✅ Conectado ao banco de dados (Enterprise Extensions Ativadas)');
-    } catch (error) {
-      console.error('❌ Erro ao conectar com o banco:', error);
-    }
+    await this.$connect();
   }
 
   async onModuleDestroy() {

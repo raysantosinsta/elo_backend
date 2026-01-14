@@ -18,7 +18,6 @@ import { AuthService } from './auth.service';
 import { RefreshTokenDto, VerifyTokenDto } from './dto/auth-payloads.dto';
 import { LoginUserDto } from './dto/login-user.dto';
 import { JwtAuthGuard } from './jwt-auth.guard';
-import { RefreshAuthGuard } from './refresh-auth.guard';
 import type { RequestWithUser } from './types';
 
 // Interface auxiliar para garantir que o TypeScript saiba que req.user existe

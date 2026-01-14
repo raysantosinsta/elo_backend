@@ -8,6 +8,7 @@ export interface UserProfile {
   role: UserRole;
   status: UserStatus;
   companyId: string | null;
+  
   document?: string | null;
   contact: string;
   professionalRole?: string | null; 

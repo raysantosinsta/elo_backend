@@ -17,7 +17,7 @@ import { FlowModule } from './flow/flow.module';
 import { ReportsTasksModule } from './reports-tasks/reports-tasks.module';
 import { ReportsFlowModule } from './reports-flow/reports-flow.module';
 import { CompaniesModule } from './companies/companies.module';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { CacheModule } from '@nestjs/cache-manager';
 import { AppController } from './app.controller';
@@ -25,6 +25,7 @@ import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler'; // Importe 
 import { RoutesModule } from './routes/routes.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
 import { ClsModule } from 'nestjs-cls';
+import { TenantInterceptor } from './common/interceptors/tenant.interceptor';
 
 @Module({
   imports: [
@@ -72,6 +73,10 @@ import { ClsModule } from 'nestjs-cls';
       provide: APP_GUARD,
       useClass: ThrottlerGuard, 
     },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: TenantInterceptor,
+    }
   ],
 })
 export class AppModule { }

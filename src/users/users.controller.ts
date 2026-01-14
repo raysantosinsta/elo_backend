@@ -12,20 +12,20 @@ import {
   Post,
   Query,
   UseGuards,
-  UseInterceptors, // 🔥
+  UseInterceptors, // 🔥 REQUIRED
 } from '@nestjs/common';
 import { SimpleStatus, UserRole } from '@prisma/client';
 import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
 import { Roles } from 'src/auth/roles.decorator';
 import { RolesGuard } from 'src/auth/roles.guard';
-import { TenantInterceptor } from 'src/common/interceptors/tenant.interceptor'; // 🔥 Importe
+import { TenantInterceptor } from 'src/common/interceptors/tenant.interceptor'; // 🔥 Import this
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UsersService } from './users.service';
 
 @Controller('users')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@UseInterceptors(TenantInterceptor) // 🔥 Contexto Automático
+@UseInterceptors(TenantInterceptor) // 🔥 THIS FIXES THE 500 ERROR
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
@@ -34,8 +34,7 @@ export class UsersController {
   @Post()
   @Roles(UserRole.MASTER, UserRole.ADMIN)
   create(@Body() createUserDto: CreateUserDto) {
-    // Não precisa passar companyId manualmente se for Admin.
-    // O Service/Extension resolvem.
+    // The Service will handle the logic using the Context
     return this.usersService.createUser(createUserDto);
   }
 
@@ -83,7 +82,7 @@ export class UsersController {
     @Query('status') status?: SimpleStatus,
     @Query('role') role?: UserRole,
   ) {
-    // Filtros limpos. O service decide se aplica companyId (se for Master)
+    // The service uses CLS context to filter data automatically
     return this.usersService.findAll(page, limit, { status, role, companyId });
   }
 
@@ -92,7 +91,6 @@ export class UsersController {
   async findByCompany(
     @Param('companyId', ParseUUIDPipe) companyId: string,
   ) {
-    // Validação de permissão feita no Service/Extension
     return this.usersService.findUsersByCompany(companyId);
   }
 
@@ -100,7 +98,6 @@ export class UsersController {
   searchUsers(
     @Query('query') query: string,
   ) {
-    // Contexto resolve qual empresa buscar
     return this.usersService.searchUsers(query);
   }
 

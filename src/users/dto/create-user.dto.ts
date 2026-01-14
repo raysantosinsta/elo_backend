@@ -1,6 +1,6 @@
 /* eslint-disable prettier/prettier */
-import { IsEmail, IsEnum, IsOptional, IsString, IsBoolean } from 'class-validator';
 import { UserRole, UserStatus } from '@prisma/client';
+import { IsEmail, IsEnum, IsOptional, IsString } from 'class-validator';
 
 export class CreateUserDto {
   @IsString()

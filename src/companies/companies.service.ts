@@ -15,6 +15,7 @@ import {
 } from '@nestjs/common';
 import { Company, SimpleStatus } from '@prisma/client';
 import type { Cache } from 'cache-manager';
+import { Type } from 'class-transformer';
 import {
   IsEmail,
   IsEnum,
@@ -66,8 +67,18 @@ export class UpdateCompanyDto {
 }
 
 export class PaginationDto {
-  @IsOptional() @IsInt() @Min(1) page?: number;
-  @IsOptional() @IsInt() @Min(1) @Max(100) limit?: number;
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number) // <--- Converte "1" para 1
+  page?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(100) // Mantido como você pediu
+  @Type(() => Number) // <--- Converte "100" para 100
+  limit?: number;
 }
 
 // --- Métricas ---
@@ -90,6 +101,28 @@ export class CompaniesService {
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
     private readonly cls: ClsService,
   ) { }
+
+  // ===========================================================================
+  // 🔥 HELPER DE SEGURANÇA (NOVO)
+  // ===========================================================================
+  /**
+   * Valida se o usuário logado tem permissão para alterar o recurso alvo.
+   * Se for MASTER, passa direto.
+   * Se for ADMIN/USER, o ID do recurso deve bater com o ID da empresa do usuário.
+   */
+  private validateOwnership(targetCompanyId: string): void {
+    const isMaster = this.cls.get<boolean>('isMaster');
+    const userTenantId = this.cls.get<string>('tenantId');
+
+    // Se for Master, tem acesso total
+    if (isMaster) return;
+
+    // Se não for Master, o ID alvo deve ser IGUAL ao ID da empresa dele
+    if (targetCompanyId !== userTenantId) {
+      this.logger.warn(`⛔ Tentativa de Acesso Ilegal: Tenant ${userTenantId} tentou acessar Empresa ${targetCompanyId}`);
+      throw new ForbiddenException('Acesso negado: Você não pode manipular registros de outra empresa.');
+    }
+  }
 
   // Wrapper de Resiliência (Mantido)
   private async executeWithResilience<T>(
@@ -128,9 +161,8 @@ export class CompaniesService {
   }
 
   async create(createCompanyDto: CreateCompanyDto): Promise<Company> {
-    // 🔥 SANITIZAÇÃO: Remove tudo que não é dígito do CNPJ e do TELEFONE
     const sanitizedCnpj = createCompanyDto.cnpj.replace(/\D/g, '');
-    const sanitizedPhone = createCompanyDto.telefone.replace(/\D/g, ''); // <--- ADICIONADO
+    const sanitizedPhone = createCompanyDto.telefone.replace(/\D/g, '');
 
     const existing = await this.prisma.company.findUnique({ where: { cnpj: sanitizedCnpj } });
     if (existing) {
@@ -139,12 +171,13 @@ export class CompaniesService {
 
     const userId = this.cls.get<string>('userId');
 
+    // Criação não precisa de validateOwnership pois está criando um novo recurso
     const company = await this.executeWithResilience('create_company', () =>
       this.prisma.company.create({
         data: {
           ...createCompanyDto,
           cnpj: sanitizedCnpj,
-          telefone: sanitizedPhone, // <--- USA O VALOR LIMPO
+          telefone: sanitizedPhone,
           userCreateId: userId,
           status: createCompanyDto.status || SimpleStatus.ACTIVE,
         },
@@ -157,11 +190,11 @@ export class CompaniesService {
     return company;
   }
 
-  // --- LISTAGEM (Mantida) ---
+  // --- LISTAGEM ---
   async findAll(
     pagination: PaginationDto
   ): Promise<{ data: Partial<Company>[]; total: number; page: number; lastPage: number }> {
-    
+
     const { page = 1, limit = 10 } = pagination;
     const skip = (page - 1) * limit;
 
@@ -180,12 +213,12 @@ export class CompaniesService {
 
     if (!isMaster) {
       if (!tenantId) {
-        return { data: [], total: 0, page, lastPage: 0 }; 
+        return { data: [], total: 0, page, lastPage: 0 };
       }
-      where.id = tenantId; 
+      where.id = tenantId;
     }
 
-    const [data, total] = await this.executeWithResilience('find_all_companies', () => 
+    const [data, total] = await this.executeWithResilience('find_all_companies', () =>
       this.prisma.$transaction([
         this.prisma.company.findMany({
           skip,
@@ -212,8 +245,11 @@ export class CompaniesService {
     return result;
   }
 
-  // --- BUSCA UNITÁRIA (Mantida) ---
+  // --- BUSCA UNITÁRIA (Protegida) ---
   async findOne(id: string): Promise<Company> {
+    // 🔥 1. Valida Permissão ANTES de buscar (Segurança primeiro)
+    this.validateOwnership(id);
+
     const cacheKey = `company_${id}`;
     let company: Company | null | undefined = await this.cacheManager.get<Company>(cacheKey);
 
@@ -227,49 +263,46 @@ export class CompaniesService {
       throw new NotFoundException(`Empresa ${id} não encontrada.`);
     }
 
-    const isMaster = this.cls.get<boolean>('isMaster');
-    const tenantId = this.cls.get<string>('tenantId');
-
-    if (!isMaster && company.id !== tenantId) {
-       this.logger.warn(`Acesso negado: Tenant ${tenantId} tentou acessar Empresa ${id}`);
-       throw new ForbiddenException('Você não tem permissão para acessar os dados desta empresa.');
-    }
+    // (A validação de ownership já foi feita no início, mas como usamos cache, 
+    // a validação lá em cima garante que, mesmo se vier do cache, o ID bate).
 
     await this.cacheManager.set(cacheKey, company, 300000);
     return company;
   }
 
-  // --- ATUALIZAÇÃO (Ajustado para limpar telefone) ---
+  // --- ATUALIZAÇÃO (Protegida) ---
   async update(
-    id: string, 
+    id: string,
     updateCompanyDto: UpdateCompanyDto
   ): Promise<Company> {
-    
+    // 🔥 1. Validação de Segurança
+    this.validateOwnership(id);
+
+    // 2. Busca dados atuais (O findOne também valida, dupla proteção é ok)
     const currentCompanyData = await this.findOne(id);
     const isMaster = this.cls.get<boolean>('isMaster');
     const userId = this.cls.get<string>('userId');
 
     if (
-      updateCompanyDto.status === SimpleStatus.INACTIVE && 
+      updateCompanyDto.status === SimpleStatus.INACTIVE &&
       !isMaster
     ) {
       throw new ForbiddenException('Apenas usuários Master podem inativar uma empresa.');
     }
 
-    // 🔥 LIMPEZA DE DADOS
+    // Limpeza de dados
     if (updateCompanyDto.cnpj) {
       updateCompanyDto.cnpj = updateCompanyDto.cnpj.replace(/\D/g, '');
       if (updateCompanyDto.cnpj !== currentCompanyData.cnpj) {
-         const exists = await this.prisma.company.findUnique({ 
-             where: { cnpj: updateCompanyDto.cnpj } 
-         });
-         if (exists) throw new BadRequestException('Este CNPJ já está em uso.');
+        const exists = await this.prisma.company.findUnique({
+          where: { cnpj: updateCompanyDto.cnpj }
+        });
+        if (exists) throw new BadRequestException('Este CNPJ já está em uso.');
       }
     }
 
-    // 🔥 Limpa telefone se foi enviado na atualização
     if (updateCompanyDto.telefone) {
-        updateCompanyDto.telefone = updateCompanyDto.telefone.replace(/\D/g, '');
+      updateCompanyDto.telefone = updateCompanyDto.telefone.replace(/\D/g, '');
     }
 
     const updated = await this.executeWithResilience('update_company', () =>
@@ -284,13 +317,14 @@ export class CompaniesService {
     );
 
     await this.cacheManager.del(`company_${id}`);
-    
+
+    // Limpa cache de listas
     try {
       const store = (this.cacheManager as any).store;
       if (store && typeof store.keys === 'function') {
         const keys: string[] = await store.keys('companies_list_*');
         if (keys.length > 0) {
-            await Promise.all(keys.map(k => this.cacheManager.del(k)));
+          await Promise.all(keys.map(k => this.cacheManager.del(k)));
         }
       }
     } catch (e) {
@@ -300,12 +334,17 @@ export class CompaniesService {
     return updated;
   }
 
-  // --- REMOÇÃO (Mantida) ---
+  // --- REMOÇÃO (Protegida) ---
   async remove(id: string): Promise<void> {
+    // 🔥 1. Validação de Segurança
+    this.validateOwnership(id);
+
+    // 2. Busca para confirmar existência
     await this.findOne(id);
+
     const isMaster = this.cls.get<boolean>('isMaster');
     if (!isMaster) {
-        throw new ForbiddenException('Permissão insuficiente para remover empresas.');
+      throw new ForbiddenException('Permissão insuficiente para remover empresas.');
     }
 
     await this.executeWithResilience('soft_delete_company', () =>

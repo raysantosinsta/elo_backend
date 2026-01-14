@@ -107,6 +107,7 @@ export class CompaniesController {
     page: number;
     lastPage: number;
   }> {
+    console.log('🔍 [DEBUG] Pagination recebida:', pagination);
     // 🔥 O Service aplica o filtro "WHERE companyId" automaticamente se não for Master
     return this.companiesService.findAll(pagination);
   }
