@@ -57,7 +57,7 @@ export class UsersService {
    */
   public async createUser(data: UserCreateData & { companyId?: string }): Promise<User> {
     const { password, companyId, ...rest } = data;
-    const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
+    const hashedPassword = await bcrypt.hash(password, 10); // SALT_ROUNDS = 10
 
     // Recupera dados do contexto
     const isMaster = this.cls.get<boolean>('isMaster');
@@ -71,29 +71,29 @@ export class UsersService {
         targetCompanyId = companyId;
     }
 
-    // 🔥 CORREÇÃO AQUI: Usamos 'UserUncheckedCreateInput'
-    // Isso permite definir 'companyId' diretamente como string.
-    // Removemos a propriedade 'company: { connect... }' para evitar conflito com a extensão.
+    // 🔥 A CORREÇÃO ESTÁ AQUI:
+    // 1. Mudamos o tipo para 'UserUncheckedCreateInput'
+    // 2. Usamos 'companyId' (string) ao invés de 'company: { connect... }'
+    
     const userData: Prisma.UserUncheckedCreateInput = {
       ...rest,
       password: hashedPassword,
       status: SimpleStatus.ACTIVE,
-      companyId: targetCompanyId, // Passamos o ID direto (Scalar)
+      companyId: targetCompanyId, // <--- ID direto (Scalar)
     };
 
     try {
-      // O '.extended' vai processar isso sem erros agora
+      // Agora o Prisma aceita misturar companyId (seu) + userCreateId (da extension)
       const user = await this.prisma.extended.user.create({ data: userData });
       return user;
     } catch (error: any) {
-      // Log do erro real no terminal (CRUCIAL PARA DEBUG)
       console.error('❌ Erro Prisma:', error); 
 
       if (error.code === 'P2002') {
         throw new ConflictException('Email ou Documento já cadastrado.');
       }
       if (error.code === 'P2003') { 
-         throw new BadRequestException('A empresa informada não existe (Erro de FK).');
+         throw new BadRequestException('A empresa informada não existe (FK Error).');
       }
       
       throw new BadRequestException('Erro ao criar usuário. Veja o terminal do servidor.');

@@ -159,6 +159,18 @@ model User {
   createdAt DateTime @default(now()) @map("criado_em")
   updatedAt DateTime @updatedAt @map("atualizado_em")
 
+  // --- NOVOS CAMPOS: Auditoria de Usuários (Self-Relation) ---
+  userCreateId String? @map("user_create_id") @db.Uuid
+  userCreate   User?   @relation("UserCreatedBy", fields: [userCreateId], references: [id])
+
+  userUpdateId String? @map("user_update_id") @db.Uuid
+  userUpdate   User?   @relation("UserUpdatedBy", fields: [userUpdateId], references: [id])
+
+  // Relacionamentos Reversos (Usuários criados/editados por este usuário)
+  createdUsers User[] @relation("UserCreatedBy")
+  updatedUsers User[] @relation("UserUpdatedBy")
+  // -----------------------------------------------------------
+
   // Relacionamento com Empresa
   company   Company? @relation("CompanyMembers", fields: [companyId], references: [id], onDelete: Cascade)
   companyId String?  @map("empresa_id") @db.Uuid
@@ -172,8 +184,8 @@ model User {
 
   createdTasks   Task[] @relation("TaskCreatedBy")
   updatedTasks   Task[] @relation("TaskUpdatedBy")
-  completedTasks Task[] @relation("TaskCompletedUser") // Corrigido nome da relação de TaskCompletedBy
-  assignedTasks  Task[] @relation("TaskAssignedUser") // Corrigido nome da relação de TaskAssignedTo
+  completedTasks Task[] @relation("TaskCompletedUser")
+  assignedTasks  Task[] @relation("TaskAssignedUser")
 
   uploadedImagesTask TaskImage[]
   uploadedAudiosTask TaskAudio[]
