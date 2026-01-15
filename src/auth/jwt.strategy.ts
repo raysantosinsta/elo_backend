@@ -7,7 +7,7 @@ import { PassportStrategy } from '@nestjs/passport';
 import { Injectable, UnauthorizedException, ForbiddenException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
-import { UserRole, UserStatus } from '@prisma/client';
+import { UserRole, SimpleStatus } from '@prisma/client';
 import { Request } from 'express';
 
 export interface JwtPayload {
@@ -43,7 +43,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('Credenciais revogadas.');
     }
 
-    if (userProfile.status !== UserStatus.ACTIVE) {
+    if (userProfile.status !== SimpleStatus.ACTIVE) {
       throw new ForbiddenException('Sua conta está inativa.');
     }
 

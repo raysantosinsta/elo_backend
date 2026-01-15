@@ -1,9 +1,9 @@
 /* eslint-disable prettier/prettier */
-import { UserRole, UserStatus } from '@prisma/client';
+import { UserRole, SimpleStatus } from '@prisma/client';
 
 export class UserResponseDto {
   id: string;
-  status: UserStatus;
+  status: SimpleStatus;
   name: string;
   email: string;
   document?: string;

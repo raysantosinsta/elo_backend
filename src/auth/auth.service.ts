@@ -17,7 +17,7 @@ import {
 // JwtService: Utilitário para criar e ler tokens JWT.
 import { JwtService } from '@nestjs/jwt';
 // Tipos do Banco de Dados (Prisma) e biblioteca de criptografia (bcrypt).
-import { UserStatus } from '@prisma/client';
+import { SimpleStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import type { Cache } from 'cache-manager';
 import { PrismaService } from 'src/prisma/prisma.service';
@@ -128,7 +128,7 @@ export class AuthService {
     // Validação final: Usuário deve existir, estar ativo e senha deve ser válida.
     if (!user || !isPasswordValid) {
       throw new UnauthorizedException('Credenciais inválidas');
-    } else if (user.status !== UserStatus.ACTIVE) {
+    } else if (user.status !== SimpleStatus.ACTIVE) {
       throw new UnauthorizedException('Usuário Bloqueado');
     } else if (user.company && user.company.status !== 'ACTIVE') {
       throw new UnauthorizedException('Empresa Bloqueada');
@@ -195,7 +195,7 @@ export class AuthService {
       });
 
       // Se usuário foi deletado ou inativado no banco, nega acesso.
-      if (!user || user.status !== UserStatus.ACTIVE) {
+      if (!user || user.status !== SimpleStatus.ACTIVE) {
         return { valid: false };
       }
 
@@ -250,7 +250,7 @@ export class AuthService {
         },
       });
 
-      if (!user || user.status !== UserStatus.ACTIVE) {
+      if (!user || user.status !== SimpleStatus.ACTIVE) {
         throw new UnauthorizedException('Acesso revogado');
       }
 

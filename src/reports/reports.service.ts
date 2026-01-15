@@ -5,7 +5,7 @@ import {
     Logger,
     BadRequestException,
 } from '@nestjs/common';
-import { BudgetStatus, TaskStatus, UserRole, UserStatus, Prisma } from '@prisma/client';
+import { BudgetStatus, TaskStatus, UserRole, SimpleStatus, Prisma } from '@prisma/client';
 import { format } from 'date-fns';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -54,8 +54,8 @@ export class ReportsService {
         }
 
         // 2. Filtros de Banco de Dados
-        const statusFilter = status && Object.values(UserStatus).includes(status as UserStatus)
-            ? (status as UserStatus)
+        const statusFilter = status && Object.values(SimpleStatus).includes(status as SimpleStatus)
+            ? (status as SimpleStatus)
             : undefined;
 
         const where: Prisma.UserWhereInput = {
@@ -168,8 +168,8 @@ export class ReportsService {
             professionals: professionalsWithMetrics,
             summary: {
                 totalProfessionals: professionals.length,
-                activeProfessionals: professionals.filter(p => p.status === UserStatus.ACTIVE).length,
-                inactiveProfessionals: professionals.filter(p => p.status === UserStatus.INACTIVE).length,
+                activeProfessionals: professionals.filter(p => p.status === SimpleStatus.ACTIVE).length,
+                inactiveProfessionals: professionals.filter(p => p.status === SimpleStatus.INACTIVE).length,
                 companies: Array.from(new Set(professionals.map(p => p.company?.name).filter(Boolean))),
             },
             filters: { companyId, startDate, endDate, status },

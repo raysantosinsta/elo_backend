@@ -1,5 +1,5 @@
 /* eslint-disable prettier/prettier */
-import { UserRole, UserStatus } from '@prisma/client';
+import { UserRole, SimpleStatus } from '@prisma/client';
 import { IsEmail, IsEnum, IsOptional, IsString } from 'class-validator';
 
 export class CreateUserDto {
@@ -32,8 +32,8 @@ export class CreateUserDto {
   @IsString()
   companyId?: string;
 
-  @IsEnum(UserStatus)
+  @IsEnum(SimpleStatus)
   @IsOptional()
-  status?: UserStatus;
+  status?: SimpleStatus;
 
 }

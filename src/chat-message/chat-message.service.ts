@@ -2,7 +2,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { PrismaService } from "src/prisma/prisma.service";
 import { WhatsappService } from "src/whatsapp/whatsapp.service";
 import { CreateChatMessageDto } from "./dto/create-chat-message.dto";
-import { UserStatus } from "@prisma/client";
+import { SimpleStatus } from "@prisma/client";
 import  { ChatGateway } from "src/chat/chat.gateway";
 
 @Injectable()
@@ -25,7 +25,7 @@ export class ChatMessageService {
             const user = await this.prisma.user.findFirst({
                 where: { 
                     name: { contains: mention.name, mode: 'insensitive' },
-                    status: UserStatus.ACTIVE 
+                    status: SimpleStatus.ACTIVE 
                 },
                 select: { id: true, name: true }
             });

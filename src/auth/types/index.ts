@@ -1,12 +1,12 @@
 /* eslint-disable prettier/prettier */
-import { SimpleStatus, UserRole, UserStatus } from "@prisma/client";
+import { SimpleStatus, UserRole } from "@prisma/client";
 
 export interface UserProfile {
   id: string;
   email: string;
   name: string;
   role: UserRole;
-  status: UserStatus;
+  status: SimpleStatus;
   companyId: string | null;
   
   document?: string | null;
