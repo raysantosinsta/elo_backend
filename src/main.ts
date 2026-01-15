@@ -1,4 +1,7 @@
 /* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
@@ -18,6 +21,9 @@ async function bootstrap() {
       ? ['error', 'warn', 'log']
       : ['error', 'warn', 'log', 'debug', 'verbose'],
   });
+
+  const server = app.getHttpAdapter().getInstance();
+  server.set('trust proxy', 1);
 
   // 2. CONFIGURAÇÃO DE TAMANHO (Adicione estas duas linhas antes de tudo)
   // Permite uploads de até 500MB (ajuste conforme necessidade)
