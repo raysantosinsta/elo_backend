@@ -27,8 +27,13 @@ async function bootstrap() {
 
   // 2. CONFIGURAÇÃO DE TAMANHO (Adicione estas duas linhas antes de tudo)
   // Permite uploads de até 500MB (ajuste conforme necessidade)
-  app.use(json({ limit: '500mb' }));
-  app.use(urlencoded({ extended: true, limit: '500mb' }));
+
+  const bodyLimit = process.env.BODY_LIMIT || '10mb';
+
+  app.use(json({ limit: bodyLimit }));
+  app.use(urlencoded({ extended: true, limit: bodyLimit }));
+
+
 
   // 2. Segurança (Security & Governance)
   // Helmet configura headers HTTP seguros (proteção contra XSS, Clickjacking, etc.)
