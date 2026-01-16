@@ -41,9 +41,14 @@ async function bootstrap() {
 
   // CORS configurado para produção (aceita variáveis de ambiente)
   app.enableCors({
-    origin: true,
+    origin: [
+      'https://elo-frontend-three.vercel.app', // <--- COLOQUE SUA URL DA VERCEL AQUI
+      'http://localhost:3000',
+      'http://localhost:3001'
+    ],
     credentials: true,
-    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+    allowedHeaders: 'Content-Type, Accept, Authorization',
     preflightContinue: false,
     optionsSuccessStatus: 204,
   });
