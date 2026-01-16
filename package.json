@@ -20,6 +20,9 @@
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "prisma-deploy": "npx prisma migrate deploy"
   },
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "dependencies": {
     "@nestjs/cache-manager": "^3.0.1",
     "@nestjs/common": "^11.0.1",
