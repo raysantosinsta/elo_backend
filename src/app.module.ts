@@ -26,6 +26,8 @@ import { RoutesModule } from './routes/routes.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
 import { ClsModule } from 'nestjs-cls';
 import { TenantInterceptor } from './common/interceptors/tenant.interceptor';
+import { ResetPasswordModule } from './reset-password/reset-password.module';
+import { MailModule } from './mail/mail.module';
 
 @Module({
   imports: [
@@ -61,6 +63,8 @@ import { TenantInterceptor } from './common/interceptors/tenant.interceptor';
     CompaniesModule,
     RoutesModule,
     SuppliersModule,
+    ResetPasswordModule,
+    MailModule,
   ],
   // ADICIONE O CONTROLLER AQUI
   controllers: [AppController],
@@ -76,7 +80,7 @@ import { TenantInterceptor } from './common/interceptors/tenant.interceptor';
     {
       provide: APP_INTERCEPTOR,
       useClass: TenantInterceptor,
-    }
+    },
   ],
 })
 export class AppModule { }
