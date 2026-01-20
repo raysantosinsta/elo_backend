@@ -1,12 +1,12 @@
 /* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 // src/auth/tenant.interceptor.ts
 /* eslint-disable prettier/prettier */
-import { CallHandler, ExecutionContext, Injectable, NestInterceptor, Logger } from '@nestjs/common';
+import { CallHandler, ExecutionContext, Injectable, Logger, NestInterceptor } from '@nestjs/common';
 import { ClsService } from 'nestjs-cls';
 import { Observable } from 'rxjs';
-import { tap } from 'rxjs/operators';
 
 @Injectable()
 export class TenantInterceptor implements NestInterceptor {
@@ -17,31 +17,28 @@ export class TenantInterceptor implements NestInterceptor {
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
     const request = context.switchToHttp().getRequest();
     const user = request.user;
-
-    this.logger.log(`🔍 [Interceptor] Iniciando request: ${request.method} ${request.url}`);
+    
+    // PEGAR O TOKEN BRUTO (String) caso precise repassar para outra API
+    // Se o user existe, assume-se que o header authorization também existe
+    const authHeader = request.headers.authorization;
+    const token = authHeader ? authHeader.replace('Bearer ', '') : null;
 
     if (user) {
-      this.logger.log(`👤 [Interceptor] Usuário encontrado: ${user.email} (${user.role})`);
-      this.logger.log(`🏢 [Interceptor] CompanyID no Token: ${user.companyId}`);
-
-      // Setup do Contexto
+      // Setup do Contexto (DADOS JÁ VALIDADOS PELO GUARD)
       this.cls.set('userId', user.id);
       this.cls.set('tenantId', user.companyId);
       this.cls.set('userRole', user.role);
       
+      // Setup do Token Bruto (Útil se o backend precisar chamar outro microsserviço)
+      this.cls.set('accessToken', token); 
+
       const isMaster = user.role === 'MASTER';
       this.cls.set('isMaster', isMaster);
 
-      this.logger.log(`🔒 [Interceptor] Contexto Definido -> IsMaster: ${isMaster}, TenantId: ${user.companyId}`);
-    } else {
-      this.logger.warn(`⚠️ [Interceptor] NENHUM usuário no request (Rota pública ou Guard falhou?)`);
-    }
+      // Log simplificado para não poluir tanto, a menos que seja debug
+      // this.logger.debug(`🔒 Contexto: User=${user.email}, Tenant=${user.companyId}`);
+    } 
 
-    return next.handle().pipe(
-      tap({
-        next: () => this.logger.log(`✅ [Interceptor] Request finalizado com sucesso`),
-        error: (err) => this.logger.error(`❌ [Interceptor] Erro durante o processamento: ${err.message}`, err.stack),
-      }),
-    );
+    return next.handle();
   }
 }

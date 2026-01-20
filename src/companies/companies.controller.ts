@@ -13,7 +13,7 @@ import {
   Post,
   Query,
   UseGuards,
-  UseInterceptors // <--- Importante
+  UseInterceptors 
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -22,9 +22,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import type { User } from '@prisma/client';
 import { Company, UserRole } from '@prisma/client';
-import { CurrentUser } from 'src/auth/current-user.decorator';
 import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
 import { Roles } from 'src/auth/roles.decorator';
 import { RolesGuard } from 'src/auth/roles.guard';
@@ -55,15 +53,12 @@ export class CompaniesController {
   @HttpCode(HttpStatus.CREATED)
   async create(
     @Body() createCompanyDto: CreateCompanyDto,
-    @CurrentUser() user: User, // Mantive apenas para o log abaixo
   ): Promise<Company> {
-    this.logger.log(
-      `MASTER ${user.id} criando empresa: ${createCompanyDto.cnpj}`,
-    );
-    
+
+
     // 🔥 MUDANÇA: Não precisamos mais setar userCreateId manualmente.
     // O Service pega o ID do contexto (CLS) automaticamente.
-    
+
     return this.companiesService.create(createCompanyDto);
   }
 
@@ -116,7 +111,7 @@ export class CompaniesController {
   @Roles(UserRole.MASTER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Busca uma empresa (Com trava de segurança para ADMIN)' })
   async findOne(
-    @Param('id', new ParseUUIDPipe()) id: string, 
+    @Param('id', new ParseUUIDPipe()) id: string,
     // @CurrentUser() user: User, -> Removido
   ): Promise<Company> {
     // 🔥 O Service valida se o ID pertence ao contexto do usuário

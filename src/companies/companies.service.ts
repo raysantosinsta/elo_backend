@@ -86,6 +86,7 @@ const companyCreationCounter = new Counter({
   name: 'company_created_total',
   help: 'Total number of companies created',
 });
+
 const dbLatencyHistogram = new Histogram({
   name: 'db_operation_duration_seconds',
   help: 'Duration of DB operations in seconds',
