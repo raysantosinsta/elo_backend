@@ -5,279 +5,141 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable prettier/prettier */
+/* eslint-disable prettier/prettier */
 import {
+  BadRequestException,
   Body,
   Controller,
+  DefaultValuePipe,
   Delete,
   Get,
   HttpCode,
   HttpStatus,
+  Logger,
   Param,
+  ParseIntPipe,
+  ParseUUIDPipe,
   Patch,
   Post,
   Put,
   Query,
   UploadedFiles,
-  UseInterceptors,
   UseGuards,
-  ParseUUIDPipe,
-  ParseIntPipe,
-  Logger,
-  BadRequestException,
-  DefaultValuePipe,
+  UseInterceptors,
 } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import {
-  ApiTags,
-  ApiOperation,
-  ApiResponse,
-  ApiConsumes,
   ApiBearerAuth,
+  ApiConsumes,
+  ApiOperation,
   ApiQuery,
+  ApiResponse,
+  ApiTags,
 } from '@nestjs/swagger';
-// Certifique-se de que CreateTaskAddressDto está sendo exportado do arquivo do service ou do arquivo de DTOs
-import {
-  TasksService,
-  CreateTaskDto,
-  UpdateTaskDto,
-  UploadedFile,
-  CreateTaskAddressDto,
-} from './tasks.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { TaskStatus } from '@prisma/client';
-import type { User } from '@prisma/client';
+import { TenantInterceptor } from 'src/common/interceptors/tenant.interceptor'; // 🔥 Injetar Contexto
+import { CreateTaskAddressDto, CreateTaskDto, FinalizeTaskDto, UpdateTaskDto, validateFiles } from './dto/create-task-dto';
+import { TasksService, UploadedFile } from './tasks.service';
+import { TaskStatus, User } from '@prisma/client';
+import { FileLoggerInterceptor } from 'src/common/interceptors/file-logger.interceptor';
 import { CurrentUser } from 'src/auth/current-user.decorator';
-
-// Adicione este DTO auxiliar ou use um Partial<UpdateTaskDto>
-export class FinalizeTaskDto {
-  status: TaskStatus;
-  finalComment: string;
-  scheduledAt?: string; // Nova data para reagendamento
-}
 
 @ApiTags('Tasks')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
+@UseInterceptors(TenantInterceptor) // 🔥 Contexto Automático
 @Controller('tasks')
 export class TasksController {
   private readonly logger = new Logger(TasksController.name);
 
-  constructor(private readonly tasksService: TasksService) { }
-
-  // --- WRITE OPERATIONS ---
+  constructor(private readonly tasksService: TasksService) {}
 
   @Post()
-  @ApiOperation({
-    summary: 'Cria uma nova tarefa com endereço e uploads opcionais',
-  })
+  @ApiOperation({ summary: 'Cria uma nova tarefa' })
   @ApiConsumes('multipart/form-data')
-  @ApiResponse({ status: 201, description: 'Tarefa criada com sucesso.' })
-  @UseInterceptors(
-    FileFieldsInterceptor([
-      { name: 'images', maxCount: 10 },
-      { name: 'audios', maxCount: 10 },
-      { name: 'videos', maxCount: 5 },
-    ]),
-  )
+  @ApiResponse({ status: 201, description: 'Tarefa criada.' })
+  @UseInterceptors(FileFieldsInterceptor([{ name: 'images', maxCount: 10 }, { name: 'audios', maxCount: 10 }, { name: 'videos', maxCount: 5 }]), FileLoggerInterceptor)
   async create(
-    @CurrentUser() user: User,
+    @CurrentUser() user: any,
     @Body() createTaskDto: CreateTaskDto,
-    @UploadedFiles()
-    files: {
-      images?: UploadedFile[];
-      audios?: UploadedFile[];
-      videos?: UploadedFile[];
-    },
+    @UploadedFiles() // 🔥 Validação de Arquivo
+    files: { images?: UploadedFile[]; audios?: UploadedFile[]; videos?: UploadedFile[] },
   ) {
 
-    // 🔥 LOG DE DEBUG NO CONTROLLER
-    this.logger.log(`[Controller] Recebido request de ${user.email}`);
-    this.logger.log(`[Controller] DTO Title: ${createTaskDto.title}`);
-
-    if (files) {
-      this.logger.log(`[Controller] Files object keys: ${Object.keys(files)}`);
-      this.logger.log(`[Controller] Images count: ${files.images?.length}`);
-    } else {
-      this.logger.error(`[Controller] Objeto 'files' é undefined! O Interceptor falhou ou o Header está errado.`);
-    }
-
     if (!user.companyId) {
-      throw new BadRequestException(
-        'Usuário não está vinculado a uma empresa.',
-      );
+      throw new BadRequestException('Usuário não está vinculado a uma empresa.');
     }
 
-    this.logger.log(
-      `Usuário ${user.id} criando tarefa: ${createTaskDto.title}`,
-    );
-
-    // --- TRATAMENTO DE MULTIPART ---
-    // Se o frontend enviar o objeto 'address' como string JSON dentro do FormData,
-    // precisamos fazer o parse manual aqui para garantir que o Service receba um objeto.
-    if (createTaskDto.address && typeof createTaskDto.address === 'string') {
-      try {
-        createTaskDto.address = JSON.parse(createTaskDto.address);
-      } catch (error) {
-        throw new BadRequestException(
-          'Formato inválido para o campo address (JSON esperado)',
-        );
-      }
+    // ✅ CHAME A VALIDAÇÃO MANUAL AQUI
+    // Se falhar, ela joga um BadRequestException e para a execução
+    if (files) {
+        validateFiles(files);
     }
 
-    // Sobrescreve com dados do token para segurança
     createTaskDto.companyId = user.companyId;
     createTaskDto.createdById = user.id;
 
+    // Não precisa injetar user, o service pega do CLS
     return this.tasksService.create(createTaskDto, files);
   }
 
   @Put(':id')
-  @ApiOperation({
-    summary: 'Atualiza uma tarefa existente (dados e uploads/remoções)',
-  })
+  @ApiOperation({ summary: 'Atualiza uma tarefa existente' })
   @ApiConsumes('multipart/form-data')
-  @UseInterceptors(
-    FileFieldsInterceptor([
-      { name: 'images', maxCount: 10 },
-      { name: 'audios', maxCount: 10 },
-      { name: 'videos', maxCount: 5 },
-    ]),
-  )
+  @UseInterceptors(FileFieldsInterceptor([{ name: 'images', maxCount: 10 }, { name: 'audios', maxCount: 10 }, { name: 'videos', maxCount: 5 }]))
   async update(
     @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() user: User,
     @Body() updateTaskDto: UpdateTaskDto,
     @UploadedFiles()
-    files: {
-      images?: UploadedFile[];
-      audios?: UploadedFile[];
-      videos?: UploadedFile[];
-    },
+    files: { images?: UploadedFile[]; audios?: UploadedFile[]; videos?: UploadedFile[] },
   ) {
-    if (!user.companyId) {
-      throw new BadRequestException(
-        'Usuário não está vinculado a uma empresa.',
-      );
-    }
-
-    return this.tasksService.update(
-      id,
-      updateTaskDto,
-      user.companyId,
-      user.id, // updaterId
-      files,
-    );
+    return this.tasksService.update(id, updateTaskDto, files);
   }
 
   @Patch(':id/status')
   @ApiOperation({ summary: 'Move a tarefa entre colunas e/ou altera status' })
-  @ApiResponse({
-    status: 200,
-    description: 'Status e/ou coluna atualizados com sucesso.',
-  })
   async updateStatus(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body()
-    body: { columnId?: string; status?: TaskStatus; columnOrder?: number },
-    @CurrentUser() user: User,
+    @Body() body: { columnId?: string; status?: TaskStatus; columnOrder?: number },
   ) {
-    if (!user.companyId)
-      throw new BadRequestException('Empresa não identificada.');
-
-    // Garante que columnOrder seja numérico se vier no body
-    const columnOrder =
-      body.columnOrder !== undefined ? Number(body.columnOrder) : undefined;
-
-    const updateData: Partial<UpdateTaskDto> = {
-      columnId: body.columnId,
-      status: body.status,
-      columnOrder: columnOrder,
-    };
-
-    return this.tasksService.update(
-      id,
-      updateData,
-      user.companyId,
-      user.id, // updaterId
-    );
+    const dto = new UpdateTaskDto();
+    dto.columnId = body.columnId;
+    dto.status = body.status;
+    dto.columnOrder = body.columnOrder;
+    
+    return this.tasksService.update(id, dto);
   }
 
-  // --- SHORTCUTS (Simplificam a mudança de status) ---
-
   @Patch(':id/complete')
-  @ApiOperation({ summary: 'Define o status da tarefa como COMPLETED' })
-  async completeTask(
-    @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() user: User,
-  ) {
-    if (!user.companyId)
-      throw new BadRequestException('Empresa não identificada.');
-
-    // Passa o ID do usuário logado como quem completou
-    return this.tasksService.update(
-      id,
-      { status: TaskStatus.COMPLETED, completedById: user.id },
-      user.companyId,
-      user.id, // updaterId
-    );
+  @ApiOperation({ summary: 'Atalho: Completar tarefa' })
+  async completeTask(@Param('id', ParseUUIDPipe) id: string) {
+    const dto = new UpdateTaskDto();
+    dto.status = TaskStatus.COMPLETED;
+    // O service pega o user ID do contexto para marcar o "completedById"
+    return this.tasksService.update(id, dto);
   }
 
   @Patch(':id/start')
-  @ApiOperation({ summary: 'Define o status da tarefa como IN_PROGRESS' })
-  async startTask(
-    @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() user: User,
-  ) {
-    if (!user.companyId)
-      throw new BadRequestException('Empresa não identificada.');
-    return this.tasksService.update(
-      id,
-      { status: TaskStatus.IN_PROGRESS },
-      user.companyId,
-      user.id, // updaterId
-    );
+  @ApiOperation({ summary: 'Atalho: Iniciar tarefa' })
+  async startTask(@Param('id', ParseUUIDPipe) id: string) {
+    const dto = new UpdateTaskDto();
+    dto.status = TaskStatus.IN_PROGRESS;
+    return this.tasksService.update(id, dto);
   }
 
   @Patch(':id/fail')
-  @ApiOperation({ summary: 'Define o status da tarefa como FAILED' })
-  async failTask(
-    @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() user: User,
-  ) {
-    if (!user.companyId)
-      throw new BadRequestException('Empresa não identificada.');
-    return this.tasksService.update(
-      id,
-      { status: TaskStatus.FAILED },
-      user.companyId,
-      user.id, // updaterId
-    );
+  @ApiOperation({ summary: 'Atalho: Falhar tarefa' })
+  async failTask(@Param('id', ParseUUIDPipe) id: string) {
+    const dto = new UpdateTaskDto();
+    dto.status = TaskStatus.FAILED;
+    return this.tasksService.update(id, dto);
   }
 
-  // --- READ OPERATIONS ---
-
   @Get()
-  @ApiOperation({ summary: 'Lista tarefas paginadas da empresa do usuário' })
+  @ApiOperation({ summary: 'Lista tarefas' })
   @ApiQuery({ name: 'page', required: false, type: Number })
-  @ApiQuery({ name: 'limit', required: false, type: Number })
-  @ApiQuery({ name: 'columnId', required: false, type: String })
-  @ApiQuery({ name: 'search', required: false, type: String })
-  @ApiQuery({
-    name: 'startDate',
-    required: false,
-    type: String,
-    description: 'ISO Date',
-  })
-  @ApiQuery({
-    name: 'endDate',
-    required: false,
-    type: String,
-    description: 'ISO Date',
-  })
-  @ApiQuery({ name: 'assignedToId', required: false, type: String })
-  @ApiQuery({ name: 'hasLocation', required: false, type: Boolean })
   async findAllPaginated(
-    @CurrentUser() user: User,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
     @Query('columnId') columnId?: string,
@@ -285,18 +147,13 @@ export class TasksController {
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
     @Query('assignedToId') assignedToId?: string,
-    @Query('hasLocation') hasLocation?: string, // Recebe como string "true"/"false" da query
+    @Query('hasLocation') hasLocation?: string,
   ) {
-    if (!user.companyId)
-      throw new BadRequestException('Empresa não identificada.');
-
-    // Lógica para converter string em boolean ou undefined
     let hasLocationBool: boolean | undefined = undefined;
     if (hasLocation === 'true') hasLocationBool = true;
     if (hasLocation === 'false') hasLocationBool = false;
 
     return this.tasksService.findAllPaginated({
-      companyId: user.companyId,
       page,
       limit,
       columnId,
@@ -304,90 +161,43 @@ export class TasksController {
       startDate,
       endDate,
       assignedToId,
-      hasLocation: hasLocationBool, // Passa o booleano correto ou undefined
+      hasLocation: hasLocationBool,
     });
   }
 
   @Get(':id')
-  @ApiOperation({
-    summary: 'Busca uma tarefa por ID (Apenas se pertencer à empresa)',
-  })
-  async findOne(
-    @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() user: User,
-  ) {
-    if (!user.companyId)
-      throw new BadRequestException('Empresa não identificada.');
-
-    return this.tasksService.findOne(id, user.companyId);
+  @ApiOperation({ summary: 'Busca tarefa por ID' })
+  async findOne(@Param('id', ParseUUIDPipe) id: string) {
+    return this.tasksService.findOne(id);
   }
-
-  // --- DELETE ---
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Remove uma tarefa e seus arquivos' })
+  @ApiOperation({ summary: 'Remove tarefa' })
   @HttpCode(HttpStatus.NO_CONTENT)
-  async remove(
-    @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() user: User,
-  ) {
-    if (!user.companyId)
-      throw new BadRequestException('Empresa não identificada.');
-
-    await this.tasksService.remove(id, user.companyId);
+  async remove(@Param('id', ParseUUIDPipe) id: string) {
+    await this.tasksService.remove(id);
   }
 
-  // --- ADDRESS (Rota Específica) ---
-  // Útil se quiser adicionar endereço a uma tarefa que já existe e não tinha
-
   @Post(':id/address')
-  @ApiOperation({
-    summary: 'Adiciona ou atualiza o endereço de uma tarefa existente',
-  })
+  @ApiOperation({ summary: 'Adiciona endereço' })
   async addAddress(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() addressDto: CreateTaskAddressDto, // Agora tipado corretamente
-    @CurrentUser() user: User,
+    @Body() addressDto: CreateTaskAddressDto,
   ) {
-    if (!user.companyId)
-      throw new BadRequestException('Empresa não identificada.');
-    return this.tasksService.addAddress(id, user.companyId, addressDto);
+    return this.tasksService.addAddress(id, addressDto);
   }
 
   @Patch(':id/finalize')
-  @ApiOperation({
-    summary: 'Finaliza a tarefa, adiciona comentário e reagenda',
-  })
+  @ApiOperation({ summary: 'Finaliza e reagenda' })
   async finalizeTask(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() body: FinalizeTaskDto,
-    @CurrentUser() user: User,
   ) {
-    if (!user.companyId)
-      throw new BadRequestException('Empresa não identificada.');
+    const dto = new UpdateTaskDto();
+    dto.status = body.status;
+    dto.finalComment = body.finalComment;
+    if (body.scheduledAt) dto.scheduledAt = body.scheduledAt;
 
-    const updateData: any = {
-      status: body.status,
-      finalComment: body.finalComment,
-      // Se for completada, marca quem completou
-      userCompleted:
-        body.status === TaskStatus.COMPLETED
-          ? { connect: { id: user.id } }
-          : undefined,
-      completionDate:
-        body.status === TaskStatus.COMPLETED ? new Date() : undefined,
-    };
-
-    // Se o motorista enviou uma data de reagendamento, atualizamos o scheduledDate
-    if (body.scheduledAt) {
-      updateData.scheduledDate = new Date(body.scheduledAt);
-    }
-
-    return this.tasksService.update(
-      id,
-      updateData, // Passamos o objeto direto pois o Service já trata a lógica
-      user.companyId,
-      user.id,
-    );
+    return this.tasksService.update(id, dto);
   }
 }

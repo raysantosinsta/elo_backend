@@ -1,115 +1,27 @@
 /* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
+/* eslint-disable @typescript-eslint/await-thenable */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
-import { Transform, Type } from 'class-transformer';
-import {
-  IsArray,
-  IsDateString,
-  IsEnum,
-  IsInt,
-  IsNotEmpty,
-  IsNumber,
-  IsOptional,
-  IsString,
-  IsUUID,
-  ValidateNested,
-} from 'class-validator';
-import { NotificationType, Prisma, TaskStatus } from '@prisma/client';
-import { Inject, Injectable, InternalServerErrorException, Logger, NotFoundException } from '@nestjs/common';
+/* eslint-disable prettier/prettier */
+/* eslint-disable prettier/prettier */
+/* eslint-disable prettier/prettier */
+/* eslint-disable prettier/prettier */
+/* eslint-disable prettier/prettier */
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { BadRequestException, ForbiddenException, Inject, Injectable, InternalServerErrorException, Logger, NotFoundException } from '@nestjs/common';
+import { NotificationType, Prisma, TaskStatus } from '@prisma/client';
+import type { Cache } from 'cache-manager';
+import { ClsService } from 'nestjs-cls';
+import { Counter } from 'prom-client';
+import { NotificationUserGateway } from 'src/notification-user/notification-user.gateway';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { SupabaseService } from 'src/supabase/supabase.service';
-import { NotificationUserGateway } from 'src/notification-user/notification-user.gateway';
-import { Counter } from 'prom-client';
-import type { Cache } from 'cache-manager';
+import { CreateTaskDto, UpdateTaskDto } from './dto/create-task-dto';
 
-
-
-export class CreateTaskAddressDto {
-  @IsString() @IsNotEmpty() cep: string;
-  @IsString() @IsNotEmpty() endereco: string;
-  @IsString() @IsNotEmpty() numero: string;
-  @IsString() @IsNotEmpty() bairro: string;
-  @IsString() @IsNotEmpty() cidade: string;
-  @IsString() @IsNotEmpty() estado: string;
-  @IsOptional() @IsString() complemento?: string;
-  @IsOptional() @Type(() => Number) @IsNumber() latitude?: number;
-  @IsOptional() @Type(() => Number) @IsNumber() longitude?: number;
-  @IsOptional() companyId?: string;
-}
-
-export class CreateTaskDto {
-  @IsString() @IsNotEmpty() title: string;
-  @IsOptional() @IsString() description?: string;
-  @IsUUID() @IsNotEmpty() columnId: string;
-  @IsOptional() @IsDateString() dueDate?: string | Date;
-  @IsOptional() @IsUUID() assignedToId?: string;
-
-  @IsOptional()
-  @Transform(({ value }) => {
-    if (typeof value === 'string') {
-      try { return JSON.parse(value); } catch (e) { return null; }
-    }
-    return value;
-  })
-  @ValidateNested()
-  @Type(() => CreateTaskAddressDto)
-  address?: CreateTaskAddressDto;
-
-  @IsOptional() @IsString() finalComment?: string;
-  @IsOptional() @IsDateString() scheduledAt?: string | Date;
-  @IsOptional() @IsInt() @Type(() => Number) priority?: number;
-  @IsOptional() @IsInt() @Type(() => Number) columnOrder?: number;
-  @IsOptional() @IsUUID() routeId?: string;
-  @IsOptional() @IsUUID() companyId?: string;
-  @IsOptional() @IsUUID() createdById?: string;
-  @IsOptional() status?: any;
-
-  // 🔥 CRÍTICO: Estes campos permitem o upload passar pelo ValidationPipe
-  @IsOptional() images?: any;
-  @IsOptional() audios?: any;
-  @IsOptional() videos?: any;
-}
-
-export class UpdateTaskDto {
-  @IsOptional() @IsString() title?: string;
-  @IsOptional() @IsString() description?: string;
-  @IsOptional() @IsUUID() columnId?: string;
-  @IsOptional() @IsDateString() dueDate?: string | Date;
-  @IsOptional() @IsDateString() scheduledAt?: string | Date;
-  @IsOptional() @IsInt() @Type(() => Number) priority?: number;
-  @IsOptional() @IsInt() @Type(() => Number) columnOrder?: number;
-  @IsOptional() @IsUUID() assignedToId?: string | null;
-  @IsOptional() @IsUUID() routeId?: string;
-  @IsOptional() @IsEnum(TaskStatus) status?: TaskStatus;
-  @IsOptional() @IsString() finalComment?: string;
-  @IsOptional() @IsUUID() completedById?: string;
-
-  @IsOptional()
-  @IsArray()
-  @Transform(({ value }) => (typeof value === 'string' ? JSON.parse(value) : value))
-  removeImageIds?: string[];
-
-  @IsOptional()
-  @IsArray()
-  @Transform(({ value }) => (typeof value === 'string' ? JSON.parse(value) : value))
-  removeAudioIds?: string[];
-
-  @IsOptional()
-  @IsArray()
-  @Transform(({ value }) => (typeof value === 'string' ? JSON.parse(value) : value))
-  removeVideoIds?: string[];
-
-  // 🔥 CRÍTICO TAMBÉM NO UPDATE
-  @IsOptional() images?: any;
-  @IsOptional() audios?: any;
-  @IsOptional() videos?: any;
-}
-
-// Interface para tipar o arquivo vindo do Interceptor/Multer
 export interface UploadedFile {
   fieldname: string;
   originalname: string;
@@ -134,25 +46,77 @@ export class TasksService {
     private readonly supabaseService: SupabaseService,
     private readonly websocketGateway: NotificationUserGateway,
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
+    private readonly cls: ClsService,
   ) {}
+
+  // --- VALIDAÇÃO DE TENANT ---
+  private validateOwnership(targetCompanyId: string): void {
+    const isMaster = this.cls.get<boolean>('isMaster');
+    const userTenantId = this.cls.get<string>('tenantId');
+
+    if (isMaster) return;
+
+    if (!targetCompanyId || targetCompanyId !== userTenantId) {
+      this.logger.warn(`⛔ Tentativa de Acesso Ilegal: Tenant ${userTenantId} -> ${targetCompanyId}`);
+      throw new ForbiddenException('Acesso negado.');
+    }
+  }
+
+  // --- VALIDAÇÃO DE RELACIONAMENTOS (Corrigida) ---
+  private async validateTaskRelations(dto: CreateTaskDto | UpdateTaskDto) {
+    const tenantId = this.cls.get<string>('tenantId');
+    const isMaster = this.cls.get<boolean>('isMaster');
+
+    if (isMaster || !tenantId) return;
+
+    // 🔥 CORREÇÃO DO ERRO DE TIPO AQUI:
+    const validations: Promise<void>[] = []; 
+
+    // 1. Valida Usuário
+    if (dto.assignedToId) {
+      validations.push(
+        this.prisma.user.findFirst({
+          where: { id: dto.assignedToId, companyId: tenantId },
+          select: { id: true },
+        }).then((res) => {
+          if (!res) throw new BadRequestException(`O usuário atribuído não pertence a esta empresa.`);
+        })
+      );
+    }
+
+    // 2. Valida Coluna
+    if (dto.columnId) {
+      validations.push(
+        this.prisma.kanbanColumn.findFirst({
+          where: { id: dto.columnId, companyId: tenantId },
+          select: { id: true },
+        }).then((res) => {
+          if (!res) throw new BadRequestException(`A coluna Kanban selecionada não pertence a esta empresa.`);
+        })
+      );
+    }
+
+    // 3. Valida Rota
+    if (dto.routeId) {
+      validations.push(
+        this.prisma.route.findFirst({
+          where: { id: dto.routeId, companyId: tenantId },
+          select: { id: true },
+        }).then((res) => {
+          if (!res) throw new BadRequestException(`A rota selecionada não pertence a esta empresa.`);
+        })
+      );
+    }
+
+    await Promise.all(validations);
+  }
 
   private getTaskIncludeDetails() {
     return {
-      taskImages: {
-        select: { id: true, url: true, filename: true, size: true },
-        orderBy: { createdAt: 'asc' } as const,
-      },
-      taskAudios: {
-        select: { id: true, url: true, duration: true },
-        orderBy: { createdAt: 'asc' } as const,
-      },
-      taskVideos: {
-        select: { id: true, url: true, duration: true },
-        orderBy: { createdAt: 'asc' } as const,
-      },
-      userAssigned: {
-        select: { id: true, name: true, email: true, contact: true },
-      },
+      taskImages: { select: { id: true, url: true, filename: true, size: true }, orderBy: { createdAt: 'asc' } as const },
+      taskAudios: { select: { id: true, url: true, duration: true }, orderBy: { createdAt: 'asc' } as const },
+      taskVideos: { select: { id: true, url: true, duration: true }, orderBy: { createdAt: 'asc' } as const },
+      userAssigned: { select: { id: true, name: true, email: true, contact: true } },
       userCreate: { select: { id: true, name: true } },
       userUpdate: { select: { id: true, name: true } },
       userCompleted: { select: { id: true, name: true } },
@@ -163,31 +127,19 @@ export class TasksService {
     };
   }
 
-  async create(
-    dto: CreateTaskDto,
-    files?: {
-      images?: UploadedFile[];
-      audios?: UploadedFile[];
-      videos?: UploadedFile[];
-    },
-  ) {
-    this.logger.debug(`[Create] Iniciando. Título: ${dto.title}`);
-    
-    if (files) {
-      this.logger.debug(`[Create] Arquivos: Imagens: ${files.images?.length || 0}, Áudios: ${files.audios?.length || 0}`);
-    }
+  // --- CREATE ---
+  async create(dto: CreateTaskDto, files?: { images?: UploadedFile[]; audios?: UploadedFile[]; videos?: UploadedFile[] }) {
+    this.logger.debug(`[Create] Iniciando task: ${dto.title}`);
 
-    const { title, companyId, createdById, assignedToId, columnId, address } = dto;
+    // Pega do contexto se não vier no DTO
+    if (!dto.companyId) dto.companyId = this.cls.get<string>('tenantId');
+    const userId = this.cls.get<string>('userId');
 
-    const [company, creator] = await Promise.all([
-      this.prisma.company.findUnique({ where: { id: companyId } }),
-      this.prisma.user.findUnique({ where: { id: createdById } }),
-    ]);
+    // Validações
+    this.validateOwnership(dto.companyId!);
+    await this.validateTaskRelations(dto);
 
-    if (!company) throw new NotFoundException('Empresa não encontrada');
-    if (!creator) throw new NotFoundException('Criador não encontrado');
-
-    const safeCompanyId = companyId!;
+    const { title, companyId, columnId, address } = dto;
     let task;
 
     try {
@@ -195,9 +147,10 @@ export class TasksService {
         data: {
           title: title.trim(),
           description: dto.description?.trim(),
-          companyId: safeCompanyId,
-          userCreateId: createdById!,
-          userAssignedId: assignedToId,
+          companyId: companyId!,
+          userCreateId: userId, // Pega do CLS
+          
+          userAssignedId: dto.assignedToId,
           columnId: columnId,
           routeId: dto.routeId,
           priority: dto.priority ?? 1,
@@ -215,76 +168,63 @@ export class TasksService {
                   bairro: address.bairro.slice(0, 100),
                   cidade: address.cidade.slice(0, 100),
                   estado: address.estado.slice(0, 2).toUpperCase(),
-                  complemento: address.complemento
-                    ? address.complemento.slice(0, 100)
-                    : null,
+                  complemento: address.complemento ? address.complemento.slice(0, 100) : null,
                   latitude: address.latitude,
                   longitude: address.longitude,
-                  companyId: safeCompanyId,
+                  companyId: companyId!,
                 },
               }
             : undefined,
         },
         include: this.getTaskIncludeDetails(),
       });
-      this.logger.debug(`[Create] Tarefa criada no banco ID: ${task.id}`);
     } catch (e: any) {
       this.logger.error('Erro ao salvar tarefa no banco', e);
-      throw new InternalServerErrorException(
-        `Erro ao salvar dados no banco: ${e.message}`,
-      );
+      throw new InternalServerErrorException(`Erro ao salvar dados no banco: ${e.message}`);
     }
 
-    if (
-      files &&
-      (files.images?.length || files.audios?.length || files.videos?.length)
-    ) {
+    if (files && (files.images?.length || files.audios?.length || files.videos?.length)) {
       try {
-        this.logger.debug(`[Create] Iniciando uploads para tarefa ${task.id}`);
-        await this.handleFileUploads(task.id, safeCompanyId, createdById!, files);
-        
-        task = await this.prisma.task.findUniqueOrThrow({
-          where: { id: task.id },
-          include: this.getTaskIncludeDetails(),
-        });
-
-        this.logger.debug(`[Create] Uploads finalizados. Imagens salvas: ${task.taskImages.length}`);
+        await this.handleFileUploads(task.id, companyId!, userId, files);
+        task = await this.prisma.task.findUniqueOrThrow({ where: { id: task.id }, include: this.getTaskIncludeDetails() });
       } catch (uploadError) {
-        this.logger.error(`[Create] Falha no upload. ROLLBACK.`, uploadError);
         await this.prisma.task.delete({ where: { id: task.id } });
-        throw new InternalServerErrorException(
-          'Erro ao processar arquivos. Tarefa cancelada.',
-        );
+        throw new InternalServerErrorException('Erro no upload. Tarefa cancelada.');
       }
     }
 
-    taskCreationCounter.labels(safeCompanyId).inc();
-    await this.cacheManager.del(`tasks_list_${safeCompanyId}`);
+    if (companyId) {
+      taskCreationCounter.labels(companyId).inc();
+      await this.cacheManager.del(`tasks_list_${companyId}`);
+    }
 
-    if (assignedToId) this.notifyAssignment(task, assignedToId, creator.name);
+    if (dto.assignedToId) {
+      const creatorName = await this.prisma.user.findUnique({ where: { id: userId }, select: { name: true } }).then(u => u?.name);
+      this.notifyAssignment(task, dto.assignedToId, creatorName || 'Sistema');
+    }
 
     return task;
   }
 
-  async update(
-    id: string,
-    dto: UpdateTaskDto,
-    companyId: string,
-    updaterId: string,
-    files?: {
-      images?: UploadedFile[];
-      audios?: UploadedFile[];
-      videos?: UploadedFile[];
-    },
-  ) {
-    const existing = await this.prisma.task.findFirst({
-      where: { id, companyId },
-    });
+  // --- UPDATE ---
+  async update(id: string, dto: UpdateTaskDto, files?: { images?: UploadedFile[]; audios?: UploadedFile[]; videos?: UploadedFile[] }) {
+    const tenantId = this.cls.get<string>('tenantId');
+    const userId = this.cls.get<string>('userId');
+
+    const existing = await this.prisma.task.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Task não encontrada.');
+    
+    // Se não for master, valida se a task pertence ao tenant atual
+    const isMaster = this.cls.get<boolean>('isMaster');
+    if (!isMaster && existing.companyId !== tenantId) {
+        throw new ForbiddenException('Acesso negado.');
+    }
+
+    await this.validateTaskRelations(dto);
 
     const data: Prisma.TaskUpdateInput = {
       updatedAt: new Date(),
-      userUpdate: { connect: { id: updaterId } },
+      userUpdate: { connect: { id: userId } },
     };
 
     if (dto.title) data.title = dto.title.trim();
@@ -294,46 +234,32 @@ export class TasksService {
     if (dto.priority !== undefined) data.priority = Number(dto.priority);
     if (dto.columnOrder !== undefined) data.columnOrder = Number(dto.columnOrder);
     if (dto.finalComment !== undefined) data.finalComment = dto.finalComment;
-
     if (dto.dueDate) data.dueDate = new Date(dto.dueDate);
     if (dto.scheduledAt) data.scheduledDate = new Date(dto.scheduledAt);
 
     if (dto.assignedToId !== undefined) {
-      data.userAssigned = dto.assignedToId
-        ? { connect: { id: dto.assignedToId } }
-        : { disconnect: true };
+      data.userAssigned = dto.assignedToId ? { connect: { id: dto.assignedToId } } : { disconnect: true };
     }
 
     if (dto.status) {
       data.status = dto.status;
       if (dto.status === TaskStatus.COMPLETED) {
         data.completionDate = new Date();
-        data.userCompleted = { connect: { id: updaterId } };
+        data.userCompleted = { connect: { id: userId } };
       } else {
         data.completionDate = null;
         data.userCompleted = { disconnect: true };
       }
     }
 
-    if (dto.completedById)
-      data.userCompleted = { connect: { id: dto.completedById } };
+    if (dto.completedById) data.userCompleted = { connect: { id: dto.completedById } };
 
-    if (
-      dto.removeImageIds?.length ||
-      dto.removeAudioIds?.length ||
-      dto.removeVideoIds?.length
-    ) {
-      await this.handleFileRemovals(
-        id,
-        companyId,
-        dto.removeImageIds,
-        dto.removeAudioIds,
-        dto.removeVideoIds,
-      );
+    if (dto.removeImageIds?.length || dto.removeAudioIds?.length || dto.removeVideoIds?.length) {
+      await this.handleFileRemovals(id, existing.companyId, dto.removeImageIds, dto.removeAudioIds, dto.removeVideoIds);
     }
 
     if (files) {
-      await this.handleFileUploads(id, companyId, updaterId, files);
+      await this.handleFileUploads(id, existing.companyId, userId, files);
     }
 
     const updated = await this.prisma.task.update({
@@ -342,181 +268,63 @@ export class TasksService {
       include: this.getTaskIncludeDetails(),
     });
 
-    await this.cacheManager.del(`tasks_list_${companyId}`);
+    await this.cacheManager.del(`tasks_list_${existing.companyId}`);
     await this.cacheManager.del(`task_${id}`);
 
     return updated;
   }
 
-  private async handleFileUploads(
-    taskId: string,
-    companyId: string,
-    uploadedById: string,
-    files: {
-      images?: UploadedFile[];
-      audios?: UploadedFile[];
-      videos?: UploadedFile[];
-    },
-  ) {
+  // --- HELPERS (Upload, Notify) ---
+  
+  private async handleFileUploads(taskId: string, companyId: string, uploadedById: string, files: any) {
     const promises: Promise<any>[] = [];
-
-    const processUpload = async (
-      file: UploadedFile,
-      bucket: 'task-images' | 'task-audios' | 'task-videos',
-    ) => {
-      const ext = file.originalname.split('.').pop();
-      const filename = `${Date.now()}-${Math.random().toString(36).substring(7)}.${ext}`;
-      const path = `tasks/${taskId}/${bucket.split('-')[1]}/${filename}`;
-
-      this.logger.debug(`[Upload] Enviando ${file.originalname} para ${bucket}`);
-
-      const result = await this.supabaseService.uploadFile(
-        bucket,
-        path,
-        file.buffer,
-        {
-          contentType: file.mimetype,
-          overwrite: true,
-        },
-      );
-
-      this.logger.debug(`[Upload] Sucesso. URL: ${result.fullPath}`);
-
-      return {
-        url: result.fullPath,
-        filename: file.originalname,
-        size: file.size,
-      };
-    };
-
-    if (files.images?.length) {
-      files.images.forEach((f) => {
-        promises.push(
-          processUpload(f, 'task-images').then((data) =>
-            this.prisma.taskImage.create({
-              data: {
-                taskId,
-                companyId,
-                userUploadedId: uploadedById,
-                url: data.url,
-                filename: data.filename,
-                size: data.size,
-              },
-            }),
-          ),
-        );
-      });
+    
+    const process = async (file: UploadedFile, bucket: 'task-images' | 'task-audios' | 'task-videos') => {
+        const ext = file.originalname.split('.').pop();
+        const filename = `${Date.now()}-${Math.random().toString(36).substring(7)}.${ext}`;
+        const path = `tasks/${taskId}/${bucket.split('-')[1]}/${filename}`;
+        const res = await this.supabaseService.uploadFile(bucket, path, file.buffer, { contentType: file.mimetype, overwrite: true });
+        return { url: res.fullPath, filename: file.originalname, size: file.size };
     }
 
-    if (files.audios?.length) {
-      files.audios.forEach((f) => {
-        promises.push(
-          processUpload(f, 'task-audios').then((data) =>
-            this.prisma.taskAudio.create({
-              data: {
-                taskId,
-                companyId,
-                userUploadedId: uploadedById,
-                url: data.url,
-                filename: data.filename,
-                size: data.size,
-                duration: 0,
-              },
-            }),
-          ),
-        );
-      });
-    }
-
-    if (files.videos?.length) {
-      files.videos.forEach((f) => {
-        promises.push(
-          processUpload(f, 'task-videos').then((data) =>
-            this.prisma.taskVideo.create({
-              data: {
-                taskId,
-                companyId,
-                userUploadedId: uploadedById,
-                url: data.url,
-                filename: data.filename,
-                size: data.size,
-                duration: 0,
-              },
-            }),
-          ),
-        );
-      });
-    }
+    if (files.images) files.images.forEach((f: any) => promises.push(process(f, 'task-images').then(d => this.prisma.taskImage.create({ data: { ...d, taskId, companyId, userUploadedId: uploadedById } }))));
+    if (files.audios) files.audios.forEach((f: any) => promises.push(process(f, 'task-audios').then(d => this.prisma.taskAudio.create({ data: { ...d, taskId, companyId, userUploadedId: uploadedById, duration: 0 } }))));
+    if (files.videos) files.videos.forEach((f: any) => promises.push(process(f, 'task-videos').then(d => this.prisma.taskVideo.create({ data: { ...d, taskId, companyId, userUploadedId: uploadedById, duration: 0 } }))));
 
     await Promise.all(promises);
   }
 
-  private async handleFileRemovals(
-    taskId: string,
-    companyId: string,
-    imgIds: string[] = [],
-    audioIds: string[] = [],
-    videoIds: string[] = [],
-  ) {
-    const deleteOps: Promise<any>[] = [];
-
-    const deleteFromStorage = (url: string, bucket: string) => {
-      const path = url.split(`${bucket}/`).pop();
-      if (path)
-        deleteOps.push(
-          this.supabaseService
-            .deleteFile(bucket as any, path)
-            .catch((e) => this.logger.error(`Erro deletar ${path}`, e)),
-        );
-    };
-
-    if (imgIds.length) {
-      const images = await this.prisma.taskImage.findMany({
-        where: { id: { in: imgIds }, taskId, companyId },
-      });
-      images.forEach((i) => deleteFromStorage(i.url, 'task-images'));
-      deleteOps.push(
-        this.prisma.taskImage.deleteMany({ where: { id: { in: imgIds } } }),
-      );
+  private async handleFileRemovals(taskId: string, companyId: string, imgIds: string[] = [], audioIds: string[] = [], videoIds: string[] = []) {
+     const del = (url: string, bucket: string) => {
+         const path = url.split(`${bucket}/`).pop();
+         if(path) this.supabaseService.deleteFile(bucket as any, path).catch(e => this.logger.error(e));
+     }
+     if(imgIds.length) {
+         const items = await this.prisma.taskImage.findMany({ where: { id: { in: imgIds }, taskId, companyId } });
+         items.forEach(i => del(i.url, 'task-images'));
+         await this.prisma.taskImage.deleteMany({ where: { id: { in: imgIds } } });
+     }
+     if(audioIds.length) {
+        const items = await this.prisma.taskAudio.findMany({ where: { id: { in: audioIds }, taskId, companyId } });
+        items.forEach(i => del(i.url, 'task-audios'));
+        await this.prisma.taskAudio.deleteMany({ where: { id: { in: audioIds } } });
     }
-    if (audioIds.length) {
-      const audios = await this.prisma.taskAudio.findMany({
-        where: { id: { in: audioIds }, taskId, companyId },
-      });
-      audios.forEach((a) => deleteFromStorage(a.url, 'task-audios'));
-      deleteOps.push(
-        this.prisma.taskAudio.deleteMany({ where: { id: { in: audioIds } } }),
-      );
+    if(videoIds.length) {
+        const items = await this.prisma.taskVideo.findMany({ where: { id: { in: videoIds }, taskId, companyId } });
+        items.forEach(i => del(i.url, 'task-videos'));
+        await this.prisma.taskVideo.deleteMany({ where: { id: { in: videoIds } } });
     }
-    if (videoIds.length) {
-      const videos = await this.prisma.taskVideo.findMany({
-        where: { id: { in: videoIds }, taskId, companyId },
-      });
-      videos.forEach((v) => deleteFromStorage(v.url, 'task-videos'));
-      deleteOps.push(
-        this.prisma.taskVideo.deleteMany({ where: { id: { in: videoIds } } }),
-      );
-    }
-    await Promise.all(deleteOps);
   }
 
-  async findAllPaginated(params: any) {
-    const {
-      companyId,
-      page = 1,
-      limit = 10,
-      search,
-      columnId,
-      startDate,
-      endDate,
-      assignedToId,
-      hasLocation,
-    } = params;
+  // --- READS ---
 
+  async findAllPaginated(params: any) {
+    const tenantId = this.cls.get<string>('tenantId');
+    const { page = 1, limit = 10, search, columnId, startDate, endDate, assignedToId, hasLocation } = params;
     const skip = (page - 1) * limit;
 
     const where: Prisma.TaskWhereInput = {
-      companyId,
+      companyId: tenantId, 
       ...(columnId && { columnId }),
       ...(search && {
         OR: [
@@ -531,21 +339,8 @@ export class TasksService {
         },
       }),
       ...(assignedToId && { userAssignedId: assignedToId }),
-      ...(hasLocation === true && {
-        taskAddress: {
-          is: {
-            latitude: { not: null },
-            longitude: { not: null },
-          },
-        },
-      }),
-      ...(hasLocation === false && {
-        OR: [
-          { taskAddress: null },
-          { taskAddress: { is: { latitude: null } } },
-          { taskAddress: { is: { longitude: null } } },
-        ],
-      }),
+      ...(hasLocation === true && { taskAddress: { is: { latitude: { not: null }, longitude: { not: null } } } }),
+      ...(hasLocation === false && { OR: [{ taskAddress: null }, { taskAddress: { is: { latitude: null } } }] }),
     };
 
     const [tasks, total] = await Promise.all([
@@ -565,39 +360,55 @@ export class TasksService {
     };
   }
 
-  async findOne(id: string, companyId: string) {
-    const t = await this.prisma.task.findFirst({
-      where: { id, companyId },
+  async findOne(id: string) {
+    const t = await this.prisma.task.findUnique({
+      where: { id },
       include: this.getTaskIncludeDetails(),
     });
+    // O Prisma Extended já filtra por tenantId, então se retornar null, ou não existe ou não é da empresa.
     if (!t) throw new NotFoundException('Task not found');
     return t;
   }
 
-  async remove(id: string, companyId: string) {
-    const t = await this.prisma.task.findFirst({
-      where: { id, companyId },
+  // --- DELETE ---
+
+  async remove(id: string) {
+    const tenantId = this.cls.get<string>('tenantId');
+    const t = await this.prisma.task.findUnique({
+      where: { id },
       include: { taskImages: true, taskAudios: true, taskVideos: true },
     });
-    if (!t) throw new NotFoundException('Not found');
 
-    await this.handleFileRemovals(
-      id,
-      companyId,
-      t.taskImages.map((i) => i.id),
-      t.taskAudios.map((a) => a.id),
-      t.taskVideos.map((v) => v.id),
-    );
+    if (!t) return null;
 
-    await this.prisma.task.delete({ where: { id } });
-    await this.cacheManager.del(`tasks_list_${companyId}`);
-    await this.cacheManager.del(`task_${id}`);
+    if (tenantId) {
+        await this.handleFileRemovals(
+        id,
+        tenantId,
+        t.taskImages.map((i) => i.id),
+        t.taskAudios.map((a) => a.id),
+        t.taskVideos.map((v) => v.id),
+        );
+    }
+
+    try {
+      await this.prisma.task.delete({ where: { id } });
+    } catch (error: any) {
+      if (error.code === 'P2025') return null;
+      throw error;
+    }
+
+    if (tenantId) {
+      await this.cacheManager.del(`tasks_list_${tenantId}`);
+      await this.cacheManager.del(`task_${id}`);
+    }
   }
 
-  async addAddress(taskId: string, companyId: string, addressData: any) {
-    const task = await this.prisma.task.findFirst({
-      where: { id: taskId, companyId },
-    });
+  // --- ADDRESS ---
+
+  async addAddress(taskId: string, addressData: any) {
+    const tenantId = this.cls.get<string>('tenantId');
+    const task = await this.prisma.task.findUnique({ where: { id: taskId } });
     if (!task) throw new NotFoundException('Task não encontrada');
 
     const cleanData = {
@@ -613,8 +424,8 @@ export class TasksService {
 
     return this.prisma.taskAddress.upsert({
       where: { taskId },
-      update: { ...cleanData, companyId },
-      create: { ...cleanData, taskId, companyId },
+      update: { ...cleanData, companyId: tenantId },
+      create: { ...cleanData, taskId, companyId: tenantId! },
     });
   }
 

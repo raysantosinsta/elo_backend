@@ -1,4 +1,8 @@
 /* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import {
   Controller,
   Post,
@@ -17,42 +21,224 @@ import {
   Query,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiBearerAuth, ApiOperation, ApiTags, ApiConsumes } from '@nestjs/swagger';
+
+// --- Guards e Segurança ---
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { RolesGuard } from '../auth/roles.guard';
+import { PermissionsGuard } from '../auth/permissions.guard';
+import { RequirePermissions, AppPermission } from '../auth/permissions.decorator';
+
+// --- Services e DTOs ---
 import { FlowService } from './flow.service';
-import {
-  ApiBearerAuth,
-  ApiOperation,
-  ApiTags,
-  ApiConsumes,
-} from '@nestjs/swagger';
-import { CreateFlowDto, CreateFlowItemDto, type FlowFilterDto } from './dto/create-flow.dto';
+import { CreateFlowDto, CreateFlowItemDto, FlowFilterDto } from './dto/create-flow.dto';
 
 @ApiTags('Product Flow (Kanban)')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+// 🔥 Ordem de Segurança: 1. Token Válido -> 2. Role Básica -> 3. Permissão Fina (Cargo)
+@UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @Controller('flow')
 export class FlowController {
-  private readonly logger = new Logger(FlowController.name); // Logger para debug
+  private readonly logger = new Logger(FlowController.name);
+
   constructor(private readonly flowService: FlowService) {}
 
+  // ===========================================================================
+  // 1️⃣ GERENCIAMENTO DE FLUXO (Restrito: "Gestor de Processos")
+  // ===========================================================================
+
   @Post()
-  @ApiOperation({ summary: 'Cria um novo fluxo de produção' })
+  @RequirePermissions(AppPermission.MANAGE_FLOW) // <--- Bloqueio por Permissão
+  @ApiOperation({ summary: 'Cria um novo fluxo de produção (Restrito)' })
   async createFlow(@Req() req: any, @Body() body: CreateFlowDto) {
-    this.logger.log(`Recebido body para criar fluxo: ${JSON.stringify(body)}`);
+    this.logger.log(`Criando fluxo na empresa ${req.user.companyId} pelo usuário ${req.user.id}`);
     return this.flowService.createFlow(req.user.companyId, req.user.id, body);
   }
 
+  @Delete(':flowId')
+  @RequirePermissions(AppPermission.MANAGE_FLOW) // <--- Bloqueio por Permissão
+  @ApiOperation({ summary: 'Deleta um fluxo inteiro (Restrito)' })
+  async deleteFlow(
+    @Req() req: any,
+    @Param('flowId', ParseUUIDPipe) flowId: string,
+  ) {
+    return this.flowService.deleteFlow(flowId, req.user.companyId);
+  }
+
+  // ===========================================================================
+  // 2️⃣ GERENCIAMENTO DE ETAPAS / STAGES (Restrito: "Gestor de Processos")
+  // ===========================================================================
+
+  @Post(':flowId/stages')
+  @RequirePermissions(AppPermission.MANAGE_STAGE) // <--- Bloqueio por Permissão
+  @ApiOperation({ summary: 'Adiciona uma nova etapa ao fluxo (Restrito)' })
+  async createStage(
+    @Req() req: any,
+    @Param('flowId', ParseUUIDPipe) flowId: string,
+    @Body() body: { name: string; color?: string },
+  ) {
+    return this.flowService.createStage(
+      req.user.companyId,
+      flowId,
+      body.name,
+      body.color,
+    );
+  }
+
+  @Put('stages/:stageId')
+  @RequirePermissions(AppPermission.MANAGE_STAGE) // <--- Bloqueio por Permissão
+  @ApiOperation({ summary: 'Atualiza uma etapa existente (Restrito)' })
+  async updateStage(
+    @Req() req: any,
+    @Param('stageId', ParseUUIDPipe) stageId: string,
+    @Body() body: { name?: string; color?: string; order?: number },
+  ) {
+    return this.flowService.updateStage(req.user.companyId, stageId, body);
+  }
+
+  @Delete('stages/:stageId')
+  @RequirePermissions(AppPermission.MANAGE_STAGE) // <--- Bloqueio por Permissão
+  @ApiOperation({ summary: 'Remove uma etapa e seus itens (Restrito)' })
+  async deleteStage(
+    @Req() req: any,
+    @Param('stageId', ParseUUIDPipe) stageId: string,
+  ) {
+    return this.flowService.deleteStage(stageId, req.user.companyId);
+  }
+
+  // ===========================================================================
+  // 3️⃣ GERENCIAMENTO DE ITENS E LEITURA (Aberto: Qualquer Usuário da Empresa)
+  // Nota: Não usamos @RequirePermissions. A segurança de Tenant é feita pelo Prisma.
+  // ===========================================================================
+
   @Get()
+  @ApiOperation({ summary: 'Lista todos os fluxos da empresa' })
   async getFlows(@Req() req: any) {
     return this.flowService.getFlows(req.user.companyId);
   }
 
-  // No arquivo flow.controller.ts, adicione este método dentro da classe:
+  @Get(':flowId/board')
+  @ApiOperation({ summary: 'Carrega o quadro Kanban completo' })
+  async getKanbanBoard(
+    @Req() req: any,
+    @Param('flowId', ParseUUIDPipe) flowId: string,
+  ) {
+    return this.flowService.getKanbanBoard(flowId, req.user.companyId);
+  }
+
+  @Get('filter/items')
+  @ApiOperation({ summary: 'Filtra itens por data e terceirização' })
+  async filterItems(@Req() req: any, @Query() query: FlowFilterDto) {
+    return this.flowService.getFilteredItems(req.user.companyId, query);
+  }
+
+  @Post(':flowId/items')
+  @ApiOperation({ summary: 'Cria um item no fluxo' })
+  async createItem(
+    @Req() req: any,
+    @Param('flowId', ParseUUIDPipe) flowId: string,
+    @Body() body: CreateFlowItemDto,
+  ) {
+    return this.flowService.createFlowItem(
+      req.user.companyId,
+      flowId,
+      req.user.id,
+      body,
+    );
+  }
+
+  @Post(':flowId/items/upload')
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiOperation({ summary: 'Cria item com upload inicial (Form Data)' })
+  async createItemWithUpload(
+    @Req() req: any,
+    @Param('flowId', ParseUUIDPipe) flowId: string,
+    @Body() body: any,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    let dto: CreateFlowItemDto;
+    try {
+      dto = typeof body.data === 'string' ? JSON.parse(body.data) : body;
+    } catch (e) {
+      dto = body;
+    }
+
+    const item = await this.flowService.createFlowItem(
+      req.user.companyId,
+      flowId,
+      req.user.id,
+      dto,
+    );
+
+    // Lógica de upload separada se necessário, ou implementada no createFlowItem
+    return item;
+  }
+
+  @Put('items/:itemId')
+  @ApiOperation({ summary: 'Atualiza dados de um item' })
+  async updateItem(
+    @Req() req: any,
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+    @Body() body: any,
+  ) {
+    return this.flowService.updateFlowItem(
+      req.user.companyId,
+      itemId,
+      req.user.id,
+      body,
+    );
+  }
+
+  @Put('items/:itemId/move')
+  @ApiOperation({ summary: 'Move um item entre etapas' })
+  async moveItem(
+    @Req() req: any,
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+    @Body() body: { newStageId: string },
+  ) {
+    return this.flowService.moveItem(itemId, body.newStageId, req.user.id);
+  }
+
+  @Delete('items/:itemId')
+  @ApiOperation({ summary: 'Remove um item do fluxo' })
+  async deleteItem(
+    @Req() req: any,
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+  ) {
+    return this.flowService.deleteItem(itemId, req.user.companyId);
+  }
+
+  // --- Gerenciamento de Mídia dos Itens (Aberto) ---
+
+  @Post('items/:itemId/media/:type')
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiOperation({ summary: 'Upload de mídia para um item' })
+  async uploadMedia(
+    @Req() req: any,
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+    @Param('type') type: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!['image', 'audio', 'video'].includes(type)) {
+      throw new BadRequestException('Tipo inválido. Use: image, audio, video');
+    }
+    if (!file) {
+      throw new BadRequestException('Nenhum arquivo enviado.');
+    }
+
+    return this.flowService.addMediaToItem(
+      req.user.companyId,
+      itemId,
+      file,
+      type as 'image' | 'audio' | 'video',
+      req.user.id,
+    );
+  }
 
   @Delete('items/:itemId/media/:type/:mediaId')
-  @ApiOperation({
-    summary: 'Remove uma mídia específica (audio, video, image) de um item',
-  })
+  @ApiOperation({ summary: 'Remove uma mídia específica de um item' })
   async deleteMedia(
     @Req() req: any,
     @Param('itemId', ParseUUIDPipe) itemId: string,
@@ -68,185 +254,6 @@ export class FlowController {
       itemId,
       type as 'image' | 'audio' | 'video',
       mediaId,
-    );
-  }
-
-  // Dentro da classe
-  @Get('filter/items')
-  @ApiOperation({ summary: 'Filtra itens por data e terceirização' })
-  async filterItems(@Req() req: any, @Query() query: FlowFilterDto) {
-    return this.flowService.getFilteredItems(req.user.companyId, query);
-  }
-
-  // Adicione isso dentro da classe FlowController
-
-  @Put('items/:itemId')
-  @ApiOperation({
-    summary: 'Atualiza dados de um item (título, descrição, etc)',
-  })
-  async updateItem(
-    @Req() req: any,
-    @Param('itemId', ParseUUIDPipe) itemId: string,
-    @Body() body: any,
-  ) {
-    return this.flowService.updateFlowItem(
-      req.user.companyId,
-      itemId,
-      req.user.id,
-      body,
-    );
-  }
-
-  @Get(':flowId/board')
-  async getKanbanBoard(
-    @Req() req: any,
-    @Param('flowId', ParseUUIDPipe) flowId: string,
-  ) {
-    return this.flowService.getKanbanBoard(flowId, req.user.companyId);
-  }
-
-  @Post(':flowId/items')
-  async createItem(
-    @Req() req: any,
-    @Param('flowId', ParseUUIDPipe) flowId: string,
-    @Body() body: CreateFlowItemDto,
-  ) {
-    return this.flowService.createFlowItem(
-      req.user.companyId,
-      flowId,
-      req.user.id,
-      body,
-    );
-  }
-
-  @Put('items/:itemId/move')
-  async moveItem(
-    @Req() req: any,
-    @Param('itemId', ParseUUIDPipe) itemId: string,
-    @Body() body: { newStageId: string },
-  ) {
-    return this.flowService.moveItem(itemId, body.newStageId, req.user.id);
-  }
-
-  @Delete(':flowId')
-  async deleteFlow(
-    @Req() req: any,
-    @Param('flowId', ParseUUIDPipe) flowId: string,
-  ) {
-    return this.flowService.deleteFlow(flowId, req.user.companyId);
-  }
-
-  // Endpoint para Upload Multipart (Compatível com FormData do Frontend)
-  @Post(':flowId/items/upload')
-  @ApiConsumes('multipart/form-data')
-  @UseInterceptors(FileInterceptor('file'))
-  async createItemWithUpload(
-    @Req() req: any,
-    @Param('flowId', ParseUUIDPipe) flowId: string,
-    @Body() body: any, // Body vem como string JSON dentro do FormData
-    @UploadedFile() file?: Express.Multer.File,
-  ) {
-    let dto: CreateFlowItemDto;
-    try {
-      dto = typeof body.data === 'string' ? JSON.parse(body.data) : body;
-    } catch (e) {
-      dto = body;
-    }
-
-    // 1. Cria o item
-    const item = await this.flowService.createFlowItem(
-      req.user.companyId,
-      flowId,
-      req.user.id,
-      dto,
-    );
-
-    // 2. Upload (se houver)
-    if (file) {
-      // Lógica de upload separada no service (addMediaToItem)
-      // ...
-    }
-    return item;
-  }
-
-  @Post(':flowId/stages')
-  @ApiOperation({ summary: 'Adiciona uma nova etapa ao fluxo' })
-  async createStage(
-    @Req() req: any,
-    @Param('flowId', ParseUUIDPipe) flowId: string,
-    // ALTERAÇÃO: Adicionado 'color' ao Body
-    @Body() body: { name: string; color?: string },
-  ) {
-    // ALTERAÇÃO: Passando a cor para o serviço
-    return this.flowService.createStage(
-      req.user.companyId,
-      flowId,
-      body.name,
-      body.color,
-    );
-  }
-
-  @Put('stages/:stageId')
-  @ApiOperation({ summary: 'Atualiza uma etapa existente' })
-  async updateStage(
-    @Req() req: any,
-    @Param('stageId', ParseUUIDPipe) stageId: string,
-    @Body() body: { name?: string; color?: string; order?: number },
-  ) {
-    return this.flowService.updateStage(req.user.companyId, stageId, body);
-  }
-
-  @Delete('stages/:stageId')
-  @ApiOperation({ summary: 'Remove uma etapa e seus itens' })
-  async deleteStage(
-    @Req() req: any,
-    @Param('stageId', ParseUUIDPipe) stageId: string,
-  ) {
-    return this.flowService.deleteStage(stageId, req.user.companyId);
-  }
-
-  // ... outros imports e métodos ...
-
-  @Delete('items/:itemId')
-  @ApiOperation({ summary: 'Remove um item do fluxo' })
-  async deleteItem(
-    @Req() req: any,
-    @Param('itemId', ParseUUIDPipe) itemId: string,
-  ) {
-    // Passamos o ID do item e o ID da empresa para garantir segurança
-    return this.flowService.deleteItem(itemId, req.user.companyId);
-  }
-
-  // ... imports existentes
-
-  // Endpoint Específico para Upload de Mídia (Imagem, Áudio, Vídeo)
-  // O Frontend chama: /flow/items/:itemId/media/:type
-  @Post('items/:itemId/media/:type')
-  @ApiConsumes('multipart/form-data')
-  @UseInterceptors(FileInterceptor('file'))
-  async uploadMedia(
-    @Req() req: any,
-    @Param('itemId', ParseUUIDPipe) itemId: string,
-    @Param('type') type: string,
-    @UploadedFile() file: Express.Multer.File,
-  ) {
-    // Validação simples do tipo
-    if (!['image', 'audio', 'video'].includes(type)) {
-      throw new BadRequestException(
-        'Tipo de mídia inválido. Use image, audio ou video.',
-      );
-    }
-
-    if (!file) {
-      throw new BadRequestException('Nenhum arquivo enviado.');
-    }
-
-    return this.flowService.addMediaToItem(
-      req.user.companyId,
-      itemId,
-      file,
-      type as 'image' | 'audio' | 'video',
-      req.user.id,
     );
   }
 }
