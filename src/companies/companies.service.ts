@@ -121,7 +121,7 @@ export class CompaniesService {
     // Se não for Master, o ID alvo deve ser IGUAL ao ID da empresa dele
     if (targetCompanyId !== userTenantId) {
       this.logger.warn(`⛔ Tentativa de Acesso Ilegal: Tenant ${userTenantId} tentou acessar Empresa ${targetCompanyId}`);
-      throw new ForbiddenException('Acesso negado: Você não pode manipular registros de outra empresa.');
+      throw new ForbiddenException();
     }
   }
 

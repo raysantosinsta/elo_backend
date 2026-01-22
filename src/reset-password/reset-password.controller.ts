@@ -1,5 +1,4 @@
 /* eslint-disable prettier/prettier */
-
 import {
   Body,
   Controller,
@@ -18,16 +17,15 @@ export class PasswordController {
 
   /**
    * FORGOT PASSWORD
-   * Endpoint público.
-   * Nunca informa se o email existe ou não (anti-enumeração).
+   * Rota: POST /password/forgot
    */
-  @Public() // <--- ADICIONE ISSO AQUI
+  @Public()
   @Post('forgot')
   @HttpCode(HttpStatus.OK)
   async forgotPassword(@Body() dto: ForgotPasswordDto) {
+    // Chama o serviço (que agora tem logs)
     await this.passwordService.forgotPassword(dto.email);
 
-    // Resposta neutra por segurança
     return {
       message:
         'Se o email estiver cadastrado, você receberá instruções para redefinir sua senha.',
@@ -36,11 +34,10 @@ export class PasswordController {
 
   /**
    * RESET PASSWORD
-   * Endpoint público.
-   * Valida token + altera senha.
+   * Rota: POST /password/reset
    */
   @Post('reset')
-  @Public() // <--- ADICIONE ISSO AQUI
+  @Public()
   @HttpCode(HttpStatus.OK)
   async resetPassword(@Body() dto: ResetPasswordDto) {
     await this.passwordService.resetPassword(dto.token, dto.password);

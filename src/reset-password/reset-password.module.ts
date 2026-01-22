@@ -3,11 +3,12 @@ import { Module } from '@nestjs/common';
 import { PasswordService } from './reset-password.service';
 import { PasswordController } from './reset-password.controller';
 import { MailModule } from 'src/mail/mail.module';
+import { PrismaModule } from 'src/prisma/prisma.module';
 
 @Module({
  controllers: [PasswordController],
   providers: [PasswordService],
   // 2. Coloque MailModule aqui
-  imports: [MailModule],
+  imports: [MailModule, PrismaModule],
 })
 export class ResetPasswordModule {}
