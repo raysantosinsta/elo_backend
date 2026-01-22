@@ -1,0 +1,4 @@
+ALTER TABLE "suppliers" ADD COLUMN     "bairro" VARCHAR(100),
+ADD COLUMN     "latitude" DOUBLE PRECISION,
+ADD COLUMN     "longitude" DOUBLE PRECISION,
+ADD COLUMN     "numero" VARCHAR(20);

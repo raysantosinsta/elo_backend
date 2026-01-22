@@ -534,6 +534,12 @@ model Supplier {
   state      String? @db.VarChar(2)
   zipCode    String? @db.VarChar(10)
   complement String? @db.VarChar(200)
+  // Novos campos recomendados
+  numero String? @map("numero") @db.VarChar(20)
+  bairro String? @map("bairro") @db.VarChar(100)
+  
+  latitude  Float? @map("latitude")
+  longitude Float? @map("longitude")
 
   // Relacionamento com Empresa
   companyId String  @map("empresa_id") @db.Uuid

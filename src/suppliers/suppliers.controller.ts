@@ -1,36 +1,63 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, Query } from '@nestjs/common';
-import { SuppliersService } from './suppliers.service';
+/* eslint-disable prettier/prettier */
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  UseGuards,
+  UseInterceptors,
+} from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
+import { TenantInterceptor } from 'src/common/interceptors/tenant.interceptor'; // Ajuste o caminho se necessário
 import { CreateSupplierDto } from './dto/create-supplier.dto';
 import { UpdateSupplierDto } from './dto/update-supplier.dto';
+import { SuppliersService } from './suppliers.service';
 
+@ApiTags('Suppliers')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard)        // 1. Garante que está logado
+@UseInterceptors(TenantInterceptor) // 2. Configura o contexto (tenantId, userId)
 @Controller('suppliers')
 export class SuppliersController {
   constructor(private readonly suppliersService: SuppliersService) {}
 
   @Post()
+  @ApiOperation({ summary: 'Cadastra um novo fornecedor' })
   create(@Body() createSupplierDto: CreateSupplierDto) {
+    // Não precisa passar ID, o service pega do contexto
     return this.suppliersService.create(createSupplierDto);
   }
 
-  // AQUI É ONDE O SEU ERRO ACONTECIA
-  // O frontend chama: /suppliers?companyId=...
   @Get()
-  findAll(@Query('companyId') companyId: string) {
-    return this.suppliersService.findAll(companyId);
+  @ApiOperation({ summary: 'Lista todos os fornecedores da empresa' })
+  findAll() {
+    // Removemos o @Query('companyId'). O service sabe quem é a empresa.
+    return this.suppliersService.findAll();
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
+  @ApiOperation({ summary: 'Busca detalhes de um fornecedor' })
+  findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.suppliersService.findOne(id);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() updateSupplierDto: UpdateSupplierDto) {
+  @ApiOperation({ summary: 'Atualiza um fornecedor' })
+  update(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() updateSupplierDto: UpdateSupplierDto,
+  ) {
     return this.suppliersService.update(id, updateSupplierDto);
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
+  @ApiOperation({ summary: 'Remove um fornecedor' })
+  remove(@Param('id', ParseUUIDPipe) id: string) {
     return this.suppliersService.remove(id);
   }
 }

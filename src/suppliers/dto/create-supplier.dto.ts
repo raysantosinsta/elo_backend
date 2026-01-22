@@ -1,54 +1,70 @@
-import { IsEnum, IsNotEmpty, IsOptional, IsString, IsUUID } from 'class-validator';
-import { SupplierCategory } from '@prisma/client';
+/* eslint-disable prettier/prettier */
+import { Transform } from 'class-transformer';
+import { IsEmail, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString } from 'class-validator';
+import { SupplierCategory, SimpleStatus } from '@prisma/client';
 
 export class CreateSupplierDto {
-  @IsNotEmpty()
   @IsString()
+  @IsNotEmpty({ message: 'O nome é obrigatório' })
   name: string;
 
-  @IsOptional()
   @IsString()
-  document?: string;
+  @IsOptional()
+  document?: string; // CPF ou CNPJ
 
+  @IsEmail({}, { message: 'E-mail inválido' })
   @IsOptional()
-  @IsString()
   email?: string;
 
-  @IsOptional()
   @IsString()
+  @IsOptional()
   phone?: string;
 
-  @IsOptional()
   @IsEnum(SupplierCategory)
-  category?: SupplierCategory; // MATERIAL_ONLY, SERVICE_ONLY, HYBRID
-
   @IsOptional()
-  @IsString()
-  address?: string;
+  category?: SupplierCategory;
 
-  @IsOptional()
+  // --- Endereço ---
   @IsString()
-  city?: string;
-
   @IsOptional()
-  @IsString()
-  state?: string;
-
-  @IsOptional()
-  @IsString()
   zipCode?: string;
 
-  @IsOptional()
   @IsString()
+  @IsOptional()
+  address?: string;
+
+  @IsString()
+  @IsOptional()
+  numero?: string;
+
+  @IsString()
+  @IsOptional()
+  bairro?: string;
+
+  @IsString()
+  @IsOptional()
   complement?: string;
 
-  @IsNotEmpty()
-  @IsUUID()
-  companyId: string;
+  @IsString()
+  @IsOptional()
+  city?: string;
 
-  // Em uma aplicação real, isso geralmente vem do Token JWT (req.user.id),
-  // mas vamos colocar aqui para funcionar com sua lógica atual.
-  @IsNotEmpty()
-  @IsUUID()
-  userCreateId: string;
+  @IsString()
+  @IsOptional()
+  state?: string;
+
+  // --- Geolocalização ---
+  @IsNumber()
+  @IsOptional()
+  @Transform(({ value }) => (value ? parseFloat(value) : null)) // Garante que venha como número
+  latitude?: number;
+
+  @IsNumber()
+  @IsOptional()
+  @Transform(({ value }) => (value ? parseFloat(value) : null))
+  longitude?: number;
+
+  @IsEnum(SimpleStatus)
+  @IsOptional()
+  status?: SimpleStatus;
 }
