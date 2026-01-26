@@ -1,0 +1,108 @@
+@baseUrl = http://localhost:3000
+@contentType = application/json
+# Coloque seu token JWT aqui (sem o prefixo Bearer, o script adiciona abaixo)
+@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkMmRjM2M5Zi04N2JkLTQ3M2QtYjVhYy0zNzNhZjAyY2ZlZjkiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiIzMjhmNWYwOC1kOGEzLTQ2MzctYmJjYy1hOWQ1NmI2Zjg0NTYiLCJpYXQiOjE3Njk0NTc3MjcsImV4cCI6MTc2OTQ1ODYyN30.pMblPVNqNoXrHgtub8Vk229lrS_IGtG6v4EHdP53h94
+
+# IDs para teste (Substitua por IDs reais criados no seu banco)
+@productId = d7de3dc7-2679-48a1-81a4-231565978923
+@materialId = 152a9c5e-cc1d-4577-a507-3c025db70936
+
+# --------------------------------------------------------------------------------
+# PRODUTOS (CRUD PRINCIPAL)
+# --------------------------------------------------------------------------------
+
+### 1. Criar Produto (Simples)
+# Cria um produto sem materiais vinculados.
+POST {{baseUrl}}/products
+Content-Type: {{contentType}}
+Authorization: Bearer {{token}}
+
+{
+  "name": "Camiseta Básica Algodão",
+  "referece": "CAM-001",
+  "description": "Camiseta 100% algodão fio 30.1",
+  "custoUnitario": 15.50,
+  "sizeRange": "P-GG"
+}
+
+### 2. Criar Produto (Com Materiais Vinculados - Nested Write)
+# Cria o produto e já insere na tabela pivot 'ProductMaterial'.
+# Nota: O 'materialId' deve existir na tabela 'Material'.
+POST {{baseUrl}}/products
+Content-Type: {{contentType}}
+Authorization: Bearer {{token}}
+
+{
+  "name": "Calça Jeans Skinny",
+  "referece": "JEANS-SK-02",
+  "custoUnitario": 45.90,
+  "materials": [
+    {
+      "materialId": "{{materialId}}",
+      "quantidade": 1.5
+    }
+  ]
+}
+
+### 3. Listar Produtos (Com Paginação e Busca)
+# Busca produtos ativos. Tente mudar ?page=2 ou ?search=Camiseta
+GET {{baseUrl}}/products?page=1&limit=10&search=
+Authorization: Bearer {{token}}
+
+### 4. Buscar um Produto por ID
+# Retorna detalhes do produto incluindo a lista de materiais.
+GET {{baseUrl}}/products/{{productId}}
+Authorization: Bearer {{token}}
+
+### 5. Atualizar Produto (Parcial)
+# Altera apenas os campos enviados.
+PATCH {{baseUrl}}/products/{{productId}}
+Content-Type: {{contentType}}
+Authorization: Bearer {{token}}
+
+{
+  "custoUnitario": 18.00,
+  "description": "Descrição atualizada via endpoint"
+}
+
+### 6. Atualizar Produto (Resetando Materiais)
+# Se você enviar o array 'materials' no update, a lógica do service
+# APAGA os vínculos antigos e CRIA os novos (Reset).
+PATCH {{baseUrl}}/products/{{productId}}
+Content-Type: {{contentType}}
+Authorization: Bearer {{token}}
+
+{
+  "materials": [
+    {
+      "materialId": "{{materialId}}",
+      "quantidade": 2.0
+    }
+  ]
+}
+
+### 7. Deletar Produto (Soft Delete)
+# Muda o status para INACTIVE (conforme lógica do service).
+DELETE {{baseUrl}}/products/{{productId}}
+Authorization: Bearer {{token}}
+
+
+# --------------------------------------------------------------------------------
+# MATERIAIS DO PRODUTO (RELAÇÃO N:N)
+# --------------------------------------------------------------------------------
+
+### 8. Adicionar/Atualizar Material avulso no Produto
+# Se o vínculo já existir, atualiza a quantidade. Se não, cria.
+POST {{baseUrl}}/products/{{productId}}/materials
+Content-Type: {{contentType}}
+Authorization: Bearer {{token}}
+
+{
+  "materialId": "{{materialId}}",
+  "quantidade": 0.5
+}
+
+### 9. Remover Material do Produto
+# Remove apenas o vínculo na tabela pivô, não deleta o Produto nem o Material.
+DELETE {{baseUrl}}/products/{{productId}}/materials/{{materialId}}
+Authorization: Bearer {{token}}

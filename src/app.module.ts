@@ -28,6 +28,8 @@ import { ClsModule } from 'nestjs-cls';
 import { TenantInterceptor } from './common/interceptors/tenant.interceptor';
 import { ResetPasswordModule } from './reset-password/reset-password.module';
 import { MailModule } from './mail/mail.module';
+import { ProductsModule } from './products/products.module';
+import { MaterialsModule } from './materials/materials.module';
 
 @Module({
   imports: [
@@ -65,6 +67,8 @@ import { MailModule } from './mail/mail.module';
     SuppliersModule,
     ResetPasswordModule,
     MailModule,
+    ProductsModule,
+    MaterialsModule,
   ],
   // ADICIONE O CONTROLLER AQUI
   controllers: [AppController],

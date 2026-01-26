@@ -1,0 +1,77 @@
+### Variáveis Globais
+@baseUrl = http://localhost:3000
+@contentType = application/json
+@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkMmRjM2M5Zi04N2JkLTQ3M2QtYjVhYy0zNzNhZjAyY2ZlZjkiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiIzMjhmNWYwOC1kOGEzLTQ2MzctYmJjYy1hOWQ1NmI2Zjg0NTYiLCJpYXQiOjE3Njk0NTc3MjcsImV4cCI6MTc2OTQ1ODYyN30.pMblPVNqNoXrHgtub8Vk229lrS_IGtG6v4EHdP53h94
+
+# Cole o ID de um material aqui para testar GET One, PATCH e DELETE
+@materialId = 152a9c5e-cc1d-4577-a507-3c025db70936
+
+### -------------------------------------------------------
+### 1. CRIAR MATERIAL (Tecido)
+### -------------------------------------------------------
+POST {{baseUrl}}/materials
+Content-Type: {{contentType}}
+Authorization: Bearer {{token}}
+
+{
+  "name": "Malha Penteada 30.2",
+  "type": "Tecido2",
+  "description": "Algodão 100% de alta qualidade2",
+  "color": "Branco2",
+  "unitOfMeasure": "KG",
+  "yieldPerKg": 5
+}
+
+### -------------------------------------------------------
+### 2. CRIAR MATERIAL (Aviamento/Outro Exemplo)
+### -------------------------------------------------------
+POST {{baseUrl}}/materials
+Content-Type: {{contentType}}
+Authorization: Bearer {{token}}
+
+{
+  "name": "Botão de Madeira 15mm",
+  "type": "Aviamento",
+  "description": "Botão rústico para camisaria",
+  "color": "Madeira",
+  "unitOfMeasure": "UN",
+  "yieldPerKg": 0
+}
+
+### -------------------------------------------------------
+### 3. LISTAR TODOS (Padrão)
+### -------------------------------------------------------
+GET {{baseUrl}}/materials
+Authorization: Bearer {{token}}
+
+### -------------------------------------------------------
+### 4. LISTAR COM PAGINAÇÃO E BUSCA
+### -------------------------------------------------------
+# Busca por "Malha", página 1, 5 itens por página
+GET {{baseUrl}}/materials?page=1&limit=5&search=Tecido2
+Authorization: Bearer {{token}}
+
+### -------------------------------------------------------
+### 5. BUSCAR UM ÚNICO MATERIAL (Pelo ID)
+### -------------------------------------------------------
+GET {{baseUrl}}/materials/{{materialId}}
+Authorization: Bearer {{token}}
+
+### -------------------------------------------------------
+### 6. ATUALIZAR MATERIAL (Patch - Parcial)
+### -------------------------------------------------------
+PATCH {{baseUrl}}/materials/{{materialId}}
+Content-Type: {{contentType}}
+Authorization: Bearer {{token}}
+
+{
+  "color": "Off-White",
+  "description": "Atualizado: Algodão egípcio",
+  "yieldPerKg": 5
+}
+
+### -------------------------------------------------------
+### 7. DELETAR MATERIAL (Soft Delete)
+### -------------------------------------------------------
+DELETE {{baseUrl}}/materials/{{materialId}}
+Authorization: Bearer {{token}}

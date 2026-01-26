@@ -1,0 +1,63 @@
+@baseUrl = http://localhost:3000
+@contentType = application/json
+
+# ==============================================================================
+# AUTENTICAÇÃO E GERAÇÃO DE TOKENS
+# ==============================================================================
+
+### 1. Login MASTER
+# Usuário com acesso total ao sistema (Superusuário).
+# @name loginMaster
+POST {{baseUrl}}/auth/login
+Content-Type: {{contentType}}
+
+{
+  "email": "santosray62@gmail.com",
+  "password": "Blessedhr10@"
+}
+
+### Variável: Token Master
+@tokenMaster = {{loginMaster.response.body.accessToken}}
+
+
+### 2. Login ADMIN
+# Administrador de uma Tenant/Empresa específica.
+# @name loginAdmin
+POST {{baseUrl}}/auth/login
+Content-Type: {{contentType}}
+
+{
+  "email": "highadm@gmail.com",
+  "password": "senha123"
+}
+
+### Variável: Token Admin
+@tokenAdmin = {{loginAdmin.response.body.accessToken}}
+
+
+### 3. Login EMPLOYER
+# Funcionário comum com permissões restritas.
+# @name loginEmployer
+POST {{baseUrl}}/auth/login
+Content-Type: {{contentType}}
+
+{
+  "email": "highfunc@gmail.com",
+  "password": "senha123"
+}
+
+### Variável: Token Employer
+@tokenEmployer = {{loginEmployer.response.body.accessToken}}
+
+
+# ==============================================================================
+# UTILITÁRIOS (VERIFICAÇÃO)
+# ==============================================================================
+
+### Verificar Perfil Atual (Testar Token Master)
+GET {{baseUrl}}/auth/profile
+Authorization: Bearer {{tokenMaster}}
+
+### Verificar Perfil Atual (Testar Token Admin)
+GET {{baseUrl}}/auth/profile
+Authorization: Bearer {{tokenAdmin}}
