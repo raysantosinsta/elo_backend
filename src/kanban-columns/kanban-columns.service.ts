@@ -3,7 +3,6 @@
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
-/* eslint-disable prettier/prettier */
 import {
   Injectable,
   BadRequestException,
@@ -18,7 +17,6 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { Counter, Histogram } from 'prom-client';
 import { Prisma } from '@prisma/client';
 
-// --- Métricas de Monitoramento ---
 const columnOpsCounter = new Counter({
   name: 'kanban_column_ops_total',
   help: 'Total de operações em colunas kanban',
@@ -34,31 +32,34 @@ const dbLatencyHistogram = new Histogram({
 @Injectable()
 export class KanbanColumnService {
   private readonly logger = new Logger(KanbanColumnService.name);
-  private readonly CACHE_TTL = 30000; // 30 segundos
-  private readonly DONE_COLUMN_TITLE = 'Concluído'; // Nome reservado para o sistema
+  private readonly CACHE_TTL = 30000;
+  
+  // Normaliza string para comparação (remove acentos e caixa baixa)
+  private normalize(str: string) {
+    return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+  }
+
+  // Lista de nomes considerados como "Concluído"
+  private readonly DONE_VARIANTS = ['concluido', 'concluído', 'done', 'finalizado'];
+  private readonly DONE_COLUMN_TITLE = 'Concluído';
 
   constructor(
     private readonly prisma: PrismaService,
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
   ) { }
 
-  /**
-   * Invalida o cache de colunas de uma empresa específica.
-   * Deve ser chamado sempre que houver uma alteração (Create, Update, Delete, Reorder).
-   */
   private async invalidateCache(companyId: string) {
     await this.cacheManager.del(`kanban_columns_${companyId}`);
   }
 
   // ===========================================================================
-  // LEITURA (FIND ALL)
+  // LEITURA (COM ORDENAÇÃO FORÇADA)
   // ===========================================================================
 
   async findAll(companyId: string) {
     const end = dbLatencyHistogram.labels('findAll').startTimer();
-
-    // 1. Tentar buscar do Cache
     const cacheKey = `kanban_columns_${companyId}`;
+
     const cached = await this.cacheManager.get(cacheKey);
     if (cached) {
       end();
@@ -66,35 +67,39 @@ export class KanbanColumnService {
     }
 
     try {
-      // 2. Buscar no Banco
       let columns = await this.fetchColumns(companyId);
 
-      // 🔥 REGRA DE NEGÓCIO: Garantir que a coluna "Concluído" exista
-      const hasDoneColumn = columns.some(c => c.title === this.DONE_COLUMN_TITLE);
-      
+      // Verificação de segurança: A coluna Concluído existe?
+      const hasDoneColumn = columns.some(c => this.DONE_VARIANTS.includes(this.normalize(c.title)));
+
       if (!hasDoneColumn) {
-         this.logger.log(`Coluna '${this.DONE_COLUMN_TITLE}' não encontrada para empresa ${companyId}. Criando automaticamente...`);
-         await this.ensureDoneColumnExists(companyId);
-         // Busca novamente para incluir a nova coluna
-         columns = await this.fetchColumns(companyId); 
+        await this.ensureDoneColumnExists(companyId);
+        columns = await this.fetchColumns(companyId);
       }
 
-      // 3. Salvar no Cache
-      await this.cacheManager.set(cacheKey, columns, this.CACHE_TTL);
+      // 🔥 CORREÇÃO CRÍTICA: Ordenação via Código (JavaScript) antes de retornar
+      // Isso garante que visualmente fique correto mesmo se o campo 'order' no banco estiver bagunçado
+      const sortedColumns = columns.sort((a, b) => {
+        const isADone = this.DONE_VARIANTS.includes(this.normalize(a.title));
+        const isBDone = this.DONE_VARIANTS.includes(this.normalize(b.title));
+
+        if (isADone && !isBDone) return 1; // A vai para o final
+        if (!isADone && isBDone) return -1; // B vai para o final
+        return a.order - b.order; // Ordenação normal numérica
+      });
+
+      await this.cacheManager.set(cacheKey, sortedColumns, this.CACHE_TTL);
       columnOpsCounter.labels('findAll', 'success').inc();
       end();
-      
-      return columns;
+      return sortedColumns;
 
     } catch (error: any) {
       columnOpsCounter.labels('findAll', 'error').inc();
       end();
-      this.logger.error(`Erro no findAll: ${error.message}`, error.stack);
       throw error;
     }
   }
 
-  // Helper para buscar colunas com as relações necessárias
   private async fetchColumns(companyId: string) {
     return this.prisma.kanbanColumn.findMany({
       where: { companyId },
@@ -104,41 +109,33 @@ export class KanbanColumnService {
           orderBy: { columnOrder: 'asc' },
           include: {
             userAssigned: { select: { id: true, name: true, email: true } },
-            taskAddress: true, // Necessário para mostrar o ícone de localização no card minimalista
-            taskImages: { select: { id: true, url: true }, take: 1 }, // Capa (opcional, caso queira usar no futuro)
-            taskVideos: { select: { id: true }, take: 1 }, // Contagem
-            taskAudios: { select: { id: true }, take: 1 }, // Contagem
+            taskAddress: true,
+            taskImages: { select: { id: true, url: true }, take: 1 },
+            taskVideos: { select: { id: true }, take: 1 },
+            taskAudios: { select: { id: true }, take: 1 },
           },
         },
       },
     });
   }
 
-  // Helper para criar a coluna "Concluído"
   private async ensureDoneColumnExists(companyId: string) {
-      // Pega o maior order atual para colocar a coluna no final
-      const maxOrder = await this.prisma.kanbanColumn.aggregate({
-        where: { companyId },
-        _max: { order: true }
-      });
-      const order = (maxOrder._max.order ?? -1) + 1;
+    // Garante uma ordem absurdamente alta (Nuclear Option)
+    const order = 9999;
 
-      // Pega um usuário qualquer da empresa para ser o "criador" (sistema) ou deixa nulo se o schema permitir
-      // Aqui vamos pegar o primeiro usuário master ou admin encontrado, ou o primeiro user da empresa
-      const systemUser = await this.prisma.user.findFirst({ where: { companyId } });
-      
-      if (!systemUser) return; // Se não tem usuário na empresa, aborta (edge case raro)
+    const systemUser = await this.prisma.user.findFirst({ where: { companyId } });
+    if (!systemUser) return;
 
-      await this.prisma.kanbanColumn.create({
-          data: {
-              title: this.DONE_COLUMN_TITLE,
-              description: 'Tarefas finalizadas',
-              order,
-              companyId,
-              userCreateId: systemUser.id,
-              status: 'ACTIVE'
-          }
-      });
+    await this.prisma.kanbanColumn.create({
+      data: {
+        title: this.DONE_COLUMN_TITLE,
+        description: 'Tarefas finalizadas',
+        order,
+        companyId,
+        userCreateId: systemUser.id,
+        status: 'ACTIVE'
+      }
+    });
   }
 
   async findOne(id: string, companyId: string) {
@@ -150,180 +147,182 @@ export class KanbanColumnService {
     return column;
   }
 
- // ===========================================================================
-  // ESCRITA (CREATE, UPDATE, DELETE)
+  // ===========================================================================
+  // ESCRITA (CREATE BLINDADO)
   // ===========================================================================
 
   async create(title: string, companyId: string, createdById: string) {
-    // 🔥 REGRA: Não permitir criar manualmente uma coluna com o nome reservado
-    if (title.trim().toLowerCase() === this.DONE_COLUMN_TITLE.toLowerCase()) {
-        throw new BadRequestException(`A coluna "${this.DONE_COLUMN_TITLE}" é gerenciada automaticamente pelo sistema.`);
+    // 1. Bloqueia criação manual com nomes reservados
+    if (this.DONE_VARIANTS.includes(this.normalize(title))) {
+      throw new BadRequestException(`A coluna "${title}" é reservada e gerenciada pelo sistema.`);
     }
 
     const existing = await this.prisma.kanbanColumn.findFirst({
       where: { title: { equals: title.trim(), mode: 'insensitive' }, companyId }
     });
-
     if (existing) throw new BadRequestException('Já existe uma coluna com este título.');
-    
-    // 1. Busca a coluna "Concluído" existente para saber o ID dela
-    const doneColumn = await this.prisma.kanbanColumn.findFirst({
-        where: { companyId, title: this.DONE_COLUMN_TITLE }
-    });
 
-    // 2. Calcula a ordem da NOVA coluna
-    // Filtro: Pega a maior ordem de todas as colunas, EXCETO a "Concluído"
-    const whereMaxOrder: Prisma.KanbanColumnWhereInput = { companyId };
-    if (doneColumn) {
-        whereMaxOrder.id = { not: doneColumn.id };
-    }
-
-    const maxOrder = await this.prisma.kanbanColumn.aggregate({
-      where: whereMaxOrder,
-      _max: { order: true }
-    });
-    
-    // A nova coluna vai ocupar o espaço logo após a última coluna "comum"
-    const newColumnOrder = (maxOrder._max.order ?? -1) + 1;
-
-    // Transação para garantir consistência: Cria a nova e move a Concluído
+    // Transação para consistência
     const result = await this.prisma.$transaction(async (tx) => {
-        // 3. Cria a nova coluna na posição calculada (antes do Concluído)
-        const newColumn = await tx.kanbanColumn.create({
-            data: {
-                title: title.trim(),
-                description: `Coluna ${title.trim()}`,
-                order: newColumnOrder,
-                companyId,
-                userCreateId: createdById,
-            }
-        });
+      // 2. Acha a coluna Done atual (por várias variações de nome)
+      const allCols = await tx.kanbanColumn.findMany({
+        where: { companyId },
+        select: { id: true, title: true, order: true }
+      });
 
-        // 4. Se a coluna "Concluído" existe, empurra ela para o final (newOrder + 1)
-        if (doneColumn) {
-            await tx.kanbanColumn.update({
-                where: { id: doneColumn.id },
-                data: { order: newColumnOrder + 1 }
-            });
+      const doneColumn = allCols.find(c => this.DONE_VARIANTS.includes(this.normalize(c.title)));
+
+      // 3. Descobre qual é a maior ordem de colunas NORMAIS (excluindo a Done)
+      const regularCols = allCols.filter(c => !this.DONE_VARIANTS.includes(this.normalize(c.title)));
+      const currentMaxRegularOrder = regularCols.reduce((max, col) => col.order > max ? col.order : max, -1);
+
+      // 4. Lógica de inserção:
+      // A nova coluna entra logo após a última coluna normal
+      const newColOrder = currentMaxRegularOrder + 1;
+
+      // Cria a nova
+      const newColumn = await tx.kanbanColumn.create({
+        data: {
+          title: title.trim(),
+          description: `Coluna ${title.trim()}`,
+          order: newColOrder,
+          companyId,
+          userCreateId: createdById,
         }
+      });
 
-        return newColumn;
+      // Se existe a coluna Done, garante que ela continue no final (Nuclear Option)
+      if (doneColumn) {
+        await tx.kanbanColumn.update({
+          where: { id: doneColumn.id },
+          data: { order: 9999 } // Força Bruta
+        });
+      }
+
+      return newColumn;
     });
 
     await this.invalidateCache(companyId);
     return result;
   }
 
+  // ===========================================================================
+  // UPDATE
+  // ===========================================================================
   async update(id: string, title: string | undefined, companyId: string, description?: string) {
     const currentColumn = await this.prisma.kanbanColumn.findUnique({ where: { id } });
+    if (!currentColumn || currentColumn.companyId !== companyId) throw new NotFoundException('Coluna não encontrada.');
 
-    if (!currentColumn || currentColumn.companyId !== companyId) {
-        throw new NotFoundException('Coluna não encontrada.');
-    }
+    const isDoneCol = this.DONE_VARIANTS.includes(this.normalize(currentColumn.title));
 
-    // 🔥 REGRA: Se a coluna for "Concluído", não pode mudar o nome
-    if (currentColumn.title === this.DONE_COLUMN_TITLE && title && title !== this.DONE_COLUMN_TITLE) {
-        throw new ForbiddenException(`Não é permitido renomear a coluna padrão "${this.DONE_COLUMN_TITLE}".`);
+    if (isDoneCol && title && !this.DONE_VARIANTS.includes(this.normalize(title))) {
+      throw new ForbiddenException(`Não é permitido renomear a coluna de Conclusão.`);
     }
 
     const data: Prisma.KanbanColumnUpdateInput = {};
-
     if (title) {
-      // Verifica duplicidade apenas se o nome mudou
-      if (title.trim().toLowerCase() !== currentColumn.title.toLowerCase()) {
-          const existing = await this.prisma.kanbanColumn.findFirst({
-            where: {
-              title: { equals: title.trim(), mode: 'insensitive' },
-              companyId,
-              id: { not: id }
-            }
-          });
-          if (existing) throw new BadRequestException('Já existe outra coluna com este título.');
+      if (this.normalize(title) !== this.normalize(currentColumn.title)) {
+        const existing = await this.prisma.kanbanColumn.findFirst({
+          where: {
+            title: { equals: title.trim(), mode: 'insensitive' },
+            companyId,
+            id: { not: id }
+          }
+        });
+        if (existing) throw new BadRequestException('Já existe outra coluna com este título.');
       }
       data.title = title.trim();
     }
-
     if (description !== undefined) data.description = description;
 
-    const updated = await this.prisma.kanbanColumn.update({
-      where: { id },
-      data
-    });
-
+    const updated = await this.prisma.kanbanColumn.update({ where: { id }, data });
     await this.invalidateCache(companyId);
     return updated;
   }
 
+  // ===========================================================================
+  // DELETE
+  // ===========================================================================
   async delete(id: string, companyId: string) {
     const columnToDelete = await this.prisma.kanbanColumn.findUnique({ where: { id } });
+    if (!columnToDelete || columnToDelete.companyId !== companyId) throw new NotFoundException('Coluna não encontrada.');
 
-    if (!columnToDelete || columnToDelete.companyId !== companyId) {
-      throw new NotFoundException('Coluna não encontrada.');
+    if (this.DONE_VARIANTS.includes(this.normalize(columnToDelete.title))) {
+      throw new ForbiddenException(`A coluna "${columnToDelete.title}" é essencial e não pode ser excluída.`);
     }
 
-    // 🔥 REGRA: A coluna "Concluído" é indestrutível
-    if (columnToDelete.title === this.DONE_COLUMN_TITLE) {
-        throw new ForbiddenException(`A coluna "${this.DONE_COLUMN_TITLE}" é essencial e não pode ser excluída.`);
-    }
-
-    // Estratégia de Fallback: Achar outra coluna para mover as tasks pendentes antes de deletar
     const fallbackColumn = await this.prisma.kanbanColumn.findFirst({
       where: {
         companyId,
         id: { not: id },
-        // Tenta achar "Sem etapa" ou a primeira coluna disponível (order 0)
-        OR: [
-          { title: { contains: 'Sem etapa', mode: 'insensitive' } },
-          { order: 0 }
-        ]
+        order: 0 // Tenta pegar a primeira
       },
       orderBy: { order: 'asc' }
     });
 
     await this.prisma.$transaction(async (tx) => {
-      // 1. Mover tarefas órfãs para a coluna de fallback
       if (fallbackColumn) {
         await tx.task.updateMany({
           where: { columnId: id },
           data: { columnId: fallbackColumn.id }
         });
       }
-      // Se não houver fallback (só existe 1 coluna), as tarefas serão deletadas pelo CASCADE do banco 
-      // ou lançará erro se o banco estiver como RESTRICT.
-
-      // 2. Deletar a Coluna
       await tx.kanbanColumn.delete({ where: { id } });
     });
 
     await this.invalidateCache(companyId);
-    return {
-      message: 'Coluna deletada.',
-      tasksMovedTo: fallbackColumn?.title || 'Nenhuma (ou excluídas)'
-    };
+    return { message: 'Coluna deletada.' };
   }
 
-  async reorder(columns: { id: string; order: number }[], companyId: string) {
-    // Validação de Segurança: Garante que todas as colunas pertencem à empresa
-    const ids = columns.map(c => c.id);
-    const count = await this.prisma.kanbanColumn.count({
-      where: { id: { in: ids }, companyId }
+  // ===========================================================================
+  // REORDER (LÓGICA BLINDADA COM OPÇÃO NUCLEAR)
+  // ===========================================================================
+
+  async reorder(columnsInput: { id: string; order: number }[], companyId: string) {
+    const ids = columnsInput.map(c => c.id);
+    const dbColumns = await this.prisma.kanbanColumn.findMany({
+      where: { id: { in: ids }, companyId },
+      select: { id: true, title: true }
     });
 
-    if (count !== columns.length) {
-      throw new BadRequestException('Tentativa de reordenar colunas inválidas ou de outra empresa.');
+    if (dbColumns.length !== columnsInput.length) {
+      throw new BadRequestException('Colunas inválidas detectadas.');
     }
 
-    // Transaction para garantir consistência visual
-    await this.prisma.$transaction(
-      columns.map(col =>
+    // Acha a coluna done no banco (independente do input do usuário)
+    const doneColumn = dbColumns.find(c => this.DONE_VARIANTS.includes(this.normalize(c.title)));
+
+    // Separa colunas normais
+    const regularColumns = columnsInput.filter(c => c.id !== doneColumn?.id);
+    // Ordena pelo input do front
+    regularColumns.sort((a, b) => a.order - b.order);
+
+    const updatePromises: Prisma.PrismaPromise<any>[] = [];
+
+    // Reindexa as normais sequencialmente: 0, 1, 2, 3...
+    regularColumns.forEach((col, index) => {
+      updatePromises.push(
         this.prisma.kanbanColumn.update({
           where: { id: col.id },
-          data: { order: col.order }
+          data: { order: index }
         })
-      )
-    );
+      );
+    });
 
+    // 🔥 FORÇA BRUTA NUCLEAR:
+    // Garante que a coluna Concluído tenha um valor inalcançável pelas colunas normais
+    if (doneColumn) {
+      updatePromises.push(
+        this.prisma.kanbanColumn.update({
+          where: { id: doneColumn.id },
+          data: { order: 9999 } // Número absurdamente alto
+        })
+      );
+    }
+
+    await this.prisma.$transaction(updatePromises);
     await this.invalidateCache(companyId);
+
     return { success: true };
   }
 }
