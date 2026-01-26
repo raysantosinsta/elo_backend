@@ -1,25 +1,33 @@
+# --- BUILDER STAGE ---
+FROM node:22-alpine AS builder
+
+WORKDIR /app
+
+# Copia dependências primeiro para aproveitar cache do Docker
+COPY package*.json ./
+COPY prisma ./prisma/
+
+# Instala tudo (incluindo devDependencies para o build)
+RUN npm install
+
+# Copia o código fonte
+COPY . .
+
+# Gera o cliente prisma e faz o build
+RUN npx prisma generate
+RUN npm run build
+
+# --- PRODUCTION STAGE ---
 FROM node:22-alpine
 
 WORKDIR /app
 
-# 1. Instalar dependências
-COPY package*.json ./
-# O --omit=dev deixaria a imagem menor, mas como o Nest precisa de devDependencies para o build, usamos install normal
-RUN npm install
+# Copia apenas o necessário do estágio anterior
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package*.json ./
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/prisma ./prisma
 
-# 2. Gerar o cliente Prisma (Crucial)
-COPY prisma ./prisma
-RUN npx prisma generate
-
-# 3. Copiar o código fonte
-COPY . .
-
-# 4. Construir o projeto (Cria a pasta dist)
-RUN npm run build
-
-# 5. EXPOR A PORTA (Documentação apenas, o Render injeta a porta)
 EXPOSE 3000
 
-# 6. COMANDO DE INICIALIZAÇÃO (O que faltava!)
-# Usa o script start:prod do seu package.json que roda "node dist/main"
 CMD ["npm", "run", "start:prod"]
