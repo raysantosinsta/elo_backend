@@ -150,7 +150,7 @@ export class KanbanColumnService {
     return column;
   }
 
-  // ===========================================================================
+ // ===========================================================================
   // ESCRITA (CREATE, UPDATE, DELETE)
   // ===========================================================================
 
@@ -166,25 +166,52 @@ export class KanbanColumnService {
 
     if (existing) throw new BadRequestException('Já existe uma coluna com este título.');
     
-    // Define a ordem como a última
+    // 1. Busca a coluna "Concluído" existente para saber o ID dela
+    const doneColumn = await this.prisma.kanbanColumn.findFirst({
+        where: { companyId, title: this.DONE_COLUMN_TITLE }
+    });
+
+    // 2. Calcula a ordem da NOVA coluna
+    // Filtro: Pega a maior ordem de todas as colunas, EXCETO a "Concluído"
+    const whereMaxOrder: Prisma.KanbanColumnWhereInput = { companyId };
+    if (doneColumn) {
+        whereMaxOrder.id = { not: doneColumn.id };
+    }
+
     const maxOrder = await this.prisma.kanbanColumn.aggregate({
-      where: { companyId },
+      where: whereMaxOrder,
       _max: { order: true }
     });
-    const order = (maxOrder._max.order ?? -1) + 1;
+    
+    // A nova coluna vai ocupar o espaço logo após a última coluna "comum"
+    const newColumnOrder = (maxOrder._max.order ?? -1) + 1;
 
-    const column = await this.prisma.kanbanColumn.create({
-      data: {
-        title: title.trim(),
-        description: `Coluna ${title.trim()}`,
-        order,
-        companyId,
-        userCreateId: createdById,
-      }
+    // Transação para garantir consistência: Cria a nova e move a Concluído
+    const result = await this.prisma.$transaction(async (tx) => {
+        // 3. Cria a nova coluna na posição calculada (antes do Concluído)
+        const newColumn = await tx.kanbanColumn.create({
+            data: {
+                title: title.trim(),
+                description: `Coluna ${title.trim()}`,
+                order: newColumnOrder,
+                companyId,
+                userCreateId: createdById,
+            }
+        });
+
+        // 4. Se a coluna "Concluído" existe, empurra ela para o final (newOrder + 1)
+        if (doneColumn) {
+            await tx.kanbanColumn.update({
+                where: { id: doneColumn.id },
+                data: { order: newColumnOrder + 1 }
+            });
+        }
+
+        return newColumn;
     });
 
     await this.invalidateCache(companyId);
-    return column;
+    return result;
   }
 
   async update(id: string, title: string | undefined, companyId: string, description?: string) {

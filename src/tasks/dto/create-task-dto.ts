@@ -7,7 +7,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable prettier/prettier */
 /* eslint-disable prettier/prettier */
-import { BadRequestException, HttpStatus, ParseFilePipeBuilder } from '@nestjs/common';
+import { BadRequestException } from '@nestjs/common';
 import { TaskStatus } from '@prisma/client';
 import { Transform, Type } from 'class-transformer';
 import {
@@ -56,9 +56,6 @@ export function validateFiles(files: {
   }
 }
 
-
-
-// ... (O restante das classes CreateTaskAddressDto, CreateTaskDto, etc. permanece igual)
 export class CreateTaskAddressDto {
   @IsString() @IsNotEmpty() cep: string;
   @IsString() @IsNotEmpty() endereco: string;
@@ -116,6 +113,19 @@ export class UpdateTaskDto {
   @IsOptional() @IsEnum(TaskStatus) status?: TaskStatus;
   @IsOptional() @IsString() finalComment?: string;
   @IsOptional() @IsUUID() completedById?: string;
+
+  // --- CAMPO QUE FALTAVA ---
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (typeof value === 'string') {
+      try { return JSON.parse(value); } catch (e) { return null; }
+    }
+    return value;
+  })
+  @ValidateNested()
+  @Type(() => CreateTaskAddressDto)
+  address?: CreateTaskAddressDto;
+  // -------------------------
 
   @IsOptional()
   @IsArray()

@@ -7,10 +7,6 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable prettier/prettier */
-/* eslint-disable prettier/prettier */
-/* eslint-disable prettier/prettier */
-/* eslint-disable prettier/prettier */
-/* eslint-disable prettier/prettier */
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { BadRequestException, ForbiddenException, Inject, Injectable, InternalServerErrorException, Logger, NotFoundException } from '@nestjs/common';
 import { NotificationType, Prisma, TaskStatus } from '@prisma/client';
@@ -62,17 +58,15 @@ export class TasksService {
     }
   }
 
-  // --- VALIDAÇÃO DE RELACIONAMENTOS (Corrigida) ---
+  // --- VALIDAÇÃO DE RELACIONAMENTOS ---
   private async validateTaskRelations(dto: CreateTaskDto | UpdateTaskDto) {
     const tenantId = this.cls.get<string>('tenantId');
     const isMaster = this.cls.get<boolean>('isMaster');
 
     if (isMaster || !tenantId) return;
 
-    // 🔥 CORREÇÃO DO ERRO DE TIPO AQUI:
-    const validations: Promise<void>[] = []; 
+    const validations: Promise<void>[] = [];
 
-    // 1. Valida Usuário
     if (dto.assignedToId) {
       validations.push(
         this.prisma.user.findFirst({
@@ -84,7 +78,6 @@ export class TasksService {
       );
     }
 
-    // 2. Valida Coluna
     if (dto.columnId) {
       validations.push(
         this.prisma.kanbanColumn.findFirst({
@@ -96,7 +89,6 @@ export class TasksService {
       );
     }
 
-    // 3. Valida Rota
     if (dto.routeId) {
       validations.push(
         this.prisma.route.findFirst({
@@ -131,11 +123,9 @@ export class TasksService {
   async create(dto: CreateTaskDto, files?: { images?: UploadedFile[]; audios?: UploadedFile[]; videos?: UploadedFile[] }) {
     this.logger.debug(`[Create] Iniciando task: ${dto.title}`);
 
-    // Pega do contexto se não vier no DTO
     if (!dto.companyId) dto.companyId = this.cls.get<string>('tenantId');
     const userId = this.cls.get<string>('userId');
 
-    // Validações
     this.validateOwnership(dto.companyId!);
     await this.validateTaskRelations(dto);
 
@@ -148,7 +138,7 @@ export class TasksService {
           title: title.trim(),
           description: dto.description?.trim(),
           companyId: companyId!,
-          userCreateId: userId, // Pega do CLS
+          userCreateId: userId,
           
           userAssignedId: dto.assignedToId,
           columnId: columnId,
@@ -188,7 +178,11 @@ export class TasksService {
         await this.handleFileUploads(task.id, companyId!, userId, files);
         task = await this.prisma.task.findUniqueOrThrow({ where: { id: task.id }, include: this.getTaskIncludeDetails() });
       } catch (uploadError) {
-        await this.prisma.task.delete({ where: { id: task.id } });
+        try {
+            await this.prisma.task.delete({ where: { id: task.id } });
+        } catch (ignored) {
+            // Ignora erro se falhar ao deletar no rollback
+        }
         throw new InternalServerErrorException('Erro no upload. Tarefa cancelada.');
       }
     }
@@ -196,6 +190,8 @@ export class TasksService {
     if (companyId) {
       taskCreationCounter.labels(companyId).inc();
       await this.cacheManager.del(`tasks_list_${companyId}`);
+      // 🔥 CORREÇÃO CACHE: Invalida o cache das colunas kanban para aparecer a nova task
+      await this.cacheManager.del(`kanban_columns_${companyId}`);
     }
 
     if (dto.assignedToId) {
@@ -214,7 +210,6 @@ export class TasksService {
     const existing = await this.prisma.task.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Task não encontrada.');
     
-    // Se não for master, valida se a task pertence ao tenant atual
     const isMaster = this.cls.get<boolean>('isMaster');
     if (!isMaster && existing.companyId !== tenantId) {
         throw new ForbiddenException('Acesso negado.');
@@ -252,6 +247,37 @@ export class TasksService {
       }
     }
 
+    if (dto.address) {
+        const cleanCep = dto.address.cep.replace(/\D/g, '').slice(0, 8);
+        data.taskAddress = {
+            upsert: {
+                create: {
+                    cep: cleanCep,
+                    endereco: dto.address.endereco.slice(0, 200),
+                    numero: dto.address.numero.slice(0, 10),
+                    bairro: dto.address.bairro.slice(0, 100),
+                    cidade: dto.address.cidade.slice(0, 100),
+                    estado: dto.address.estado.slice(0, 2).toUpperCase(),
+                    complemento: dto.address.complemento ? dto.address.complemento.slice(0, 100) : null,
+                    latitude: dto.address.latitude,
+                    longitude: dto.address.longitude,
+                    companyId: existing.companyId,
+                },
+                update: {
+                    cep: cleanCep,
+                    endereco: dto.address.endereco.slice(0, 200),
+                    numero: dto.address.numero.slice(0, 10),
+                    bairro: dto.address.bairro.slice(0, 100),
+                    cidade: dto.address.cidade.slice(0, 100),
+                    estado: dto.address.estado.slice(0, 2).toUpperCase(),
+                    complemento: dto.address.complemento ? dto.address.complemento.slice(0, 100) : null,
+                    latitude: dto.address.latitude,
+                    longitude: dto.address.longitude,
+                }
+            }
+        };
+    }
+
     if (dto.completedById) data.userCompleted = { connect: { id: dto.completedById } };
 
     if (dto.removeImageIds?.length || dto.removeAudioIds?.length || dto.removeVideoIds?.length) {
@@ -270,6 +296,8 @@ export class TasksService {
 
     await this.cacheManager.del(`tasks_list_${existing.companyId}`);
     await this.cacheManager.del(`task_${id}`);
+    // 🔥 CORREÇÃO CACHE: Invalida o cache das colunas kanban para refletir a atualização
+    await this.cacheManager.del(`kanban_columns_${existing.companyId}`);
 
     return updated;
   }
@@ -320,8 +348,15 @@ export class TasksService {
 
   async findAllPaginated(params: any) {
     const tenantId = this.cls.get<string>('tenantId');
-    const { page = 1, limit = 10, search, columnId, startDate, endDate, assignedToId, hasLocation } = params;
+    // Adicionamos dateType nos params
+    const { page = 1, limit = 10, search, columnId, startDate, endDate, assignedToId, hasLocation, dateType } = params;
     const skip = (page - 1) * limit;
+
+    // Mapeamento do tipo de data para o campo do banco
+    let dateField = 'createdAt'; // Padrão
+    if (dateType === 'scheduled') dateField = 'scheduledDate';
+    if (dateType === 'due') dateField = 'dueDate';
+    if (dateType === 'created') dateField = 'createdAt';
 
     const where: Prisma.TaskWhereInput = {
       companyId: tenantId, 
@@ -332,8 +367,9 @@ export class TasksService {
           { description: { contains: search, mode: 'insensitive' } },
         ],
       }),
+      // Lógica dinâmica de data
       ...((startDate || endDate) && {
-        scheduledDate: {
+        [dateField]: {
           ...(startDate && { gte: new Date(startDate) }),
           ...(endDate && { lte: new Date(endDate) }),
         },
@@ -365,12 +401,11 @@ export class TasksService {
       where: { id },
       include: this.getTaskIncludeDetails(),
     });
-    // O Prisma Extended já filtra por tenantId, então se retornar null, ou não existe ou não é da empresa.
     if (!t) throw new NotFoundException('Task not found');
     return t;
   }
 
-  // --- DELETE ---
+  // --- DELETE (CORRIGIDO PARA O ERRO P2025) ---
 
   async remove(id: string) {
     const tenantId = this.cls.get<string>('tenantId');
@@ -401,6 +436,8 @@ export class TasksService {
     if (tenantId) {
       await this.cacheManager.del(`tasks_list_${tenantId}`);
       await this.cacheManager.del(`task_${id}`);
+      // 🔥 CORREÇÃO CACHE: Invalida o cache das colunas kanban ao remover
+      await this.cacheManager.del(`kanban_columns_${tenantId}`);
     }
   }
 
@@ -412,7 +449,6 @@ export class TasksService {
     if (!task) throw new NotFoundException('Task não encontrada');
 
     const cleanData = {
-      ...addressData,
       cep: addressData.cep?.replace(/\D/g, '').slice(0, 8),
       endereco: addressData.endereco?.slice(0, 200),
       numero: addressData.numero?.slice(0, 10),
@@ -420,6 +456,8 @@ export class TasksService {
       cidade: addressData.cidade?.slice(0, 100),
       estado: addressData.estado?.slice(0, 2).toUpperCase(),
       complemento: addressData.complemento?.slice(0, 100),
+      latitude: addressData.latitude,
+      longitude: addressData.longitude,
     };
 
     return this.prisma.taskAddress.upsert({
