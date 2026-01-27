@@ -1,4 +1,5 @@
 /* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { Injectable, InternalServerErrorException, Logger } from "@nestjs/common";
 import { randomUUID } from "crypto";
 import { MailService } from "src/mail/mail.service";

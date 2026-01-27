@@ -43,7 +43,7 @@ export class TasksService {
     private readonly websocketGateway: NotificationUserGateway,
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
     private readonly cls: ClsService,
-  ) {}
+  ) { }
 
   // --- VALIDAÇÃO DE TENANT ---
   private validateOwnership(targetCompanyId: string): void {
@@ -139,7 +139,7 @@ export class TasksService {
           description: dto.description?.trim(),
           companyId: companyId!,
           userCreateId: userId,
-          
+
           userAssignedId: dto.assignedToId,
           columnId: columnId,
           routeId: dto.routeId,
@@ -151,19 +151,19 @@ export class TasksService {
           scheduledDate: dto.scheduledAt ? new Date(dto.scheduledAt) : new Date(),
           taskAddress: address
             ? {
-                create: {
-                  cep: address.cep.replace(/\D/g, '').slice(0, 8),
-                  endereco: address.endereco.slice(0, 200),
-                  numero: address.numero.slice(0, 10),
-                  bairro: address.bairro.slice(0, 100),
-                  cidade: address.cidade.slice(0, 100),
-                  estado: address.estado.slice(0, 2).toUpperCase(),
-                  complemento: address.complemento ? address.complemento.slice(0, 100) : null,
-                  latitude: address.latitude,
-                  longitude: address.longitude,
-                  companyId: companyId!,
-                },
-              }
+              create: {
+                cep: address.cep.replace(/\D/g, '').slice(0, 8),
+                endereco: address.endereco.slice(0, 200),
+                numero: address.numero.slice(0, 10),
+                bairro: address.bairro.slice(0, 100),
+                cidade: address.cidade.slice(0, 100),
+                estado: address.estado.slice(0, 2).toUpperCase(),
+                complemento: address.complemento ? address.complemento.slice(0, 100) : null,
+                latitude: address.latitude,
+                longitude: address.longitude,
+                companyId: companyId!,
+              },
+            }
             : undefined,
         },
         include: this.getTaskIncludeDetails(),
@@ -179,9 +179,9 @@ export class TasksService {
         task = await this.prisma.task.findUniqueOrThrow({ where: { id: task.id }, include: this.getTaskIncludeDetails() });
       } catch (uploadError) {
         try {
-            await this.prisma.task.delete({ where: { id: task.id } });
+          await this.prisma.task.delete({ where: { id: task.id } });
         } catch (ignored) {
-            // Ignora erro se falhar ao deletar no rollback
+          // Ignora erro se falhar ao deletar no rollback
         }
         throw new InternalServerErrorException('Erro no upload. Tarefa cancelada.');
       }
@@ -209,10 +209,10 @@ export class TasksService {
 
     const existing = await this.prisma.task.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Task não encontrada.');
-    
+
     const isMaster = this.cls.get<boolean>('isMaster');
     if (!isMaster && existing.companyId !== tenantId) {
-        throw new ForbiddenException('Acesso negado.');
+      throw new ForbiddenException('Acesso negado.');
     }
 
     await this.validateTaskRelations(dto);
@@ -248,34 +248,34 @@ export class TasksService {
     }
 
     if (dto.address) {
-        const cleanCep = dto.address.cep.replace(/\D/g, '').slice(0, 8);
-        data.taskAddress = {
-            upsert: {
-                create: {
-                    cep: cleanCep,
-                    endereco: dto.address.endereco.slice(0, 200),
-                    numero: dto.address.numero.slice(0, 10),
-                    bairro: dto.address.bairro.slice(0, 100),
-                    cidade: dto.address.cidade.slice(0, 100),
-                    estado: dto.address.estado.slice(0, 2).toUpperCase(),
-                    complemento: dto.address.complemento ? dto.address.complemento.slice(0, 100) : null,
-                    latitude: dto.address.latitude,
-                    longitude: dto.address.longitude,
-                    companyId: existing.companyId,
-                },
-                update: {
-                    cep: cleanCep,
-                    endereco: dto.address.endereco.slice(0, 200),
-                    numero: dto.address.numero.slice(0, 10),
-                    bairro: dto.address.bairro.slice(0, 100),
-                    cidade: dto.address.cidade.slice(0, 100),
-                    estado: dto.address.estado.slice(0, 2).toUpperCase(),
-                    complemento: dto.address.complemento ? dto.address.complemento.slice(0, 100) : null,
-                    latitude: dto.address.latitude,
-                    longitude: dto.address.longitude,
-                }
-            }
-        };
+      const cleanCep = dto.address.cep.replace(/\D/g, '').slice(0, 8);
+      data.taskAddress = {
+        upsert: {
+          create: {
+            cep: cleanCep,
+            endereco: dto.address.endereco.slice(0, 200),
+            numero: dto.address.numero.slice(0, 10),
+            bairro: dto.address.bairro.slice(0, 100),
+            cidade: dto.address.cidade.slice(0, 100),
+            estado: dto.address.estado.slice(0, 2).toUpperCase(),
+            complemento: dto.address.complemento ? dto.address.complemento.slice(0, 100) : null,
+            latitude: dto.address.latitude,
+            longitude: dto.address.longitude,
+            companyId: existing.companyId,
+          },
+          update: {
+            cep: cleanCep,
+            endereco: dto.address.endereco.slice(0, 200),
+            numero: dto.address.numero.slice(0, 10),
+            bairro: dto.address.bairro.slice(0, 100),
+            cidade: dto.address.cidade.slice(0, 100),
+            estado: dto.address.estado.slice(0, 2).toUpperCase(),
+            complemento: dto.address.complemento ? dto.address.complemento.slice(0, 100) : null,
+            latitude: dto.address.latitude,
+            longitude: dto.address.longitude,
+          }
+        }
+      };
     }
 
     if (dto.completedById) data.userCompleted = { connect: { id: dto.completedById } };
@@ -303,16 +303,16 @@ export class TasksService {
   }
 
   // --- HELPERS (Upload, Notify) ---
-  
+
   private async handleFileUploads(taskId: string, companyId: string, uploadedById: string, files: any) {
     const promises: Promise<any>[] = [];
-    
+
     const process = async (file: UploadedFile, bucket: 'task-images' | 'task-audios' | 'task-videos') => {
-        const ext = file.originalname.split('.').pop();
-        const filename = `${Date.now()}-${Math.random().toString(36).substring(7)}.${ext}`;
-        const path = `tasks/${taskId}/${bucket.split('-')[1]}/${filename}`;
-        const res = await this.supabaseService.uploadFile(bucket, path, file.buffer, { contentType: file.mimetype, overwrite: true });
-        return { url: res.fullPath, filename: file.originalname, size: file.size };
+      const ext = file.originalname.split('.').pop();
+      const filename = `${Date.now()}-${Math.random().toString(36).substring(7)}.${ext}`;
+      const path = `tasks/${taskId}/${bucket.split('-')[1]}/${filename}`;
+      const res = await this.supabaseService.uploadFile(bucket, path, file.buffer, { contentType: file.mimetype, overwrite: true });
+      return { url: res.fullPath, filename: file.originalname, size: file.size };
     }
 
     if (files.images) files.images.forEach((f: any) => promises.push(process(f, 'task-images').then(d => this.prisma.taskImage.create({ data: { ...d, taskId, companyId, userUploadedId: uploadedById } }))));
@@ -323,58 +323,85 @@ export class TasksService {
   }
 
   private async handleFileRemovals(taskId: string, companyId: string, imgIds: string[] = [], audioIds: string[] = [], videoIds: string[] = []) {
-     const del = (url: string, bucket: string) => {
-         const path = url.split(`${bucket}/`).pop();
-         if(path) this.supabaseService.deleteFile(bucket as any, path).catch(e => this.logger.error(e));
-     }
-     if(imgIds.length) {
-         const items = await this.prisma.taskImage.findMany({ where: { id: { in: imgIds }, taskId, companyId } });
-         items.forEach(i => del(i.url, 'task-images'));
-         await this.prisma.taskImage.deleteMany({ where: { id: { in: imgIds } } });
-     }
-     if(audioIds.length) {
-        const items = await this.prisma.taskAudio.findMany({ where: { id: { in: audioIds }, taskId, companyId } });
-        items.forEach(i => del(i.url, 'task-audios'));
-        await this.prisma.taskAudio.deleteMany({ where: { id: { in: audioIds } } });
+    const del = (url: string, bucket: string) => {
+      const path = url.split(`${bucket}/`).pop();
+      if (path) this.supabaseService.deleteFile(bucket as any, path).catch(e => this.logger.error(e));
     }
-    if(videoIds.length) {
-        const items = await this.prisma.taskVideo.findMany({ where: { id: { in: videoIds }, taskId, companyId } });
-        items.forEach(i => del(i.url, 'task-videos'));
-        await this.prisma.taskVideo.deleteMany({ where: { id: { in: videoIds } } });
+    if (imgIds.length) {
+      const items = await this.prisma.taskImage.findMany({ where: { id: { in: imgIds }, taskId, companyId } });
+      items.forEach(i => del(i.url, 'task-images'));
+      await this.prisma.taskImage.deleteMany({ where: { id: { in: imgIds } } });
+    }
+    if (audioIds.length) {
+      const items = await this.prisma.taskAudio.findMany({ where: { id: { in: audioIds }, taskId, companyId } });
+      items.forEach(i => del(i.url, 'task-audios'));
+      await this.prisma.taskAudio.deleteMany({ where: { id: { in: audioIds } } });
+    }
+    if (videoIds.length) {
+      const items = await this.prisma.taskVideo.findMany({ where: { id: { in: videoIds }, taskId, companyId } });
+      items.forEach(i => del(i.url, 'task-videos'));
+      await this.prisma.taskVideo.deleteMany({ where: { id: { in: videoIds } } });
     }
   }
 
   // --- READS ---
 
-  async findAllPaginated(params: any) {
+
+ async findAllPaginated(params: any) {
     const tenantId = this.cls.get<string>('tenantId');
-    // Adicionamos dateType nos params
+    
+    // Extraímos os parâmetros
     const { page = 1, limit = 10, search, columnId, startDate, endDate, assignedToId, hasLocation, dateType } = params;
     const skip = (page - 1) * limit;
 
-    // Mapeamento do tipo de data para o campo do banco
-    let dateField = 'createdAt'; // Padrão
-    if (dateType === 'scheduled') dateField = 'scheduledDate';
-    if (dateType === 'due') dateField = 'dueDate';
-    if (dateType === 'created') dateField = 'createdAt';
+    // 1. MAPEAMENTO DE DATA
+    let dbField = 'createdAt'; 
+    if (dateType === 'scheduled') dbField = 'scheduledDate';
+    if (dateType === 'due') dbField = 'dueDate';
+    if (dateType === 'created') dbField = 'createdAt';
 
+    // 2. FILTRO DE DATA (Problema da Meia-Noite resolvido)
+    const dateFilter: Prisma.DateTimeNullableFilter = {}; 
+
+    if (startDate) {
+      dateFilter.gte = new Date(startDate);
+    }
+    if (endDate) {
+      const endD = new Date(endDate);
+      endD.setUTCHours(23, 59, 59, 999); 
+      dateFilter.lte = endD;
+    }
+
+    // 3. QUERY PRINCIPAL
     const where: Prisma.TaskWhereInput = {
       companyId: tenantId, 
       ...(columnId && { columnId }),
+      
+      // --- CORREÇÃO AQUI: BUSCA POR NOME DA PESSOA ---
       ...(search && {
         OR: [
           { title: { contains: search, mode: 'insensitive' } },
           { description: { contains: search, mode: 'insensitive' } },
+          // Adiciona a busca pelo NOME do usuário atribuído
+          { 
+            userAssigned: { 
+              name: { contains: search, mode: 'insensitive' } 
+            } 
+          }
         ],
       }),
-      // Lógica dinâmica de data
+      // ----------------------------------------------
+
+      // 4. APLICAÇÃO DO FILTRO DE DATA DINÂMICO
       ...((startDate || endDate) && {
-        [dateField]: {
-          ...(startDate && { gte: new Date(startDate) }),
-          ...(endDate && { lte: new Date(endDate) }),
-        },
+        [dbField]: dateFilter, 
       }),
-      ...(assignedToId && { userAssignedId: assignedToId }),
+
+      // Filtro específico (Dropdown de usuário)
+      // Adicionado validação !== 'all' para segurança
+      ...(assignedToId && assignedToId !== 'all' && { userAssignedId: assignedToId }),
+
+      // Filtro de Localização
       ...(hasLocation === true && { taskAddress: { is: { latitude: { not: null }, longitude: { not: null } } } }),
       ...(hasLocation === false && { OR: [{ taskAddress: null }, { taskAddress: { is: { latitude: null } } }] }),
     };
@@ -417,13 +444,13 @@ export class TasksService {
     if (!t) return null;
 
     if (tenantId) {
-        await this.handleFileRemovals(
+      await this.handleFileRemovals(
         id,
         tenantId,
         t.taskImages.map((i) => i.id),
         t.taskAudios.map((a) => a.id),
         t.taskVideos.map((v) => v.id),
-        );
+      );
     }
 
     try {
