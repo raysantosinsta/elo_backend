@@ -15,83 +15,16 @@ import {
 } from '@nestjs/common';
 import { Company, SimpleStatus } from '@prisma/client';
 import type { Cache } from 'cache-manager';
-import { Type } from 'class-transformer';
-import {
-  IsEmail,
-  IsEnum,
-  IsInt,
-  IsNotEmpty,
-  IsOptional,
-  IsString,
-  IsUUID,
-  Max,
-  Min
-} from 'class-validator';
 import { ClsService } from 'nestjs-cls';
+// 🔥 IMPORTS NOVOS
+import { InjectMetric } from '@willsoto/nestjs-prometheus';
 import { Counter, Histogram } from 'prom-client';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { CreateCompanyDto, PaginationDto, UpdateCompanyDto } from './dto/create-company.dto';
 
-// --- DTOs (Mantidos) ---
-export class CreateCompanyDto {
-  @IsNotEmpty() @IsString() name: string;
-  @IsNotEmpty() @IsString() cnpj: string;
-  @IsNotEmpty() @IsString() telefone: string;
-  @IsNotEmpty() @IsEmail() email: string;
-  @IsNotEmpty() @IsString() endereco: string;
-  @IsNotEmpty() @IsString() numero: string;
-  @IsOptional() @IsString() complemento?: string;
-  @IsNotEmpty() @IsString() bairro: string;
-  @IsNotEmpty() @IsString() cidade: string;
-  @IsNotEmpty() @IsString() estado: string;
-  @IsNotEmpty() @IsString() cep: string;
-  @IsOptional() @IsString() ramoAtividade?: string;
-  @IsOptional() @IsUUID() userCreateId?: string;
-  @IsOptional() @IsEnum(SimpleStatus) status?: SimpleStatus;
-}
 
-export class UpdateCompanyDto {
-  @IsOptional() @IsString() name?: string;
-  @IsOptional() @IsString() cnpj?: string;
-  @IsOptional() @IsString() telefone?: string;
-  @IsOptional() @IsEmail() email?: string;
-  @IsOptional() @IsString() endereco?: string;
-  @IsOptional() @IsString() numero?: string;
-  @IsOptional() @IsString() complemento?: string;
-  @IsOptional() @IsString() bairro?: string;
-  @IsOptional() @IsString() cidade?: string;
-  @IsOptional() @IsString() estado?: string;
-  @IsOptional() @IsString() cep?: string;
-  @IsOptional() @IsString() ramoAtividade?: string;
-  @IsOptional() @IsUUID() userUpdateId?: string;
-  @IsOptional() @IsEnum(SimpleStatus) status?: SimpleStatus;
-}
 
-export class PaginationDto {
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  @Type(() => Number) // <--- Converte "1" para 1
-  page?: number;
 
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  @Max(100) // Mantido como você pediu
-  @Type(() => Number) // <--- Converte "100" para 100
-  limit?: number;
-}
-
-// --- Métricas ---
-const companyCreationCounter = new Counter({
-  name: 'company_created_total',
-  help: 'Total number of companies created',
-});
-
-const dbLatencyHistogram = new Histogram({
-  name: 'db_operation_duration_seconds',
-  help: 'Duration of DB operations in seconds',
-  labelNames: ['operation'],
-});
 
 @Injectable()
 export class CompaniesService {
@@ -101,6 +34,12 @@ export class CompaniesService {
     private readonly prisma: PrismaService,
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
     private readonly cls: ClsService,
+    // 🔥 INJEÇÃO DAS MÉTRICAS AQUI
+    @InjectMetric('company_created_total')
+    public companyCounter: Counter<string>,
+
+    @InjectMetric('db_operation_duration_seconds')
+    public dbHistogram: Histogram<string>,
   ) { }
 
   // ===========================================================================
@@ -125,39 +64,103 @@ export class CompaniesService {
     }
   }
 
-  // Wrapper de Resiliência (Mantido)
+  /**
+   * Executa uma operação assíncrona com estratégias de resiliência (Retry + Timeout + Métricas).
+   * * Este método envolve ("wraps") uma chamada ao banco de dados ou serviço externo para garantir que:
+   * 1. Se demorar demais, o processo é abortado (Timeout).
+   * 2. Se falhar, ele tenta novamente algumas vezes (Retry).
+   * 3. O tempo de execução é monitorado para o Prometheus (Observability).
+   * * @template T - O tipo de dado que a função `fn` retorna (ex: Company, User, void).
+   * @param operation - Nome da operação (string) usado como label (etiqueta) nas métricas do Prometheus e nos logs (ex: 'create_company').
+   * @param fn - A função assíncrona que executa a lógica real (ex: `() => this.prisma.company.create(...)`).
+   * @param retries - (Opcional) Número máximo de tentativas em caso de erro. Padrão: 3.
+   * @param timeoutMs - (Opcional) Tempo máximo em milissegundos que cada tentativa pode levar antes de ser abortada. Padrão: 5000ms (5s).
+   * @returns Retorna o resultado da função `fn` (do tipo T) se for bem-sucedida.
+   * @throws InternalServerErrorException - Se todas as tentativas falharem ou ocorrer timeout repetidamente.
+   */
   private async executeWithResilience<T>(
     operation: string,
     fn: () => Promise<T>,
     retries = 3,
     timeoutMs = 5000
   ): Promise<T> {
-    const endTimer = dbLatencyHistogram.labels(operation).startTimer();
+    
+    // 1. INÍCIO DA METRIFICAÇÃO
+    // Inicia um cronômetro no Histograma do Prometheus injetado (`this.dbHistogram`).
+    // O método `.labels(operation)` categoriza essa métrica com o nome da operação passada.
+    // O retorno `endTimer` é uma função que deve ser chamada quando a operação terminar para calcular a duração total.
+    const endTimer = this.dbHistogram.labels(operation).startTimer();
+
+    // 2. CONTADOR DE TENTATIVAS
+    // Inicializa a variável de controle para o loop de tentativas. Começa em 0.
     let attempt = 0;
 
+    // 3. LOOP DE RETRY (TENTATIVAS)
+    // Entra num laço que continuará rodando enquanto o número de tentativas atuais (`attempt`)
+    // for menor que o limite configurado (`retries`).
     while (attempt < retries) {
       try {
+        // 4. CORRIDA CONTRA O TEMPO (TIMEOUT)
+        // O `Promise.race` aceita um array de Promises e retorna o resultado daquela que finalizar primeiro (seja sucesso ou erro).
+        // Aqui colocamos duas "corredoras":
+        //   A: A função real (`fn()`) que queremos executar.
+        //   B: Um temporizador (`setTimeout`) que rejeita a promessa com um erro 'Timeout' após `timeoutMs`.
         const result = await Promise.race([
-          fn(),
+          fn(), // A: Tenta executar a operação.
           new Promise((_, reject) =>
+            // B: Cria uma "bomba relógio" que falha se o tempo expirar.
             setTimeout(() => reject(new Error('Timeout')), timeoutMs),
           ),
         ]);
+
+        // 5. SUCESSO
+        // Se `fn()` terminar antes do timeout e sem erros, o código chega aqui.
+        // Paramos o cronômetro do Prometheus para registrar quanto tempo levou o sucesso.
         endTimer();
+
+        // Retorna o resultado obtido para quem chamou o método. O loop é encerrado aqui.
         return result as T;
+
       } catch (error: any) {
+        // 6. TRATAMENTO DE ERRO (FALHA OU TIMEOUT)
+        // Se `fn()` falhar ou se o `timeout` estourar primeiro, caímos aqui.
+        
+        // Incrementa o contador de tentativas realizadas.
         attempt++;
+
+        // Loga um aviso (Warn) no console informando que a tentativa X falhou e o motivo.
+        // Isso não é um erro crítico ainda, pois vamos tentar de novo (se houver tentativas sobrando).
         this.logger.warn(`Tentativa ${attempt} falhou para ${operation}: ${error.message}`);
 
+        // 7. VERIFICAÇÃO DE FALHA FINAL
+        // Verifica se já esgotamos todas as tentativas permitidas.
         if (attempt >= retries) {
+          // Se esgotou:
+          // Para o cronômetro do Prometheus (registra o tempo total gasto até a falha final).
           endTimer();
+
+          // Loga um erro crítico (Error) informando que a operação falhou definitivamente.
           this.logger.error(`Falha crítica em ${operation} após ${retries} tentativas.`);
+
+          // Lança a exceção para o Controller/Frontend.
+          // Se o erro original for conhecido, repassa ele. Se não, lança um erro genérico de banco.
           throw error instanceof Error ? error : new InternalServerErrorException('Database unavailable');
         }
 
+        // 8. BACKOFF EXPONENCIAL (ESPERA INTELIGENTE)
+        // Se ainda temos tentativas sobrando, não tentamos imediatamente para não sobrecarregar o banco.
+        // Esperamos um tempo calculado pela fórmula: 100ms * 2 elevado à potência da tentativa atual.
+        // Ex:
+        //   Tentativa 1: espera 200ms
+        //   Tentativa 2: espera 400ms
+        //   Tentativa 3: espera 800ms...
         await new Promise((res) => setTimeout(res, 100 * Math.pow(2, attempt)));
       }
     }
+
+    // 9. FAILSAFE (SEGURANÇA DE CÓDIGO)
+    // Teoricamente inalcançável, pois o `throw` dentro do `if (attempt >= retries)` deve interromper o fluxo.
+    // Mas o TypeScript exige um retorno ou throw no final da função caso o loop termine sem return.
     throw new InternalServerErrorException('Unexpected execution flow in resilience wrapper');
   }
 
@@ -186,7 +189,8 @@ export class CompaniesService {
     );
 
     await this.cacheManager.del('companies_list_all');
-    companyCreationCounter.inc();
+    // 🔥 Uso da métrica injetada
+    this.companyCounter.inc();
 
     return company;
   }

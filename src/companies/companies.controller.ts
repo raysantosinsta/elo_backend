@@ -13,7 +13,7 @@ import {
   Post,
   Query,
   UseGuards,
-  UseInterceptors 
+  UseInterceptors
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -29,10 +29,8 @@ import { RolesGuard } from 'src/auth/roles.guard';
 import { TenantInterceptor } from 'src/common/interceptors/tenant.interceptor'; // <--- Importe seu interceptor
 import {
   CompaniesService,
-  CreateCompanyDto,
-  PaginationDto,
-  UpdateCompanyDto,
 } from './companies.service';
+import { CreateCompanyDto, PaginationDto, UpdateCompanyDto } from './dto/create-company.dto';
 
 @ApiTags('Companies')
 @ApiBearerAuth()

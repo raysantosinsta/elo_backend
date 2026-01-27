@@ -28,6 +28,9 @@ import { ClsModule } from 'nestjs-cls';
 import { TenantInterceptor } from './common/interceptors/tenant.interceptor';
 import { ResetPasswordModule } from './reset-password/reset-password.module';
 import { MailModule } from './mail/mail.module';
+import { PrometheusModule } from '@willsoto/nestjs-prometheus';
+import { MetricsController } from './metrics/metrics.controller';
+import { MetricsModule } from './metrics/metrics.module';
 
 @Module({
   imports: [
@@ -45,6 +48,13 @@ import { MailModule } from './mail/mail.module';
       ttl: 60000,
       limit: 100, 
     }]), // Configuração padrão
+    PrometheusModule.register({
+      path: '/metrics',
+      controller: MetricsController,
+      defaultMetrics: {
+        enabled: true, // Já traz métricas de CPU/Memória por padrão
+      },
+    }),
     PrismaModule,
     AuthModule,
     SupabaseModule,
@@ -65,9 +75,10 @@ import { MailModule } from './mail/mail.module';
     SuppliersModule,
     ResetPasswordModule,
     MailModule,
+    MetricsModule,
   ],
   // ADICIONE O CONTROLLER AQUI
-  controllers: [AppController],
+  controllers: [AppController, MetricsController],
   providers: [
     {
       provide: APP_GUARD,
