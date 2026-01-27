@@ -53,7 +53,7 @@ import { CurrentUser } from 'src/auth/current-user.decorator';
 export class TasksController {
   private readonly logger = new Logger(TasksController.name);
 
-  constructor(private readonly tasksService: TasksService) {}
+  constructor(private readonly tasksService: TasksService) { }
 
   @Post()
   @ApiOperation({ summary: 'Cria uma nova tarefa' })
@@ -74,7 +74,7 @@ export class TasksController {
     // ✅ CHAME A VALIDAÇÃO MANUAL AQUI
     // Se falhar, ela joga um BadRequestException e para a execução
     if (files) {
-        validateFiles(files);
+      validateFiles(files);
     }
 
     createTaskDto.companyId = user.companyId;
@@ -94,6 +94,10 @@ export class TasksController {
     @UploadedFiles()
     files: { images?: UploadedFile[]; audios?: UploadedFile[]; videos?: UploadedFile[] },
   ) {
+    if (files && (files.images?.length || files.audios?.length || files.videos?.length)) {
+      // Certifique-se que sua função validateFiles aceita arquivos parciais/opcionais
+      validateFiles(files);
+    }
     return this.tasksService.update(id, updateTaskDto, files);
   }
 
@@ -107,7 +111,7 @@ export class TasksController {
     dto.columnId = body.columnId;
     dto.status = body.status;
     dto.columnOrder = body.columnOrder;
-    
+
     return this.tasksService.update(id, dto);
   }
 
