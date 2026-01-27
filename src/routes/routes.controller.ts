@@ -1,7 +1,7 @@
 /* eslint-disable prettier/prettier */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
-import { Body, Controller, Get, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import { Body, Controller, Get, Logger, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import { FinalizeTaskDto, OptimizeRouteDto } from './dto/optimize-route.dto';
 import { RouteService } from './routes.service';
 
@@ -9,6 +9,7 @@ import { RouteService } from './routes.service';
 // @UseGuards(JwtAuthGuard)
 @Controller('routes')
 export class RouteController {
+  private readonly logger = new Logger(RouteController.name); // Instancia o Logger
   constructor(private readonly routeService: RouteService) {}
 
   /**
@@ -24,6 +25,7 @@ export class RouteController {
     @Query('assignedToId') assignedToId?: string,
   ) {
     const companyId = req.user?.companyId;
+    this.logger.log(`[GET available-tasks] Company: ${companyId}, Filters: startDate=${startDate}, endDate=${endDate}, assignedTo=${assignedToId}`); // Log
 
     // Repassa os filtros para o Service
     return this.routeService.getTasksWithLocation(companyId, {
@@ -40,6 +42,7 @@ export class RouteController {
    */
   @Post('calculate-best-path')
   async calculateBestPath(@Body() dto: OptimizeRouteDto) {
+    this.logger.log(`[POST calculate-best-path] Tasks Count: ${dto.taskIds.length}, Driver Loc: [${dto.driverLatitude}, ${dto.driverLongitude}]`); // Log
     return this.routeService.optimizeRoute(dto);
   }
 
@@ -54,6 +57,7 @@ export class RouteController {
     @Req() req: any,
   ) {
     const userId = req.user?.id; // ID do usuário que está finalizando (motorista)
+    this.logger.log(`[PATCH finalize] Task: ${taskId}, User: ${userId}, Status: ${dto.status}`); // Log
 
     return this.routeService.concludeVisit(taskId, userId, dto);
   }
