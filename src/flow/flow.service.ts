@@ -94,7 +94,7 @@ export class FlowService {
     return flows;
   }
 
-  // ============ UPDATE ITEM (Com novos campos) ============
+  // ============ UPDATE ITEM (CORRIGIDO PARA REMOVER MÍDIAS) ============
 
   async updateFlowItem(
     companyId: string,
@@ -108,6 +108,33 @@ export class FlowService {
 
     if (!item) throw new NotFoundException('Item não encontrado');
 
+    // 1. Processar Exclusões de Mídia (NOVO)
+    // Verifica se vieram listas de IDs para remover e chama o deleteMedia existente
+    if (data.removeImageIds && Array.isArray(data.removeImageIds)) {
+      for (const id of data.removeImageIds) {
+        await this.deleteMedia(companyId, itemId, 'image', id).catch((e) =>
+          this.logger.error(`Falha ao remover imagem ${id} no update`, e),
+        );
+      }
+    }
+
+    if (data.removeVideoIds && Array.isArray(data.removeVideoIds)) {
+      for (const id of data.removeVideoIds) {
+        await this.deleteMedia(companyId, itemId, 'video', id).catch((e) =>
+          this.logger.error(`Falha ao remover vídeo ${id} no update`, e),
+        );
+      }
+    }
+
+    if (data.removeAudioIds && Array.isArray(data.removeAudioIds)) {
+      for (const id of data.removeAudioIds) {
+        await this.deleteMedia(companyId, itemId, 'audio', id).catch((e) =>
+          this.logger.error(`Falha ao remover áudio ${id} no update`, e),
+        );
+      }
+    }
+
+    // 2. Preparar dados para atualização do Prisma (MANTIDO IGUAL)
     const updateData: any = {
       title: data.title,
       orderNumber: data.orderNumber,
@@ -117,19 +144,16 @@ export class FlowService {
       description: data.description,
       assignedToId: data.assignedToId || null,
       updatedAt: new Date(),
-      supplierId: data.supplierId || null, // <--- ATUALIZAR AQUI
+      supplierId: data.supplierId || null,
     };
 
     // --- TRATAMENTO DE DATAS ---
-
-    // 1. Data de Vencimento (Prazo)
     if (data.dueDate) {
       updateData.dueDate = new Date(data.dueDate);
     } else if (data.dueDate === null || data.dueDate === '') {
       updateData.dueDate = null;
     }
 
-    // 2. Data Início Produção (NOVO)
     if (data.productionStartedAt) {
       updateData.productionStartedAt = new Date(data.productionStartedAt);
     } else if (
@@ -139,7 +163,6 @@ export class FlowService {
       updateData.productionStartedAt = null;
     }
 
-    // 3. Data Entrega Produção (NOVO)
     if (data.deliveryAt) {
       updateData.deliveryAt = new Date(data.deliveryAt);
     } else if (data.deliveryAt === null || data.deliveryAt === '') {
