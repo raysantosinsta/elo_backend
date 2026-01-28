@@ -1,10 +1,10 @@
 ### Variáveis Globais
 @baseUrl = http://localhost:3000
 @contentType = application/json
-@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkMmRjM2M5Zi04N2JkLTQ3M2QtYjVhYy0zNzNhZjAyY2ZlZjkiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiIzMjhmNWYwOC1kOGEzLTQ2MzctYmJjYy1hOWQ1NmI2Zjg0NTYiLCJpYXQiOjE3Njk0NTc3MjcsImV4cCI6MTc2OTQ1ODYyN30.pMblPVNqNoXrHgtub8Vk229lrS_IGtG6v4EHdP53h94
+@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkMmRjM2M5Zi04N2JkLTQ3M2QtYjVhYy0zNzNhZjAyY2ZlZjkiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiIzMjhmNWYwOC1kOGEzLTQ2MzctYmJjYy1hOWQ1NmI2Zjg0NTYiLCJpYXQiOjE3Njk2MjUyNjUsImV4cCI6MTc2OTYyNjE2NX0.i6XrmB-P8a7iBql0_QcNcHrwoJmgEl3ydXACSXojSwA
 
 # Cole o ID de um material aqui para testar GET One, PATCH e DELETE
-@materialId = 152a9c5e-cc1d-4577-a507-3c025db70936
+@materialId = 363cd8ab-10e8-4881-89b8-1fdfd52c72a9
 
 ### -------------------------------------------------------
 ### 1. CRIAR MATERIAL (Tecido)
@@ -14,10 +14,10 @@ Content-Type: {{contentType}}
 Authorization: Bearer {{token}}
 
 {
-  "name": "Malha Penteada 30.2",
-  "type": "Tecido2",
-  "description": "Algodão 100% de alta qualidade2",
-  "color": "Branco2",
+  "name": "Malha Penteada 30.21",
+  "type": "Tecido21",
+  "description": "Algodão 100% de alta qualidade21",
+  "color": "Branco21",
   "unitOfMeasure": "KG",
   "yieldPerKg": 5
 }
@@ -30,10 +30,10 @@ Content-Type: {{contentType}}
 Authorization: Bearer {{token}}
 
 {
-  "name": "Botão de Madeira 15mm",
-  "type": "Aviamento",
-  "description": "Botão rústico para camisaria",
-  "color": "Madeira",
+  "name": "Botão de Madeira 16mm",
+  "type": "Aviamento1",
+  "description": "Botão rústico para camisaria1",
+  "color": "Madeira1",
   "unitOfMeasure": "UN",
   "yieldPerKg": 0
 }
@@ -48,7 +48,7 @@ Authorization: Bearer {{token}}
 ### 4. LISTAR COM PAGINAÇÃO E BUSCA
 ### -------------------------------------------------------
 # Busca por "Malha", página 1, 5 itens por página
-GET {{baseUrl}}/materials?page=1&limit=5&search=Tecido2
+GET {{baseUrl}}/materials?page=1&limit=5&search=Tecido21
 Authorization: Bearer {{token}}
 
 ### -------------------------------------------------------
@@ -65,9 +65,9 @@ Content-Type: {{contentType}}
 Authorization: Bearer {{token}}
 
 {
-  "color": "Off-White",
-  "description": "Atualizado: Algodão egípcio",
-  "yieldPerKg": 5
+  "color": "Off-White1",
+  "description": "Atualizado: Algodão egípcio1",
+  "yieldPerKg": 50
 }
 
 ### -------------------------------------------------------

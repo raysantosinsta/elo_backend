@@ -13,7 +13,7 @@ Content-Type: {{contentType}}
 
 {
   "email": "santosray62@gmail.com",
-  "password": "Blessedhr10@"
+  "password": "Blessedhr10@@"
 }
 
 ### Variável: Token Master

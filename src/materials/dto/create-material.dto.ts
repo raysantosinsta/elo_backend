@@ -1,6 +1,7 @@
 /* eslint-disable prettier/prettier */
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsInt, IsNotEmpty, IsOptional, IsString, Min } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsInt, IsNotEmpty, IsOptional, IsString, Max, Min } from 'class-validator';
 
 export class CreateMaterialDto {
   @ApiProperty({ example: 'Tecido' })
@@ -32,4 +33,24 @@ export class CreateMaterialDto {
   @IsInt()
   @Min(0)
   yieldPerKg: number;
+}
+
+
+
+export class PaginationDto {
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  page?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  @Type(() => Number)
+  limit?: number;
+
+  @IsOptional()
+  search?: string; // Adicionei search aqui para facilitar
 }

@@ -1,45 +1,53 @@
 /* eslint-disable prettier/prettier */
 import {
-  Controller,
-  Get,
-  Post,
   Body,
-  Patch,
-  Param,
+  Controller,
   Delete,
-  Query,
-  DefaultValuePipe,
-  ParseIntPipe,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
   ParseUUIDPipe,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+  UseInterceptors
 } from '@nestjs/common';
-import { MaterialsService } from './materials.service';
-import { CreateMaterialDto } from './dto/create-material.dto';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
+import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
+import { RolesGuard } from 'src/auth/roles.guard';
+import { TenantInterceptor } from 'src/common/interceptors/tenant.interceptor'; // Importe seu interceptor
+import { CreateMaterialDto, PaginationDto } from './dto/create-material.dto';
 import { UpdateMaterialDto } from './dto/update-material.dto';
-import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { MaterialsService } from './materials.service';
 
-@ApiTags('Materiais') // Agrupa no Swagger
-@ApiBearerAuth()      // Indica que precisa de Token JWT
+@ApiTags('Materials')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard, RolesGuard) // 🔥 Segurança
+@UseInterceptors(TenantInterceptor)  // 🔥 Contexto CLS (Tenant)
 @Controller('materials')
 export class MaterialsController {
   constructor(private readonly materialsService: MaterialsService) {}
 
   @Post()
   @ApiOperation({ summary: 'Criar novo material' })
+  @ApiResponse({ status: 201, description: 'Material criado.' })
+  @HttpCode(HttpStatus.CREATED)
   create(@Body() createMaterialDto: CreateMaterialDto) {
     return this.materialsService.create(createMaterialDto);
   }
 
   @Get()
   @ApiOperation({ summary: 'Listar materiais (Paginado)' })
-  @ApiQuery({ name: 'page', required: false, type: Number })
-  @ApiQuery({ name: 'limit', required: false, type: Number })
-  @ApiQuery({ name: 'search', required: false, type: String })
-  findAll(
-    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
-    @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
-    @Query('search') search?: string,
-  ) {
-    return this.materialsService.findAll(page, limit, search);
+  async findAll(@Query() pagination: PaginationDto) {
+    // 🔥 Agora segue o padrão do CompaniesController usando DTO
+    return this.materialsService.findAll(pagination);
   }
 
   @Get(':id')
@@ -59,6 +67,7 @@ export class MaterialsController {
 
   @Delete(':id')
   @ApiOperation({ summary: 'Inativar material (Soft Delete)' })
+  @HttpCode(HttpStatus.NO_CONTENT)
   remove(@Param('id', ParseUUIDPipe) id: string) {
     return this.materialsService.remove(id);
   }

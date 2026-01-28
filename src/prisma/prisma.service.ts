@@ -1,96 +1,53 @@
 /* eslint-disable prettier/prettier */
-/* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 
-/* eslint-disable prettier/prettier */
-/* eslint-disable @typescript-eslint/no-explicit-any */
-/* eslint-disable prettier/prettier */
-/* eslint-disable @typescript-eslint/no-explicit-any */
-/* eslint-disable prettier/prettier */
-/* eslint-disable @typescript-eslint/no-explicit-any */
-/* eslint-disable prettier/prettier */
-/* eslint-disable @typescript-eslint/no-explicit-any */
-/* eslint-disable prettier/prettier */
-/* eslint-disable @typescript-eslint/no-explicit-any */
-/* eslint-disable prettier/prettier */
-/* eslint-disable @typescript-eslint/no-explicit-any */
-/* eslint-disable prettier/prettier */
-/* eslint-disable @typescript-eslint/no-explicit-any */
-/* eslint-disable prettier/prettier */
-/* eslint-disable prettier/prettier */
 import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { ClsService } from 'nestjs-cls';
 
-/**
- * @class PrismaService
- * @extends PrismaClient
- * @description Serviço responsável pela conexão com o banco de dados e gerenciamento de permissões Multi-tenant.
- * Utiliza o Prisma Client Extensions para injetar automaticamente filtros de segurança e auditoria.
- */
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   private _extendedClient: any;
-  private readonly logger = new Logger('PrismaExtension');
+  private readonly logger = new Logger('PrismaService'); // Mudei o nome para facilitar
 
   constructor(private readonly cls: ClsService) {
     super({
-      log: ['error'], // Configurado para logar apenas erros críticos por padrão
+      log: ['error'],
     });
   }
 
-  /**
-   * @property extended
-   * @description Retorna uma instância do Prisma configurada com middlewares de segurança (Extensions).
-   * * As extensões aplicam automaticamente:
-   * 1. **Auditoria**: Injeção de `userCreateId` e `userUpdateId`.
-   * 2. **Multi-tenancy**: Filtro automático por `companyId` para garantir isolamento de dados.
-   * 3. **Segurança Master**: Bypass de filtros para usuários com nível de acesso Master.
-   */
   get extended() {
     if (!this._extendedClient) {
       const cls = this.cls;
       const logger = this.logger;
+      const prismaContext = this;
 
       this._extendedClient = this.$extends({
         query: {
           $allModels: {
             async $allOperations({ model, operation, args, query }) {
               try {
-                // Recupera dados do contexto da requisição atual (via CLS)
                 const tenantId = cls.get('tenantId');
                 const userId = cls.get('userId');
                 const isMaster = cls.get('isMaster');
-
-                // Modelos que não possuem vínculo com empresa ou são dados globais
                 const publicModels = ['Plan', 'Subscription'];
                 const safeArgs = (args as any) || {};
 
-                /**
-                 * ============================================================
-                 * 1. LÓGICA DE AUDITORIA AUTOMÁTICA
-                 * ============================================================
-                 * Adiciona automaticamente quem criou ou editou o registro.
-                 */
+                // --- 1. AUDITORIA ---
                 if (userId) {
-                  // Operações de criação
                   if (operation === 'create') {
                     if (!safeArgs.data) safeArgs.data = {};
                     safeArgs.data.userCreateId = userId;
                     safeArgs.data.userUpdateId = userId;
                   }
-                  
-                  // Criação em lote
                   if (operation === 'createMany' && safeArgs.data) {
                     const list = Array.isArray(safeArgs.data) ? safeArgs.data : [safeArgs.data];
                     list.forEach((item: any) => item.userCreateId = userId);
                   }
-
-                  // Operações de atualização e Upsert
                   if (['update', 'updateMany', 'upsert'].includes(operation)) {
                     if (operation === 'upsert') {
                       if (!safeArgs.create) safeArgs.create = {};
@@ -105,35 +62,16 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
                   }
                 }
 
-                /**
-                 * ============================================================
-                 * 2. LÓGICA MULTI-TENANT (ISOLAMENTO DE EMPRESAS)
-                 * ============================================================
-                 * Garante que um usuário de uma empresa não acesse dados de outra.
-                 */
-                
-                // Regra de Ouro: Usuários Master ignoram qualquer trava de Tenant
-                if (isMaster) {
-                  return await query(safeArgs);
-                }
+                // --- 2. MULTI-TENANT ---
+                if (isMaster) return await query(safeArgs);
 
-                // Aplica isolamento se houver um tenantId e o modelo não for público
                 if (tenantId && !publicModels.includes(model)) {
-                  
-                  /**
-                   * CREATE: Bloqueia injeção de IDs falsos.
-                   * Força o companyId do objeto a ser o mesmo do usuário logado.
-                   */
                   if (operation === 'create' && model !== 'Company') {
                     if (!safeArgs.data) safeArgs.data = {};
                     safeArgs.data.companyId = tenantId;
                     if (safeArgs.data.company) delete safeArgs.data.company;
                   }
 
-                  /**
-                   * READ / UPDATE / DELETE: Injeção de cláusula WHERE.
-                   * Adiciona 'companyId: tenantId' em todas as buscas de forma invisível.
-                   */
                   const operationsWithWhere = [
                     'findMany', 'findFirst', 'findUnique', 'findUniqueOrThrow',
                     'count', 'update', 'updateMany', 'delete', 'deleteMany',
@@ -143,34 +81,28 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
                   if (operationsWithWhere.includes(operation)) {
                     if (!safeArgs.where) safeArgs.where = {};
 
-                    /**
-                     * Tratamento de exceção para o modelo Company:
-                     * Em modelos comuns (ex: Produtos), filtramos por 'companyId'.
-                     * No modelo Company, a empresa é o próprio registro, então filtramos por 'id'.
-                     */
-                    if (model === 'Company') {
-                      safeArgs.where.id = tenantId;
-                    } else {
-                      safeArgs.where.companyId = tenantId;
-                    }
+                    if (model === 'Company') safeArgs.where.id = tenantId;
+                    else safeArgs.where.companyId = tenantId;
 
-                    /**
-                     * Conversão de findUnique para findFirst:
-                     * O Prisma não permite filtros extras em findUnique (apenas IDs primários).
-                     * Convertendo para findFirst, conseguimos aplicar o filtro de segurança (tenantId).
-                     */
+                    // --- CONVERSÃO FIND UNIQUE -> FIND FIRST ---
                     if (operation === 'findUnique' || operation === 'findUniqueOrThrow') {
-                      if (operation === 'findUnique') return (this as any)[model].findFirst(safeArgs);
-                      return (this as any)[model].findFirstOrThrow(safeArgs);
+                      const camelCaseModel = model.charAt(0).toLowerCase() + model.slice(1);
+                      const delegate = (prismaContext as any)[camelCaseModel];
+
+                      if (!delegate) {
+                        logger.error(`FATAL: Delegate '${camelCaseModel}' não existe no PrismaClient.`);
+                        throw new Error(`Delegate '${camelCaseModel}' não encontrado. Execute 'npx prisma generate'.`);
+                      }
+
+                      if (operation === 'findUnique') return delegate.findFirst(safeArgs);
+                      return delegate.findFirstOrThrow(safeArgs);
                     }
                   }
                 }
 
-                // Executa a query final com todos os filtros injetados
                 return await query(safeArgs);
-
               } catch (error) {
-                logger.error(`💥 [Prisma Fatal Error] Falha em ${model}.${operation}`, error);
+                logger.error(`Erro em ${model}.${operation}:`, error);
                 throw error;
               }
             },
@@ -181,16 +113,22 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
     return this._extendedClient;
   }
 
-  /**
-   * Ciclo de vida: Conecta ao banco quando o módulo inicia.
-   */
   async onModuleInit() {
     await this.$connect();
+    
+    // --- DIAGNÓSTICO AO INICIAR ---
+    // Isso vai listar no console quais tabelas o Prisma carregou.
+    // Se "material" não aparecer aqui, o generate falhou.
+    const availableModels = Object.getOwnPropertyNames(this)
+      .filter(key => !key.startsWith('_') && !key.startsWith('$'));
+      
+    // Truque para ver propriedades no Prototype (onde os delegates realmente vivem)
+    const prototypeProps = Object.getOwnPropertyNames(Object.getPrototypeOf(this))
+       .filter(key => !key.startsWith('_') && !key.startsWith('$') && key !== 'constructor');
+
+    this.logger.log(`✅ Prisma conectado. Models disponíveis: [${[...availableModels, ...prototypeProps].join(', ')}]`);
   }
 
-  /**
-   * Ciclo de vida: Desconecta do banco quando o módulo é destruído.
-   */
   async onModuleDestroy() {
     await this.$disconnect();
   }

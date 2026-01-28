@@ -1,52 +1,124 @@
 /* eslint-disable prettier/prettier */
 /* eslint-disable @typescript-eslint/require-await */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
-import { Injectable, NotFoundException } from '@nestjs/common';
+
+import { 
+  Injectable, 
+  NotFoundException, 
+  ForbiddenException, 
+  Logger 
+} from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { CreateMaterialDto } from './dto/create-material.dto';
+import { CreateMaterialDto, PaginationDto } from './dto/create-material.dto';
 import { UpdateMaterialDto } from './dto/update-material.dto';
 import { ClsService } from 'nestjs-cls';
 import { Prisma, SimpleStatus } from '@prisma/client';
 
 @Injectable()
 export class MaterialsService {
+  private readonly logger = new Logger(MaterialsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly cls: ClsService,
   ) {}
 
-  // Getter para usar a extensão do Prisma (onde a lógica de Tenant costuma ficar)
-  private get db() {
-    return this.prisma.extended;
+  // ===========================================================================
+  // 🔒 HELPER DE SEGURANÇA (Igual ao UsersService)
+  // ===========================================================================
+  /**
+   * Verifica se o usuário tem permissão para tocar neste recurso.
+   * Master pode tudo. Admin só pode tocar no que é da sua empresa.
+   */
+  private validateOwnership(resource: { companyId: string | null }) {
+    const isMaster = this.cls.get<boolean>('isMaster');
+    const tenantId = this.cls.get<string>('tenantId');
+
+    // Se for Master, libera
+    if (isMaster) return;
+
+    // Se não for da mesma empresa, bloqueia
+    if (resource.companyId !== tenantId) {
+      this.logger.warn(`⛔ Tentativa de acesso negado. Tenant: ${tenantId} tentou acessar Material da Company: ${resource.companyId}`);
+      throw new ForbiddenException('Acesso negado: Você não tem permissão para alterar este registro.');
+    }
   }
 
-  // --- CREATE ---
-  async create(createMaterialDto: CreateMaterialDto) {
-    // 1. Pega os IDs do contexto atual (Sessão do usuário)
-    const userId = this.cls.get('userId');
-    const companyId = this.cls.get('tenantId');
+  // ===========================================================================
+  // 📝 ESCRITA
+  // ===========================================================================
 
-    // 2. Criação com injeção EXPLICITA para evitar erro de "Argument missing"
-    return this.db.material.create({
+  async create(createMaterialDto: CreateMaterialDto) {
+    const userId = this.cls.get('userId');
+    const tenantId = this.cls.get('tenantId');
+
+    // O PrismaService (extended) já injeta companyId automaticamente se não for Master.
+    // Mas para garantir a tipagem correta, preparamos o data object.
+    
+    return this.prisma.extended.material.create({
       data: {
         ...createMaterialDto,
-        companyId: companyId,       // Garante vínculo com a empresa
-        userCreateId: userId,       // Garante vínculo de auditoria (quem criou)
-        userUpdateId: userId,       // Inicializa update igual create
-        status: SimpleStatus.ACTIVE // Padrão
+        // Fallback de segurança: Se o extended falhar, garantimos aqui
+        companyId: tenantId, 
+        userCreateId: userId,
+        userUpdateId: userId,
+        status: SimpleStatus.ACTIVE,
       },
     });
   }
 
-  // --- FIND ALL (Com paginação e busca) ---
-  async findAll(page = 1, limit = 10, search?: string) {
+  async update(id: string, updateMaterialDto: UpdateMaterialDto) {
+    // 1. Busca o material existente para validar posse
+    const materialToUpdate = await this.findOne(id);
+    
+    // 2. Valida segurança
+    this.validateOwnership(materialToUpdate);
+
+    const userId = this.cls.get('userId');
+
+    return this.prisma.extended.material.update({
+      where: { id },
+      data: {
+        ...updateMaterialDto,
+        userUpdateId: userId,
+      },
+    });
+  }
+
+  async remove(id: string) {
+    // 1. Busca para validar
+    const materialToDelete = await this.findOne(id);
+    
+    // 2. Valida segurança
+    this.validateOwnership(materialToDelete);
+
+    const userId = this.cls.get('userId');
+
+    // Soft Delete
+    return this.prisma.extended.material.update({
+      where: { id },
+      data: {
+        status: SimpleStatus.INACTIVE,
+        userUpdateId: userId,
+      },
+    });
+  }
+
+  // ===========================================================================
+  // 🔍 LEITURA
+  // ===========================================================================
+
+  async findAll(pagination: PaginationDto) {
+    const { page = 1, limit = 10, search } = pagination;
     const skip = (page - 1) * limit;
 
     const where: Prisma.MaterialWhereInput = {
       status: SimpleStatus.ACTIVE,
+      // O PrismaService (extended) injeta o filtro de companyId automaticamente aqui
       ...(search && {
         OR: [
           { name: { contains: search, mode: 'insensitive' } },
@@ -57,23 +129,16 @@ export class MaterialsService {
     };
 
     const [total, data] = await Promise.all([
-      this.db.material.count({ where }),
-      this.db.material.findMany({
+      this.prisma.extended.material.count({ where }),
+      this.prisma.extended.material.findMany({
         where,
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
-        // --- AQUI ESTÁ A MUDANÇA ---
         include: {
-          supplierMaterials: {
-            include: {
-              supplier: {
-                select: { name: true } // Traz só o nome para ficar leve
-              }
-            }
-          }
+          // Exemplo de include seguro (apenas campos necessários)
+          // supplierMaterials: { include: { supplier: { select: { name: true } } } }
         }
-        // ---------------------------
       }),
     ]);
 
@@ -87,49 +152,20 @@ export class MaterialsService {
     };
   }
 
-  // --- FIND ONE ---
   async findOne(id: string) {
-    const material = await this.db.material.findUnique({
+    // Usamos findFirst ao invés de findUnique porque a extensão converte 
+    // findUnique -> findFirst para aplicar o filtro de companyId
+    const material = await this.prisma.extended.material.findFirst({
       where: { id },
       include: {
-        userCreate: { select: { id: true, name: true } }, // Quem criou
+        userCreate: { select: { id: true, name: true } },
       },
     });
 
     if (!material) {
-      throw new NotFoundException('Material não encontrado');
+      throw new NotFoundException('Material não encontrado.');
     }
 
     return material;
-  }
-
-  // --- UPDATE ---
-  async update(id: string, updateMaterialDto: UpdateMaterialDto) {
-    // Verifica existência (Opcional se confiar no tratamento de erro do Prisma)
-    await this.findOne(id);
-
-    const userId = this.cls.get('userId');
-
-    return this.db.material.update({
-      where: { id },
-      data: {
-        ...updateMaterialDto,
-        userUpdateId: userId, // Auditoria de quem atualizou
-      },
-    });
-  }
-
-  // --- REMOVE (Soft Delete) ---
-  async remove(id: string) {
-    await this.findOne(id);
-    const userId = this.cls.get('userId');
-
-    return this.db.material.update({
-      where: { id },
-      data: {
-        status: SimpleStatus.INACTIVE, // Deleção lógica
-        userUpdateId: userId,
-      },
-    });
   }
 }
