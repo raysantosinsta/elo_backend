@@ -381,7 +381,7 @@ export class TasksService {
         OR: [
           { title: { contains: search, mode: 'insensitive' } },
           { description: { contains: search, mode: 'insensitive' } },
-          // Adiciona a busca pelo NOME do usuário atribuído
+          { userAssigned: { name: { contains: search, mode: 'insensitive' } } },
           {
             userAssigned: {
               name: { contains: search, mode: 'insensitive' }
@@ -403,6 +403,7 @@ export class TasksService {
       // Filtro de Localização
       ...(hasLocation === true && { taskAddress: { is: { latitude: { not: null }, longitude: { not: null } } } }),
       ...(hasLocation === false && { OR: [{ taskAddress: null }, { taskAddress: { is: { latitude: null } } }] }),
+      
       ...(isOverdue === true && {
         dueDate: {
           lt: new Date(), // Menor que agora
