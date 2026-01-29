@@ -376,7 +376,6 @@ export class TasksService {
     const where: Prisma.TaskWhereInput = {
       companyId: tenantId,
       ...(columnId && { columnId }),
-
       // --- CORREÇÃO AQUI: BUSCA POR NOME DA PESSOA ---
       ...(search && {
         OR: [

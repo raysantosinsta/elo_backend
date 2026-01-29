@@ -67,14 +67,23 @@ export class RouteService {
     }
 
     // 4. Executa a busca no banco
-    return this.prisma.task.findMany({
+    const tasks = await this.prisma.task.findMany({
       where,
       include: {
-        taskAddress: true, // Traz os detalhes do endereço
-        userAssigned: { select: { name: true } }, // Traz apenas o nome do responsável
-        column: { select: { id: true } }, // Traz o ID da coluna Kanban - manter esse campo em caso de conclusao eu mudar a tarefa para outra coluna
+        taskAddress: true,
+        userAssigned: { select: { name: true } },
+        column: { select: { id: true } },
       },
     });
+
+    this.logger.log(`[getTasksWithLocation] Found ${tasks.length} tasks with location.`);
+    // Log detalhado (cuidado em produção com muitos dados)
+    if (tasks.length > 0) {
+        this.logger.debug(`[getTasksWithLocation] Sample Task Address: ${JSON.stringify(tasks[0].taskAddress)}`);
+    }
+
+    return tasks;
+
   }
 
   /**
@@ -100,9 +109,17 @@ export class RouteService {
       },
     });
 
+    this.logger.log(`[optimizeRoute] Retrieved ${tasks.length} tasks from DB for optimization.`);
+
     if (tasks.length === 0) {
+      this.logger.warn(`[optimizeRoute] No valid tasks found for IDs: ${dto.taskIds.join(', ')}`);
       throw new NotFoundException('Nenhuma tarefa válida encontrada.');
     }
+
+    // Log para verificar coordenadas
+    tasks.forEach(t => {
+        this.logger.debug(`[optimizeRoute] Task ${t.id} coords: [${t.taskAddress?.latitude}, ${t.taskAddress?.longitude}]`);
+    });
 
     let optimizedOrder: typeof tasks = [];
 
@@ -192,6 +209,8 @@ export class RouteService {
       { lat: Number(dto.driverLatitude), lng: Number(dto.driverLongitude) },
       optimizedOrder,
     );
+
+    this.logger.log(`[optimizeRoute] Returning optimized route with ${optimizedOrder.length} stops.`);
 
     return {
       route: optimizedOrder,
