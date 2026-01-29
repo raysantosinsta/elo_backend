@@ -148,11 +148,14 @@ export class TasksController {
     @Query('endDate') endDate?: string,
     @Query('assignedToId') assignedToId?: string,
     @Query('hasLocation') hasLocation?: string,
-    @Query('dateType') dateType?: string, // <--- ADICIONADO AQUI
+    @Query('dateType') dateType?: string, 
+    @Query('isOverdue') isOverdue?: string,
   ) {
     let hasLocationBool: boolean | undefined = undefined;
     if (hasLocation === 'true') hasLocationBool = true;
     if (hasLocation === 'false') hasLocationBool = false;
+    let isOverdueBool: boolean | undefined = undefined;
+    if (isOverdue === 'true') isOverdueBool = true;
 
     return this.tasksService.findAllPaginated({
       page,
@@ -163,7 +166,8 @@ export class TasksController {
       endDate,
       assignedToId,
       hasLocation: hasLocationBool,
-      dateType, // <--- PASSADO PARA O SERVICE
+      dateType, 
+      isOverdue: isOverdueBool, // <--- PASSADO
     });
   }
 

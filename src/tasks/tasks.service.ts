@@ -347,46 +347,46 @@ export class TasksService {
   // --- READS ---
 
 
- async findAllPaginated(params: any) {
+  async findAllPaginated(params: any) {
     const tenantId = this.cls.get<string>('tenantId');
-    
+
     // Extraímos os parâmetros
-    const { page = 1, limit = 10, search, columnId, startDate, endDate, assignedToId, hasLocation, dateType } = params;
+    const { page = 1, limit = 10, search, columnId, startDate, endDate, assignedToId, hasLocation, dateType, isOverdue } = params; // <--- isOverdue AQUI
     const skip = (page - 1) * limit;
 
     // 1. MAPEAMENTO DE DATA
-    let dbField = 'createdAt'; 
+    let dbField = 'createdAt';
     if (dateType === 'scheduled') dbField = 'scheduledDate';
     if (dateType === 'due') dbField = 'dueDate';
     if (dateType === 'created') dbField = 'createdAt';
 
     // 2. FILTRO DE DATA (Problema da Meia-Noite resolvido)
-    const dateFilter: Prisma.DateTimeNullableFilter = {}; 
+    const dateFilter: Prisma.DateTimeNullableFilter = {};
 
     if (startDate) {
       dateFilter.gte = new Date(startDate);
     }
     if (endDate) {
       const endD = new Date(endDate);
-      endD.setUTCHours(23, 59, 59, 999); 
+      endD.setUTCHours(23, 59, 59, 999);
       dateFilter.lte = endD;
     }
 
     // 3. QUERY PRINCIPAL
     const where: Prisma.TaskWhereInput = {
-      companyId: tenantId, 
+      companyId: tenantId,
       ...(columnId && { columnId }),
-      
+
       // --- CORREÇÃO AQUI: BUSCA POR NOME DA PESSOA ---
       ...(search && {
         OR: [
           { title: { contains: search, mode: 'insensitive' } },
           { description: { contains: search, mode: 'insensitive' } },
           // Adiciona a busca pelo NOME do usuário atribuído
-          { 
-            userAssigned: { 
-              name: { contains: search, mode: 'insensitive' } 
-            } 
+          {
+            userAssigned: {
+              name: { contains: search, mode: 'insensitive' }
+            }
           }
         ],
       }),
@@ -394,7 +394,7 @@ export class TasksService {
 
       // 4. APLICAÇÃO DO FILTRO DE DATA DINÂMICO
       ...((startDate || endDate) && {
-        [dbField]: dateFilter, 
+        [dbField]: dateFilter,
       }),
 
       // Filtro específico (Dropdown de usuário)
@@ -404,6 +404,14 @@ export class TasksService {
       // Filtro de Localização
       ...(hasLocation === true && { taskAddress: { is: { latitude: { not: null }, longitude: { not: null } } } }),
       ...(hasLocation === false && { OR: [{ taskAddress: null }, { taskAddress: { is: { latitude: null } } }] }),
+      ...(isOverdue === true && {
+        dueDate: {
+          lt: new Date(), // Menor que agora
+        },
+        status: {
+          not: TaskStatus.COMPLETED, // E não concluída
+        },
+      }),
     };
 
     const [tasks, total] = await Promise.all([
