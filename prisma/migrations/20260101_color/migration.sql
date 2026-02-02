@@ -1,0 +1,1 @@
+ALTER TABLE "fluxos_produto" ADD COLUMN     "cor" VARCHAR(7) DEFAULT '#D35400';

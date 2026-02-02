@@ -17,7 +17,13 @@ export class CreateFlowDto {
   @IsNotEmpty()
   name: string;
 
+  @ApiProperty({ example: '#D35400', required: false }) // 🔥 Adicionado para o Swagger
+  @IsString()
   @IsOptional()
+  color?: string; // 🔥 Campo de cor adicionado
+
+  @IsOptional()
+  @IsUUID()
   companyId?: string;
 }
 

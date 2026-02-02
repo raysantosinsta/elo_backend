@@ -55,44 +55,47 @@ export class FlowService {
   // ============ FLUXOS ============
 
   async createFlow(companyId: string, userId: string, dto: CreateFlowDto) {
-    const end = dbLatency.labels('createFlow').startTimer();
-    try {
-      const flow = await this.prisma.productFlow.create({
-        data: {
-          name: dto.name,
-          companyId,
-        },
-        include: { stages: true },
-      });
-
-      await this.invalidateFlowCache(companyId);
-      flowOpsCounter.labels('createFlow', 'success').inc();
-      end();
-      return flow;
-    } catch (error) {
-      flowOpsCounter.labels('createFlow', 'error').inc();
-      end();
-      throw error;
-    }
-  }
-
-  async getFlows(companyId: string) {
-    const cacheKey = `flows_list_${companyId}`;
-    const cached = await this.cacheManager.get(cacheKey);
-    if (cached) return cached;
-
-    const flows = await this.prisma.productFlow.findMany({
-      where: { companyId },
-      include: {
-        stages: { orderBy: { order: 'asc' } },
-        _count: { select: { items: true, stages: true } },
+  const end = dbLatency.labels('createFlow').startTimer();
+  try {
+    const flow = await this.prisma.productFlow.create({
+      data: {
+        name: dto.name,
+        companyId,
+        // 🔥 Garante que se vier uma cor no DTO, ela seja salva
+        color: (dto as any).color || '#D35400', 
       },
-      orderBy: { createdAt: 'desc' },
+      include: { stages: true },
     });
 
-    await this.cacheManager.set(cacheKey, flows, this.CACHE_TTL);
-    return flows;
+    await this.invalidateFlowCache(companyId);
+    flowOpsCounter.labels('createFlow', 'success').inc();
+    end();
+    return flow;
+  } catch (error) {
+    flowOpsCounter.labels('createFlow', 'error').inc();
+    end();
+    throw error;
   }
+}
+
+  async getFlows(companyId: string) {
+  const cacheKey = `flows_list_${companyId}`;
+  const cached = await this.cacheManager.get(cacheKey);
+  if (cached) return cached;
+
+  const flows = await this.prisma.productFlow.findMany({
+    where: { companyId },
+    include: {
+      stages: { orderBy: { order: 'asc' } },
+      _count: { select: { items: true, stages: true } },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  // O campo 'color' já vem aqui automaticamente por ser campo simples da tabela principal
+  await this.cacheManager.set(cacheKey, flows, this.CACHE_TTL);
+  return flows;
+}
 
   // ============ UPDATE ITEM (CORRIGIDO PARA REMOVER MÍDIAS) ============
 
@@ -223,39 +226,40 @@ export class FlowService {
   }
 
   async getKanbanBoard(flowId: string, companyId: string) {
-    const cacheKey = `flow_board_${flowId}`;
-    const cached = await this.cacheManager.get(cacheKey);
-    if (cached) return cached;
+  const cacheKey = `flow_board_${flowId}`;
+  const cached = await this.cacheManager.get(cacheKey);
+  if (cached) return cached;
 
-    const board = await this.prisma.productFlow.findFirst({
-      where: { id: flowId, companyId },
-      include: {
-        stages: {
-          orderBy: { order: 'asc' },
-          include: {
-            items: {
-              orderBy: { orderInStage: 'asc' },
-              include: {
-                images: { select: { url: true, id: true }, take: 1 },
-                videos: { select: { url: true, id: true, filename: true } },
-                audios: { select: { url: true, id: true, filename: true } },
-                assignedTo: { select: { name: true, email: true } },
-                _count: {
-                  select: { images: true, audios: true, videos: true },
-                },
-                supplier: { select: { id: true, name: true } }, // <--- ADICIONAR
+  const board = await this.prisma.productFlow.findFirst({
+    where: { id: flowId, companyId },
+    // O Prisma traz o campo 'color' automaticamente aqui por ele estar na tabela 'productFlow'
+    include: {
+      stages: {
+        orderBy: { order: 'asc' },
+        include: {
+          items: {
+            orderBy: { orderInStage: 'asc' },
+            include: {
+              images: { select: { url: true, id: true }, take: 1 },
+              videos: { select: { url: true, id: true, filename: true } },
+              audios: { select: { url: true, id: true, filename: true } },
+              assignedTo: { select: { name: true, email: true } },
+              supplier: { select: { id: true, name: true } },
+              _count: {
+                select: { images: true, audios: true, videos: true },
               },
             },
           },
         },
       },
-    });
+    },
+  });
 
-    if (!board) throw new NotFoundException('Fluxo não encontrado');
+  if (!board) throw new NotFoundException('Fluxo não encontrado');
 
-    await this.cacheManager.set(cacheKey, board, 10000);
-    return board;
-  }
+  await this.cacheManager.set(cacheKey, board, 10000);
+  return board;
+}
 
   async deleteFlow(flowId: string, companyId: string) {
     const flow = await this.prisma.productFlow.findFirst({
