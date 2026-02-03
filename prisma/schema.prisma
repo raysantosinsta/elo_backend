@@ -3,9 +3,9 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL") 
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 // Enums
@@ -135,6 +135,7 @@ model Company {
   flowImages    FlowImage[]    @relation("CompanyFlowImages")
   flowAudios    FlowAudio[]    @relation("CompanyFlowAudios")
   flowVideos    FlowVideo[]    @relation("CompanyFlowVideos")
+  flowTemplates FlowTemplate[] @relation("CompanyFlowTemplates")
   suppliers     Supplier[]
   budgetGroups  BudgetGroup[]
 
@@ -244,7 +245,6 @@ model PasswordResetToken {
 
   createdAt DateTime @default(now())
 }
-
 
 model KanbanColumn {
   id     String             @id @default(uuid()) @map("id") @db.Uuid
@@ -535,9 +535,9 @@ model Supplier {
   zipCode    String? @db.VarChar(10)
   complement String? @db.VarChar(200)
   // Novos campos recomendados
-  numero String? @map("numero") @db.VarChar(20)
-  bairro String? @map("bairro") @db.VarChar(100)
-  
+  numero     String? @map("numero") @db.VarChar(20)
+  bairro     String? @map("bairro") @db.VarChar(100)
+
   latitude  Float? @map("latitude")
   longitude Float? @map("longitude")
 
@@ -860,9 +860,9 @@ model ChatMessage {
 
 // 1. FLUXO DE PRODUÇÃO (Esteira)
 model ProductFlow {
-  id   String @id @default(uuid()) @map("id") @db.Uuid
-  name String @map("nome") @db.VarChar(100)
-  color     String?  @default("#D35400") @map("cor") @db.VarChar(7)
+  id    String  @id @default(uuid()) @map("id") @db.Uuid
+  name  String  @map("nome") @db.VarChar(100)
+  color String? @default("#D35400") @map("cor") @db.VarChar(7)
 
   // Relacionamento com Empresa
   companyId String  @map("empresa_id") @db.Uuid
@@ -956,6 +956,21 @@ model FlowItem {
   @@index([priority])
   @@index([dueDate])
   @@map("itens_fluxo")
+}
+
+model FlowTemplate {
+  id        String @id @default(uuid()) @map("id") @db.Uuid
+  name      String @map("nome") @db.VarChar(150)
+  structure Json   @map("estrutura") // [{ "name": "Corte", "color": "#2C3E50" }, ...]
+
+  companyId String  @map("empresa_id") @db.Uuid
+  company   Company @relation("CompanyFlowTemplates", fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("criado_em")
+  updatedAt DateTime @updatedAt @map("atualizado_em")
+
+  @@index([companyId])
+  @@map("templates_fluxo")
 }
 
 // 4. IMAGENS DO ITEM (igual ao TaskImage)

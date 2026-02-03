@@ -1,4 +1,5 @@
 /* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
@@ -21,21 +22,32 @@ import {
   Query,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { ApiBearerAuth, ApiOperation, ApiTags, ApiConsumes } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiTags,
+  ApiConsumes,
+} from '@nestjs/swagger';
 
 // --- Guards e Segurança ---
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { PermissionsGuard } from '../auth/permissions.guard';
-import { RequirePermissions, AppPermission } from '../auth/permissions.decorator';
+import {
+  RequirePermissions,
+  AppPermission,
+} from '../auth/permissions.decorator';
 
 // --- Services e DTOs ---
 import { FlowService } from './flow.service';
-import { CreateFlowDto, CreateFlowItemDto, FlowFilterDto } from './dto/create-flow.dto';
+import {
+  CreateFlowDto,
+  CreateFlowItemDto,
+  FlowFilterDto,
+} from './dto/create-flow.dto';
 
 @ApiTags('Product Flow (Kanban)')
 @ApiBearerAuth()
-// 🔥 Ordem de Segurança: 1. Token Válido -> 2. Role Básica -> 3. Permissão Fina (Cargo)
 @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @Controller('flow')
 export class FlowController {
@@ -44,20 +56,61 @@ export class FlowController {
   constructor(private readonly flowService: FlowService) {}
 
   // ===========================================================================
-  // 1️⃣ GERENCIAMENTO DE FLUXO (Restrito: "Gestor de Processos")
+  // 🟢 GERENCIAMENTO DE TEMPLATES (Rotas Estáticas Primeiro)
+  // ===========================================================================
+
+  @Get('templates')
+  @ApiOperation({ summary: 'Lista todos os templates de etapas da empresa' })
+  async getTemplates(@Req() req: any) {
+    this.logger.log(`Chamada GET /flow/templates - Empresa: ${req.user.companyId}`);
+    return this.flowService.getTemplates(req.user.companyId);
+  }
+
+  @Post(':flowId/save-template')
+  @RequirePermissions(AppPermission.MANAGE_FLOW)
+  @ApiOperation({ summary: 'Salva as etapas atuais de um fluxo como template' })
+  async saveTemplate(
+    @Req() req: any,
+    @Param('flowId', ParseUUIDPipe) flowId: string,
+    @Body('name') name: string,
+  ) {
+    this.logger.log(`Chamada POST /flow/${flowId}/save-template - User: ${req.user.id}`);
+    
+    if (!name) {
+      this.logger.warn(`Tentativa de salvar template sem nome - FlowID: ${flowId}`);
+      throw new BadRequestException('O nome do template é obrigatório');
+    }
+
+    return this.flowService.saveTemplate(req.user.companyId, flowId, name);
+  }
+
+  @Post(':flowId/apply-template/:templateId')
+  @RequirePermissions(AppPermission.MANAGE_STAGE)
+  @ApiOperation({ summary: 'Aplica um template de etapas a um fluxo' })
+  async applyTemplate(
+    @Req() req: any,
+    @Param('flowId', ParseUUIDPipe) flowId: string,
+    @Param('templateId', ParseUUIDPipe) templateId: string,
+  ) {
+    this.logger.log(`Chamada POST /flow/${flowId}/apply-template/${templateId}`);
+    return this.flowService.applyTemplate(req.user.companyId, flowId, templateId);
+  }
+
+  // ===========================================================================
+  // 1️⃣ GERENCIAMENTO DE FLUXO
   // ===========================================================================
 
   @Post()
-  @RequirePermissions(AppPermission.MANAGE_FLOW) // <--- Bloqueio por Permissão
-  @ApiOperation({ summary: 'Cria um novo fluxo de produção (Restrito)' })
+  @RequirePermissions(AppPermission.MANAGE_FLOW)
+  @ApiOperation({ summary: 'Cria um novo fluxo de produção' })
   async createFlow(@Req() req: any, @Body() body: CreateFlowDto) {
     this.logger.log(`Criando fluxo na empresa ${req.user.companyId} pelo usuário ${req.user.id}`);
     return this.flowService.createFlow(req.user.companyId, req.user.id, body);
   }
 
   @Delete(':flowId')
-  @RequirePermissions(AppPermission.MANAGE_FLOW) // <--- Bloqueio por Permissão
-  @ApiOperation({ summary: 'Deleta um fluxo inteiro (Restrito)' })
+  @RequirePermissions(AppPermission.MANAGE_FLOW)
+  @ApiOperation({ summary: 'Deleta um fluxo inteiro' })
   async deleteFlow(
     @Req() req: any,
     @Param('flowId', ParseUUIDPipe) flowId: string,
@@ -66,28 +119,22 @@ export class FlowController {
   }
 
   // ===========================================================================
-  // 2️⃣ GERENCIAMENTO DE ETAPAS / STAGES (Restrito: "Gestor de Processos")
+  // 2️⃣ GERENCIAMENTO DE ETAPAS / STAGES
   // ===========================================================================
 
   @Post(':flowId/stages')
-  @RequirePermissions(AppPermission.MANAGE_STAGE) // <--- Bloqueio por Permissão
-  @ApiOperation({ summary: 'Adiciona uma nova etapa ao fluxo (Restrito)' })
+  @RequirePermissions(AppPermission.MANAGE_STAGE)
+  @ApiOperation({ summary: 'Adiciona uma nova etapa ao fluxo' })
   async createStage(
     @Req() req: any,
     @Param('flowId', ParseUUIDPipe) flowId: string,
     @Body() body: { name: string; color?: string },
   ) {
-    return this.flowService.createStage(
-      req.user.companyId,
-      flowId,
-      body.name,
-      body.color,
-    );
+    return this.flowService.createStage(req.user.companyId, flowId, body.name, body.color);
   }
 
   @Put('stages/:stageId')
-  @RequirePermissions(AppPermission.MANAGE_STAGE) // <--- Bloqueio por Permissão
-  @ApiOperation({ summary: 'Atualiza uma etapa existente (Restrito)' })
+  @RequirePermissions(AppPermission.MANAGE_STAGE)
   async updateStage(
     @Req() req: any,
     @Param('stageId', ParseUUIDPipe) stageId: string,
@@ -97,8 +144,7 @@ export class FlowController {
   }
 
   @Delete('stages/:stageId')
-  @RequirePermissions(AppPermission.MANAGE_STAGE) // <--- Bloqueio por Permissão
-  @ApiOperation({ summary: 'Remove uma etapa e seus itens (Restrito)' })
+  @RequirePermissions(AppPermission.MANAGE_STAGE)
   async deleteStage(
     @Req() req: any,
     @Param('stageId', ParseUUIDPipe) stageId: string,
@@ -107,18 +153,15 @@ export class FlowController {
   }
 
   // ===========================================================================
-  // 3️⃣ GERENCIAMENTO DE ITENS E LEITURA (Aberto: Qualquer Usuário da Empresa)
-  // Nota: Não usamos @RequirePermissions. A segurança de Tenant é feita pelo Prisma.
+  // 3️⃣ GERENCIAMENTO DE ITENS E LEITURA
   // ===========================================================================
 
   @Get()
-  @ApiOperation({ summary: 'Lista todos os fluxos da empresa' })
   async getFlows(@Req() req: any) {
     return this.flowService.getFlows(req.user.companyId);
   }
 
   @Get(':flowId/board')
-  @ApiOperation({ summary: 'Carrega o quadro Kanban completo' })
   async getKanbanBoard(
     @Req() req: any,
     @Param('flowId', ParseUUIDPipe) flowId: string,
@@ -127,30 +170,22 @@ export class FlowController {
   }
 
   @Get('filter/items')
-  @ApiOperation({ summary: 'Filtra itens por data e terceirização' })
   async filterItems(@Req() req: any, @Query() query: FlowFilterDto) {
     return this.flowService.getFilteredItems(req.user.companyId, query);
   }
 
   @Post(':flowId/items')
-  @ApiOperation({ summary: 'Cria um item no fluxo' })
   async createItem(
     @Req() req: any,
     @Param('flowId', ParseUUIDPipe) flowId: string,
     @Body() body: CreateFlowItemDto,
   ) {
-    return this.flowService.createFlowItem(
-      req.user.companyId,
-      flowId,
-      req.user.id,
-      body,
-    );
+    return this.flowService.createFlowItem(req.user.companyId, flowId, req.user.id, body);
   }
 
   @Post(':flowId/items/upload')
   @ApiConsumes('multipart/form-data')
   @UseInterceptors(FileInterceptor('file'))
-  @ApiOperation({ summary: 'Cria item com upload inicial (Form Data)' })
   async createItemWithUpload(
     @Req() req: any,
     @Param('flowId', ParseUUIDPipe) flowId: string,
@@ -163,35 +198,19 @@ export class FlowController {
     } catch (e) {
       dto = body;
     }
-
-    const item = await this.flowService.createFlowItem(
-      req.user.companyId,
-      flowId,
-      req.user.id,
-      dto,
-    );
-
-    // Lógica de upload separada se necessário, ou implementada no createFlowItem
-    return item;
+    return this.flowService.createFlowItem(req.user.companyId, flowId, req.user.id, dto);
   }
 
   @Put('items/:itemId')
-  @ApiOperation({ summary: 'Atualiza dados de um item' })
   async updateItem(
     @Req() req: any,
     @Param('itemId', ParseUUIDPipe) itemId: string,
     @Body() body: any,
   ) {
-    return this.flowService.updateFlowItem(
-      req.user.companyId,
-      itemId,
-      req.user.id,
-      body,
-    );
+    return this.flowService.updateFlowItem(req.user.companyId, itemId, req.user.id, body);
   }
 
   @Put('items/:itemId/move')
-  @ApiOperation({ summary: 'Move um item entre etapas' })
   async moveItem(
     @Req() req: any,
     @Param('itemId', ParseUUIDPipe) itemId: string,
@@ -201,7 +220,6 @@ export class FlowController {
   }
 
   @Delete('items/:itemId')
-  @ApiOperation({ summary: 'Remove um item do fluxo' })
   async deleteItem(
     @Req() req: any,
     @Param('itemId', ParseUUIDPipe) itemId: string,
@@ -209,12 +227,9 @@ export class FlowController {
     return this.flowService.deleteItem(itemId, req.user.companyId);
   }
 
-  // --- Gerenciamento de Mídia dos Itens (Aberto) ---
-
   @Post('items/:itemId/media/:type')
   @ApiConsumes('multipart/form-data')
   @UseInterceptors(FileInterceptor('file'))
-  @ApiOperation({ summary: 'Upload de mídia para um item' })
   async uploadMedia(
     @Req() req: any,
     @Param('itemId', ParseUUIDPipe) itemId: string,
@@ -227,33 +242,29 @@ export class FlowController {
     if (!file) {
       throw new BadRequestException('Nenhum arquivo enviado.');
     }
-
-    return this.flowService.addMediaToItem(
-      req.user.companyId,
-      itemId,
-      file,
-      type as 'image' | 'audio' | 'video',
-      req.user.id,
-    );
+    return this.flowService.addMediaToItem(req.user.companyId, itemId, file, type as any, req.user.id);
   }
 
   @Delete('items/:itemId/media/:type/:mediaId')
-  @ApiOperation({ summary: 'Remove uma mídia específica de um item' })
   async deleteMedia(
     @Req() req: any,
     @Param('itemId', ParseUUIDPipe) itemId: string,
     @Param('type') type: string,
     @Param('mediaId', ParseUUIDPipe) mediaId: string,
   ) {
-    if (!['image', 'audio', 'video'].includes(type)) {
-      throw new BadRequestException('Tipo inválido');
-    }
+    return this.flowService.deleteMedia(req.user.companyId, itemId, type as any, mediaId);
+  }
 
-    return this.flowService.deleteMedia(
-      req.user.companyId,
-      itemId,
-      type as 'image' | 'audio' | 'video',
-      mediaId,
-    );
+  // flow.controller.ts
+
+  @Delete('templates/:templateId')
+  @RequirePermissions(AppPermission.MANAGE_FLOW)
+  @ApiOperation({ summary: 'Exclui um template de etapas' })
+  async deleteTemplate(
+    @Req() req: any,
+    @Param('templateId', ParseUUIDPipe) templateId: string,
+  ) {
+    this.logger.log(`Chamada DELETE /flow/templates/${templateId} - User: ${req.user.id}`);
+    return this.flowService.deleteTemplate(req.user.companyId, templateId);
   }
 }
