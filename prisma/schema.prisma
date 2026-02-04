@@ -283,7 +283,7 @@ model Task {
   description  String? @map("descricao") @db.Text
   finalComment String? @map("comentario_final") @db.Text
 
-  scheduledDate  DateTime? @default(now()) @map("agendado_para")
+  scheduledDate  DateTime? @map("agendado_para")
   dueDate        DateTime? @map("prazo")
   completionDate DateTime? @map("data_conclusao")
 

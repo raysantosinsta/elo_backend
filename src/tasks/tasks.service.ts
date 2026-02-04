@@ -148,7 +148,7 @@ export class TasksService {
           status: TaskStatus.PENDING,
           finalComment: dto.finalComment,
           dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
-          scheduledDate: dto.scheduledAt ? new Date(dto.scheduledAt) : new Date(),
+          scheduledDate: dto.scheduledAt ? new Date(dto.scheduledAt) : null,
           taskAddress: address
             ? {
               create: {
