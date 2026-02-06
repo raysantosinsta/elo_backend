@@ -283,7 +283,7 @@ model Task {
   description  String? @map("descricao") @db.Text
   finalComment String? @map("comentario_final") @db.Text
 
-  scheduledDate  DateTime? @default(now()) @map("agendado_para")
+  scheduledDate  DateTime? @map("agendado_para")
   dueDate        DateTime? @map("prazo")
   completionDate DateTime? @map("data_conclusao")
 
@@ -864,6 +864,7 @@ model ProductFlow {
   name  String  @map("nome") @db.VarChar(100)
   color String? @default("#D35400") @map("cor") @db.VarChar(7)
 
+
   // Relacionamento com Empresa
   companyId String  @map("empresa_id") @db.Uuid
   company   Company @relation("CompanyProductFlows", fields: [companyId], references: [id]) // Consolidado
@@ -885,6 +886,9 @@ model FlowStage {
   name  String  @map("nome") @db.VarChar(50)
   order Int     @default(0) @map("ordem")
   color String? @map("cor") @db.VarChar(7)
+
+  allowedRole String? @map("cargo_permitido") @db.VarChar(100)
+
 
   // Relacionamento com Fluxo
   flowId String      @map("fluxo_id") @db.Uuid

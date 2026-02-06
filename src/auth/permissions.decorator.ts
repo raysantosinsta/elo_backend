@@ -10,6 +10,7 @@ export enum AppPermission {
   // mas é bom ter para consistência futura.
   MANAGE_ITEMS = 'CAN_MANAGE_ITEMS', 
   MANAGE_KANBAN_COLUMNS = 'CAN_MANAGE_KANBAN_COLUMNS',
+   MANAGE_FLOW_ITEMS = 'CAN_MANAGE_FLOW_ITEMS', 
 }
 
 export const PERMISSIONS_KEY = 'permissions';

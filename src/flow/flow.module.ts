@@ -1,13 +1,11 @@
 // flow.module.ts
 import { Module } from '@nestjs/common';
-import { FlowService } from './flow.service';
 import { FlowController } from './flow.controller';
+import { FlowService } from './flow.service';
 
-import { PrismaService } from '../prisma/prisma.service';
-import { SupabaseService } from '../supabase/supabase.service';
+import { CacheModule } from '@nestjs/cache-manager';
 import { PrismaModule } from 'src/prisma/prisma.module';
 import { SupabaseModule } from 'src/supabase/supabase.module';
-import { CacheModule } from '@nestjs/cache-manager';
 
 @Module({
   imports: [
