@@ -20,7 +20,11 @@ import { SupabaseService } from '../supabase/supabase.service';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
 import { Counter, Histogram } from 'prom-client';
-import { CreateFlowDto, CreateFlowItemDto } from './dto/create-flow.dto';
+import {
+  CreateFlowDto,
+  CreateFlowItemDto,
+  CreateStageDto, // 🔥 IMPORTADO
+} from './dto/create-flow.dto';
 import { InjectMetric } from '@willsoto/nestjs-prometheus';
 import { ClsService } from 'nestjs-cls';
 
@@ -44,18 +48,16 @@ export class FlowService {
 
   constructor(
     private prisma: PrismaService,
-    private readonly cls: ClsService, // Injeção do Contexto
+    private readonly cls: ClsService,
     private supabase: SupabaseService,
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
-    // --- OBSERVABILIDADE ---
     @InjectMetric('flow_item_moves_total')
-    public moveCounter: Counter<string>, // Contador de movimentos
-
+    public moveCounter: Counter<string>,
     @InjectMetric('db_operation_duration_seconds')
-    public dbHistogram: Histogram<string>, // Histograma de latência
+    public dbHistogram: Histogram<string>,
   ) {}
 
-  // --- RESILIENCE PATTERN (O SEU CÓDIGO) ---
+  // --- RESILIENCE PATTERN ---
   private async executeWithResilience<T>(
     operation: string,
     fn: () => Promise<T>,
@@ -98,54 +100,44 @@ export class FlowService {
 
   // --- LÓGICA DE NEGÓCIO: AVANÇAR ETAPA ---
 
-  /**
-   * Move o item para a próxima etapa da sequência automaticamente.
-   * Blindado com validação de Tenant e Cargo do Usuário.
-   */
   async advanceItemToNextStage(itemId: string, userId: string) {
-    // 1. Segurança: Obtém ID do Tenant do Contexto Seguro
     const companyId = this.cls.get<string>('tenantId');
 
     if (!companyId)
       throw new InternalServerErrorException('Tenant Context missing');
 
     return this.executeWithResilience('advance_item_stage', async () => {
-      // 2. Transação Implícita (Atomicidade completa)
       return this.prisma.$transaction(async (tx) => {
-        
-        // A. Busca os dados do usuário para validação de segurança (ABAC)
         const user = await tx.user.findFirst({
-          where: { id: userId, companyId }, // Garante que user é da mesma empresa
-          select: { id: true, role: true, professionalRole: true }, 
+          where: { id: userId, companyId },
+          select: { id: true, role: true, professionalRole: true },
         });
 
-        if (!user) throw new ForbiddenException('Usuário não encontrado ou inativo.');
+        if (!user)
+          throw new ForbiddenException('Usuário não encontrado ou inativo.');
 
-        // B. Busca o item e a configuração da etapa ATUAL
         const item = await tx.flowItem.findFirst({
-          where: { id: itemId, companyId }, // Garante Tenant Isolation
+          where: { id: itemId, companyId },
           include: {
-            stage: true, // Necessário para ler o 'allowedRole'
+            stage: true,
           },
         });
 
         if (!item || !item.stage)
-          throw new NotFoundException('Item não encontrado ou etapa inconsistente.');
+          throw new NotFoundException(
+            'Item não encontrado ou etapa inconsistente.',
+          );
 
-        // 🔥 C. SECURITY CHECK: O usuário tem o cargo para mexer NESTA etapa?
         this.validateStageAccess(user, item.stage);
 
-        // D. Busca a topologia do Fluxo (Cacheável, mas seguro via banco na transação)
         const allStages = await tx.flowStage.findMany({
-          where: { flowId: item.flowId }, 
+          where: { flowId: item.flowId },
           select: { id: true, order: true, name: true },
           orderBy: { order: 'asc' },
         });
 
-        // E. Algoritmo de Próximo Passo
         const currentIndex = allStages.findIndex((s) => s.id === item.stageId);
 
-        // Validação: Item está num limbo (etapa deletada, etc)?
         if (currentIndex === -1)
           throw new BadRequestException(
             'A etapa atual do item não existe mais na sequência do fluxo.',
@@ -153,33 +145,25 @@ export class FlowService {
 
         const nextStage = allStages[currentIndex + 1];
 
-        // Validação: Fim da linha?
         if (!nextStage) {
           throw new BadRequestException(
             `O item "${item.title}" já está na última etapa (${allStages[currentIndex].name}).`,
           );
         }
 
-        // F. Efetiva a Movimentação
         const updatedItem = await tx.flowItem.update({
           where: { id: itemId },
           data: {
             stageId: nextStage.id,
             updatedAt: new Date(),
-            // Opcional: Auditoria de quem moveu
-            // userUpdateId: userId 
           },
         });
 
-        // G. Pós-Processamento (Side Effects & Observabilidade)
         this.logger.log(
           `[Automação] Item ${item.orderNumber} movido por ${user.professionalRole || 'Admin'}: ${item.stage.name} -> ${nextStage.name}`,
         );
 
-        // Invalida Cache para atualização instantânea no Front
         await this.cacheManager.del(`flow_board_${item.flowId}`);
-
-        // Incrementa Métrica de Negócio (Prometheus)
         this.moveCounter.labels('success', 'auto_advance').inc();
 
         return updatedItem;
@@ -187,38 +171,69 @@ export class FlowService {
     });
   }
 
-  /**
- * Método auxiliar para validar se o usuário pode mexer na etapa
- */
-private validateStageAccess(user: { role: string, professionalRole: string | null }, stage: { allowedRole: string | null }) {
-  // Regra A: Admins e Gerentes sempre podem tudo (Supersusers)
-  if (['ADMIN', 'MANAGER'].includes(user.role)) {
-    return true;
-  }
+  // ===========================================================================
+  // 🛡️ LÓGICA DE VALIDAÇÃO (Atualizada com Match Parcial)
+  // ===========================================================================
 
-  // Regra B: Se a etapa não tem restrição, verifica se a empresa permite (opcional)
-  if (!stage.allowedRole) {
-     // Aqui você decide: Se for null, todo mundo mexe? Ou ninguém mexe?
-     // Vamos assumir que se for null, qualquer um com permissão básica pode.
-     return true; 
-  }
+  private validateStageAccess(
+    user: { role: string; professionalRole: string | null },
+    stage: { name: string; allowedRole: string | null },
+  ) {
+    this.logger.debug(
+      `👮 [AUTH_CHECK] Validando acesso para etapa: "${stage.name}"`,
+    );
+    this.logger.debug(`   - Cargo Exigido (Banco): "${stage.allowedRole}"`);
+    this.logger.debug(
+      `   - Cargo do Usuário (Banco): "${user.professionalRole}"`,
+    );
 
-  // Regra C: Normalização de Strings (Evitar erro "Corte" vs "corte")
-  const userRoleNormalized = user.professionalRole?.trim().toLowerCase();
-  const stageRoleNormalized = stage.allowedRole?.trim().toLowerCase();
+    // 1. Superusuários (Admin/Master/Manager) sempre podem mover
+    if (['MASTER', 'ADMIN', 'MANAGER'].includes(user.role)) {
+      this.logger.debug(
+        `   - [AUTH_CHECK] Liberado: Usuário é Superusuário (${user.role})`,
+      );
+      return true;
+    }
 
-  // Regra D: Verificação final
-  if (userRoleNormalized !== stageRoleNormalized) {
+    // 2. Etapa Livre: Se a etapa não tem restrição (null ou string vazia), libera geral
+    if (!stage.allowedRole || stage.allowedRole.trim() === '') {
+      this.logger.debug(
+        `   - [AUTH_CHECK] Liberado: Etapa não tem restrição de cargo.`,
+      );
+      return true;
+    }
+
+    // 3. Normalização (Converte para minúsculo e remove espaços extras)
+    const userRole = user.professionalRole?.trim().toLowerCase() || '';
+    const stageRequiredRole = stage.allowedRole.trim().toLowerCase();
+
+    this.logger.debug(
+      `   - [AUTH_CHECK] Comparando: Usuário="${userRole}" vs Exigido="${stageRequiredRole}"`,
+    );
+
+    // 4. Comparação Inteligente
+    
+    // A. Match Exato (Cenário Ideal)
+    if (userRole === stageRequiredRole) {
+      return true;
+    }
+
+    // B. Match Parcial (🔥 A CORREÇÃO PARA O SEU PROBLEMA)
+    // Verifica se o cargo do usuário CONTÉM a palavra exigida.
+    // Ex: Se usuário é "gerente de produção" e a exigência é "gerente" -> Retorna TRUE.
+    if (userRole.includes(stageRequiredRole)) {
+      this.logger.debug(`   - [AUTH_CHECK] Liberado por similaridade (Partial Match).`);
+      return true;
+    }
+
+    // 5. Bloqueio Final
+    this.logger.warn(`   - ⛔ BLOQUEADO: Cargos não batem.`);
+    
     throw new ForbiddenException(
-      `Seu cargo (${user.professionalRole}) não permite movimentar itens da etapa "${stage.allowedRole}".`
+      `Apenas colaboradores com o cargo "${stage.allowedRole}" podem mover itens desta etapa.`,
     );
   }
-}
 
-  /**
-   * Helper privado para limpar o cache quando a estrutura do Kanban muda.
-   * Pilar: Performance & Consistency.
-   */
   private async invalidateFlowCache(companyId: string, flowId?: string) {
     await this.cacheManager.del(`flows_list_${companyId}`);
     if (flowId) {
@@ -231,9 +246,6 @@ private validateStageAccess(user: { role: string, professionalRole: string | nul
   // 🟢 SISTEMA DE TEMPLATES DE ETAPAS
   // ===========================================================================
 
-  /**
-   * Busca todos os templates salvos da empresa.
-   */
   async getTemplates(companyId: string) {
     this.logger.log(`Buscando templates para a empresa: ${companyId}`);
     return await this.prisma.flowTemplate.findMany({
@@ -242,9 +254,6 @@ private validateStageAccess(user: { role: string, professionalRole: string | nul
     });
   }
 
-  /**
-   * Salva a estrutura de colunas atual de um fluxo como um template.
-   */
   async saveTemplate(companyId: string, flowId: string, name: string) {
     this.logger.log(
       `Iniciando saveTemplate para FlowID: ${flowId} na Empresa: ${companyId}`,
@@ -275,9 +284,6 @@ private validateStageAccess(user: { role: string, professionalRole: string | nul
     return template;
   }
 
-  /**
-   * Aplica um template clonando suas etapas para dentro de um fluxo.
-   */
   async applyTemplate(companyId: string, flowId: string, templateId: string) {
     this.logger.log(`Aplicando Template ${templateId} ao Fluxo ${flowId}`);
 
@@ -289,7 +295,6 @@ private validateStageAccess(user: { role: string, professionalRole: string | nul
 
     const structure = template.structure as any[];
 
-    // Busca a última posição para não encavalar ordens
     const lastStage = await this.prisma.flowStage.findFirst({
       where: { flowId },
       orderBy: { order: 'desc' },
@@ -319,11 +324,6 @@ private validateStageAccess(user: { role: string, professionalRole: string | nul
     });
   }
 
-  // flow.service.ts
-
-  /**
-   * Exclui um template de etapas da empresa.
-   */
   async deleteTemplate(companyId: string, templateId: string) {
     this.logger.log(
       `Iniciando exclusão de template: ${templateId} para empresa: ${companyId}`,
@@ -437,7 +437,6 @@ private validateStageAccess(user: { role: string, professionalRole: string | nul
 
     if (!flow) throw new NotFoundException('Fluxo não encontrado');
 
-    // Cleanup de arquivos no Supabase
     this.cleanUpFlowFiles(flow.items).catch((e) =>
       this.logger.error('Cleanup error', e),
     );
@@ -459,8 +458,8 @@ private validateStageAccess(user: { role: string, professionalRole: string | nul
   async createStage(
     companyId: string,
     flowId: string,
-    name: string,
-    color?: string,
+    // 🔥 CORREÇÃO: Agora recebe o DTO inteiro como 3º argumento
+    data: CreateStageDto,
   ) {
     const lastStage = await this.prisma.flowStage.findFirst({
       where: { flowId },
@@ -472,10 +471,11 @@ private validateStageAccess(user: { role: string, professionalRole: string | nul
 
     const stage = await this.prisma.flowStage.create({
       data: {
-        name,
+        name: data.name,
         flowId,
         order: newOrder,
-        color: color || '#2C3E50',
+        color: data.color || '#2C3E50',
+        allowedRole: data.allowedRole || null, // Salva o cargo permitido
         companyId,
       },
     });
@@ -492,7 +492,12 @@ private validateStageAccess(user: { role: string, professionalRole: string | nul
 
     const updated = await this.prisma.flowStage.update({
       where: { id: stageId },
-      data: { name: data.name, color: data.color, order: data.order },
+      data: {
+        name: data.name,
+        color: data.color,
+        order: data.order,
+        allowedRole: data.allowedRole,
+      },
     });
 
     await this.invalidateFlowCache(companyId, stage.flowId);
@@ -521,7 +526,7 @@ private validateStageAccess(user: { role: string, professionalRole: string | nul
   }
 
   // ===========================================================================
-  // 🟡 GESTÃO DE ITENS (PRODUTOS NA ESTEIRA)
+  // 🟡 GESTÃO DE ITENS
   // ===========================================================================
 
   async createFlowItem(
@@ -584,7 +589,6 @@ private validateStageAccess(user: { role: string, professionalRole: string | nul
     });
     if (!item) throw new NotFoundException('Item não encontrado');
 
-    // Processamento de exclusão de mídias via IDs enviados do front
     if (data.removeImageIds)
       for (const id of data.removeImageIds)
         await this.deleteMedia(companyId, itemId, 'image', id);
@@ -620,18 +624,80 @@ private validateStageAccess(user: { role: string, professionalRole: string | nul
   }
 
   async moveItem(itemId: string, newStageId: string, userId: string) {
-    const item = await this.prisma.flowItem.findUnique({
-      where: { id: itemId },
-    });
-    if (!item) throw new NotFoundException('Item não encontrado');
+    this.logger.log(
+      `🚀 [MOVE_ITEM] Iniciando movimentação. Item: ${itemId} -> Stage: ${newStageId}`,
+    );
 
-    const updated = await this.prisma.flowItem.update({
-      where: { id: itemId },
-      data: { stageId: newStageId, updatedAt: new Date() },
+    // 1. Validar Contexto
+    const companyId = this.cls.get<string>('tenantId');
+    this.logger.log(`🔍 [MOVE_ITEM] Contexto CompanyID: ${companyId}`);
+
+    if (!companyId) {
+      this.logger.error(
+        `❌ [MOVE_ITEM] Erro: CompanyID não encontrado no CLS.`,
+      );
+      throw new InternalServerErrorException('Tenant Context missing');
+    }
+
+    // 2. Buscar Item
+    const item = await this.prisma.flowItem.findFirst({
+      where: { id: itemId, companyId },
+      include: { stage: true },
     });
 
-    await this.invalidateFlowCache(item.companyId, item.flowId);
-    return updated;
+    if (!item) {
+      this.logger.error(`❌ [MOVE_ITEM] Item não encontrado no banco.`);
+      throw new NotFoundException('Item não encontrado.');
+    }
+
+    this.logger.log(
+      `✅ [MOVE_ITEM] Item encontrado: ${item.title} (Atual Stage: ${item.stage?.name})`,
+    );
+
+    // 3. Buscar Usuário
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, companyId },
+      select: { id: true, role: true, professionalRole: true, name: true },
+    });
+
+    if (!user) {
+      this.logger.error(`❌ [MOVE_ITEM] Usuário não encontrado: ${userId}`);
+      throw new ForbiddenException('Usuário inválido.');
+    }
+
+    this.logger.log(
+      `👤 [MOVE_ITEM] Usuário: ${user.name} | Role: ${user.role} | ProfRole: ${user.professionalRole}`,
+    );
+
+    // 4. Validar Acesso (Aqui é onde suspeitamos que está o erro)
+    try {
+      this.validateStageAccess(user, item.stage!);
+      this.logger.log(`🔓 [MOVE_ITEM] Acesso PERMITIDO.`);
+    } catch (error) {
+      this.logger.error(`⛔ [MOVE_ITEM] Acesso NEGADO: ${error.message}`);
+      throw error; // Re-lança o erro para o controller
+    }
+
+    // 5. Mover
+    try {
+      const updated = await this.prisma.flowItem.update({
+        where: { id: itemId },
+        data: {
+          stageId: newStageId,
+          updatedAt: new Date(),
+        },
+      });
+      this.logger.log(`💾 [MOVE_ITEM] Sucesso! Item salvo no banco.`);
+      await this.invalidateFlowCache(item.companyId, item.flowId);
+
+      return updated;
+    } catch (dbError) {
+      this.logger.error(
+        `🔥 [MOVE_ITEM] Erro de Banco de Dados: ${dbError.message}`,
+        dbError.stack,
+      );
+      throw new InternalServerErrorException('Erro ao salvar movimentação.');
+    }
   }
 
   async deleteItem(itemId: string, companyId: string) {
@@ -647,10 +713,7 @@ private validateStageAccess(user: { role: string, professionalRole: string | nul
     return { success: true };
   }
 
-  // ===========================================================================
-  // 📷 SISTEMA DE MÍDIAS E STORAGE (SUPABASE)
-  // ===========================================================================
-
+  // --- MÍDIAS ---
   async addMediaToItem(
     companyId: string,
     itemId: string,
@@ -732,10 +795,6 @@ private validateStageAccess(user: { role: string, professionalRole: string | nul
         if (m.url) await this.supabase.deleteFlowFile(m.url);
     }
   }
-
-  // ===========================================================================
-  // 🔍 FILTROS E RELATÓRIOS
-  // ===========================================================================
 
   async getFilteredItems(companyId: string, filters: any) {
     const { startDate, endDate, dateField, onlyOutsourced } = filters;

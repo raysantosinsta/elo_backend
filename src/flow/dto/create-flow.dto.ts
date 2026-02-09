@@ -42,6 +42,15 @@ export class CreateStageDto {
   @IsOptional()
   @IsNumber()
   order?: number;
+
+  // 🔥 NOVO CAMPO: Cargo permitido para mover card
+  @ApiProperty({ 
+    required: false, 
+    description: 'Cargo técnico necessário para mover itens desta etapa (ex: "modelista")' 
+  })
+  @IsOptional()
+  @IsString()
+  allowedRole?: string;
 }
 
 export class CreateFlowItemDto {

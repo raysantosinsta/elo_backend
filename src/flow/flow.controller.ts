@@ -27,6 +27,7 @@ import {
   ApiOperation,
   ApiTags,
   ApiConsumes,
+  ApiBody,
 } from '@nestjs/swagger';
 
 // --- Guards e Segurança ---
@@ -44,6 +45,7 @@ import {
   CreateFlowDto,
   CreateFlowItemDto,
   FlowFilterDto,
+  CreateStageDto, // 🔥 IMPORTADO
 } from './dto/create-flow.dto';
 
 @ApiTags('Product Flow (Kanban)')
@@ -56,7 +58,7 @@ export class FlowController {
   constructor(private readonly flowService: FlowService) {}
 
   // ===========================================================================
-  // 🟢 GERENCIAMENTO DE TEMPLATES (Rotas Estáticas Primeiro)
+  // 🟢 GERENCIAMENTO DE TEMPLATES
   // ===========================================================================
 
   @Get('templates')
@@ -91,7 +93,6 @@ export class FlowController {
   }
 
   @Post(':flowId/apply-template/:templateId')
-  // @RequirePermissions(AppPermission.MANAGE_STAGE)
   @ApiOperation({ summary: 'Aplica um template de etapas a um fluxo' })
   async applyTemplate(
     @Req() req: any,
@@ -106,6 +107,19 @@ export class FlowController {
       flowId,
       templateId,
     );
+  }
+
+  @Delete('templates/:templateId')
+  @RequirePermissions(AppPermission.MANAGE_FLOW)
+  @ApiOperation({ summary: 'Exclui um template de etapas' })
+  async deleteTemplate(
+    @Req() req: any,
+    @Param('templateId', ParseUUIDPipe) templateId: string,
+  ) {
+    this.logger.log(
+      `Chamada DELETE /flow/templates/${templateId} - User: ${req.user.id}`,
+    );
+    return this.flowService.deleteTemplate(req.user.companyId, templateId);
   }
 
   // ===========================================================================
@@ -137,47 +151,30 @@ export class FlowController {
   // ===========================================================================
 
   @Post(':flowId/stages')
-  // @RequirePermissions(AppPermission.MANAGE_STAGE)
   @ApiOperation({ summary: 'Adiciona uma nova etapa ao fluxo' })
   async createStage(
     @Req() req: any,
     @Param('flowId', ParseUUIDPipe) flowId: string,
-    @Body() body: { name: string; color?: string },
+    @Body() body: CreateStageDto, // 🔥 Agora usa o DTO completo
   ) {
     return this.flowService.createStage(
       req.user.companyId,
       flowId,
-      body.name,
-      body.color,
+      body, // 🔥 Passa o objeto body inteiro, não campos soltos
     );
   }
 
-  @Post('items/:itemId/advance')
-  @ApiOperation({
-    summary: 'Automação: Move o card para a próxima coluna da esteira',
-  })
-  // Permissão específica para garantir que apenas quem pode editar items possa avançar
-  @RequirePermissions(AppPermission.MANAGE_FLOW_ITEMS)
-  async advanceItem(
-    @Param('itemId', ParseUUIDPipe) itemId: string,
-    @Req() req: any, // Ainda precisamos do userId para log de quem fez a ação
-  ) {
-    // Apenas chamamos o serviço. O companyId será resolvido internamente via CLS.
-    return this.flowService.advanceItemToNextStage(itemId, req.user.id);
-  }
-
   @Put('stages/:stageId')
-  // @RequirePermissions(AppPermission.MANAGE_STAGE)
+  @ApiOperation({ summary: 'Atualiza uma etapa existente' })
   async updateStage(
     @Req() req: any,
     @Param('stageId', ParseUUIDPipe) stageId: string,
-    @Body() body: { name?: string; color?: string; order?: number },
+    @Body() body: Partial<CreateStageDto>, // 🔥 Usa Partial do DTO para tipagem
   ) {
     return this.flowService.updateStage(req.user.companyId, stageId, body);
   }
 
   @Delete('stages/:stageId')
-  // @RequirePermissions(AppPermission.MANAGE_STAGE)
   async deleteStage(
     @Req() req: any,
     @Param('stageId', ParseUUIDPipe) stageId: string,
@@ -258,13 +255,28 @@ export class FlowController {
     );
   }
 
+  // ✅ Rota de Mover (Drag & Drop)
   @Put('items/:itemId/move')
+  @ApiOperation({ summary: 'Move item entre colunas (Drag & Drop)' })
   async moveItem(
-    @Req() req: any,
     @Param('itemId', ParseUUIDPipe) itemId: string,
     @Body() body: { newStageId: string },
+    @Req() req: any,
   ) {
     return this.flowService.moveItem(itemId, body.newStageId, req.user.id);
+  }
+
+  // ✅ Rota de Avançar (Botão Automático)
+  @Post('items/:itemId/advance')
+  @ApiOperation({
+    summary: 'Automação: Move o card para a próxima coluna da esteira',
+  })
+  @RequirePermissions(AppPermission.MANAGE_FLOW_ITEMS)
+  async advanceItem(
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+    @Req() req: any,
+  ) {
+    return this.flowService.advanceItemToNextStage(itemId, req.user.id);
   }
 
   @Delete('items/:itemId')
@@ -312,20 +324,5 @@ export class FlowController {
       type as any,
       mediaId,
     );
-  }
-
-  // flow.controller.ts
-
-  @Delete('templates/:templateId')
-  @RequirePermissions(AppPermission.MANAGE_FLOW)
-  @ApiOperation({ summary: 'Exclui um template de etapas' })
-  async deleteTemplate(
-    @Req() req: any,
-    @Param('templateId', ParseUUIDPipe) templateId: string,
-  ) {
-    this.logger.log(
-      `Chamada DELETE /flow/templates/${templateId} - User: ${req.user.id}`,
-    );
-    return this.flowService.deleteTemplate(req.user.companyId, templateId);
   }
 }
