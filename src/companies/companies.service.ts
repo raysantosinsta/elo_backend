@@ -23,7 +23,7 @@ import { InjectMetric } from '@willsoto/nestjs-prometheus';
 import type { Cache } from 'cache-manager';
 import { ClsService } from 'nestjs-cls';
 import { Counter, Histogram } from 'prom-client';
-import { PrismaService } from 'src/prisma/prisma.service';
+import { PrismaService } from '../prisma/prisma.service';
 import {
   CreateCompanyDto,
   PaginationDto,

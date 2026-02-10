@@ -13,7 +13,7 @@ import {
   Post,
   Query,
   UseGuards,
-  UseInterceptors
+  UseInterceptors,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -28,7 +28,11 @@ import { Roles } from 'src/auth/roles.decorator';
 import { RolesGuard } from 'src/auth/roles.guard';
 import { TenantInterceptor } from 'src/common/interceptors/tenant.interceptor';
 import { CompaniesService } from './companies.service';
-import { CreateCompanyDto, PaginationDto, UpdateCompanyDto } from './dto/create-company.dto';
+import {
+  CreateCompanyDto,
+  PaginationDto,
+  UpdateCompanyDto,
+} from './dto/create-company.dto';
 
 // Interface para garantir o contrato de retorno
 interface PaginatedCompaniesResponse {
@@ -46,7 +50,7 @@ interface PaginatedCompaniesResponse {
 export class CompaniesController {
   private readonly logger = new Logger(CompaniesController.name);
 
-  constructor(private readonly companiesService: CompaniesService) { }
+  constructor(private readonly companiesService: CompaniesService) {}
 
   @Post()
   @Roles(UserRole.MASTER)
@@ -69,7 +73,9 @@ export class CompaniesController {
 
   @Delete(':id')
   @Roles(UserRole.MASTER)
-  @ApiOperation({ summary: 'Inativa (Soft Delete) uma empresa (Apenas MASTER)' })
+  @ApiOperation({
+    summary: 'Inativa (Soft Delete) uma empresa (Apenas MASTER)',
+  })
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(@Param('id', new ParseUUIDPipe()) id: string): Promise<void> {
     await this.companiesService.remove(id);
@@ -77,18 +83,26 @@ export class CompaniesController {
 
   @Get()
   @Roles(UserRole.MASTER, UserRole.ADMIN)
-  @ApiOperation({ summary: 'Lista empresas (MASTER vê todas, ADMIN vê apenas a sua)' })
+  @ApiOperation({
+    summary: 'Lista empresas (MASTER vê todas, ADMIN vê apenas a sua)',
+  })
   @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
   @ApiQuery({ name: 'limit', required: false, type: Number, example: 10 })
-  async findAll(@Query() pagination: PaginationDto): Promise<PaginatedCompaniesResponse> {
+  async findAll(
+    @Query() pagination: PaginationDto,
+  ): Promise<PaginatedCompaniesResponse> {
     // 🔥 O retorno agora está estritamente tipado
     return this.companiesService.findAll(pagination);
   }
 
   @Get(':id')
   @Roles(UserRole.MASTER, UserRole.ADMIN)
-  @ApiOperation({ summary: 'Busca uma empresa (Com trava de segurança para ADMIN)' })
-  async findOne(@Param('id', new ParseUUIDPipe()) id: string): Promise<Company> {
+  @ApiOperation({
+    summary: 'Busca uma empresa (Com trava de segurança para ADMIN)',
+  })
+  async findOne(
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ): Promise<Company> {
     return this.companiesService.findOne(id);
   }
 }
