@@ -271,7 +271,6 @@ export class FlowController {
   @ApiOperation({
     summary: 'Automação: Move o card para a próxima coluna da esteira',
   })
-  @RequirePermissions(AppPermission.MANAGE_FLOW_ITEMS)
   async advanceItem(
     @Param('itemId', ParseUUIDPipe) itemId: string,
     @Req() req: any,

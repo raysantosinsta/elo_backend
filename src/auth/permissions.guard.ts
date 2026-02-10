@@ -1,4 +1,6 @@
 /* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
+/* eslint-disable @typescript-eslint/restrict-template-expressions */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import {
@@ -30,12 +32,11 @@ export class PermissionsGuard implements CanActivate {
       [context.getHandler(), context.getClass()],
     );
 
-    // Se a rota não exige permissão específica, deixa passar
+    // Se a rota não exige @RequirePermissions, qualquer um autenticado passa
     if (!requiredPermissions || requiredPermissions.length === 0) {
       return true;
     }
 
-    // 2. Pegar o usuário da Request (injetado pelo JWT Strategy)
     const request = context.switchToHttp().getRequest();
     const userJwt = request.user;
 
@@ -43,7 +44,7 @@ export class PermissionsGuard implements CanActivate {
       throw new UnauthorizedException('Usuário não autenticado.');
     }
 
-    // 3. Buscar dados frescos do banco
+    // 2. Buscar dados do usuário
     const user = await this.prisma.user.findUnique({
       where: { id: userJwt.id },
       select: { role: true, professionalRole: true },
@@ -51,28 +52,26 @@ export class PermissionsGuard implements CanActivate {
 
     if (!user) throw new UnauthorizedException('Usuário não encontrado.');
 
-    // 4. Bypass para MASTER e ADMIN (Superusuários)
+    // 3. Superusuários ignoram as travas administrativas
     if (user.role === UserRole.MASTER || user.role === UserRole.ADMIN) {
       return true;
     }
 
-    // 5. Mapear: Role + professionalRole -> Lista de Permissões
-    const userPermissions = this.mapRoleAndprofessionalRoleToPermissions(
+    // 4. Mapear permissões administrativas do usuário
+    const userPermissions = this.mapRoleAndProfessionalRoleToPermissions(
       user.role,
       user.professionalRole,
     );
 
-    // 6. Verificar se o usuário tem TODAS as permissões exigidas
+    // 5. Validar acesso
     const hasPermission = requiredPermissions.every((permission) =>
       userPermissions.includes(permission),
     );
 
     if (!hasPermission) {
-      this.logger.warn(
-        `Acesso negado: User ${userJwt.id} (Role: ${user.role}, professionalRole: ${user.professionalRole}) tentou acessar recurso protegido.`,
-      );
+      this.logger.warn(`⛔ Acesso negado para User ${userJwt.id}`);
       throw new ForbiddenException(
-        'Você não possui permissão para realizar esta ação.',
+        'Você não possui permissão administrativa para realizar esta ação.',
       );
     }
 
@@ -80,41 +79,33 @@ export class PermissionsGuard implements CanActivate {
   }
 
   /**
-   * Transforma Role + professionalRole em uma lista de Capabilities.
+   * Mapeia apenas as permissões de GESTÃO (Sturcture).
+   * As permissões operacionais não entram aqui pois são livres.
    */
-  private mapRoleAndprofessionalRoleToPermissions(
+  private mapRoleAndProfessionalRoleToPermissions(
     role: UserRole,
     professionalRole?: string | null,
   ): AppPermission[] {
     const permissions: AppPermission[] = [];
-    const normalizedProfessionalRole = professionalRole?.trim().toLowerCase() || '';
+    const profRole = professionalRole?.trim().toLowerCase() || '';
 
-    // --- REGRA GERAL (Base) ---
-    // Todo usuário autenticado deve ter permissões básicas de leitura/escrita de itens
-    permissions.push(AppPermission.MANAGE_ITEMS);
+    // Cargos de gestão que permitem configurar o fluxo (mesmo sendo EMPLOYER)
+    const managementProfRoles = [
+      'gerente',
+      'gerente de produção',
+      'gestao de producao',
+      'diretor'
+    ];
 
-    // 🔥 CORREÇÃO PRINCIPAL AQUI:
-    // Liberamos a permissão de "Gerenciar Itens do Fluxo" (Mover/Concluir) para TODOS.
-    // A lógica de "qual coluna ele pode mexer" é feita no FlowService (validateStageAccess).
-    permissions.push(AppPermission.MANAGE_FLOW_ITEMS);
+    const isManagerByTitle = managementProfRoles.includes(profRole);
 
-    // --- REGRA DE GESTÃO (Criar Fluxos/Etapas/Templates) ---
-    // Apenas Gestores
-    if (role === UserRole.ADMIN) {
-      permissions.push(AppPermission.MANAGE_FLOW);
-      permissions.push(AppPermission.MANAGE_STAGE);
-      permissions.push(AppPermission.MANAGE_KANBAN_COLUMNS);
-    }
-    // Regra específica para Employer que é Gestor
-    else if (role === UserRole.EMPLOYER) {
-      if (
-        normalizedProfessionalRole === 'gestao de producao' ||
-        normalizedProfessionalRole === 'gerente'
-      ) {
-        permissions.push(AppPermission.MANAGE_FLOW);
-        permissions.push(AppPermission.MANAGE_STAGE);
-        permissions.push(AppPermission.MANAGE_KANBAN_COLUMNS);
-      }
+    // Se for ADMIN ou um EMPLOYER gestor, ganha acesso às ferramentas de estrutura
+    if (role === UserRole.ADMIN || (role === UserRole.EMPLOYER && isManagerByTitle)) {
+      permissions.push(
+        AppPermission.MANAGE_FLOW,
+        AppPermission.MANAGE_STAGE,
+        AppPermission.MANAGE_KANBAN_COLUMNS
+      );
     }
 
     return permissions;
