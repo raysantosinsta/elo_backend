@@ -30,6 +30,13 @@ import {
   UpdateCompanyDto,
 } from './dto/create-company.dto';
 
+export interface PaginatedCompaniesResponse {
+  data: Partial<Company>[];
+  total: number;
+  page: number;
+  lastPage: number;
+}
+
 @Injectable()
 export class CompaniesService {
   private readonly logger = new Logger(CompaniesService.name);
@@ -126,50 +133,68 @@ export class CompaniesService {
     return company;
   }
 
-  async findAll(pagination: PaginationDto) {
+async findAll(pagination: PaginationDto): Promise<PaginatedCompaniesResponse> {
     const { page = 1, limit = 10 } = pagination;
     const skip = (page - 1) * limit;
     const isMaster = this.cls.get<boolean>('isMaster');
     const tenantId = this.cls.get<string>('tenantId');
 
+    // Chave de cache segmentada por perfil e paginação
     const cacheKey = `list_${isMaster ? 'm' : 't_' + tenantId}_p${page}_l${limit}`;
-    const cached = await this.cacheManager.get(cacheKey);
+    const cached = await this.cacheManager.get<PaginatedCompaniesResponse>(cacheKey);
+    
     if (cached) return cached;
 
     const where: any = { status: SimpleStatus.ACTIVE };
 
-    // PERFORMANCE: Promise.all é superior ao $transaction para operações de leitura paralelizáveis
+    // Se não for Master, a extensão do Prisma já aplicaria o filtro, 
+    // mas reforçamos aqui para garantir a consistência da query.
+    if (!isMaster) {
+      if (!tenantId) return { data: [], total: 0, page, lastPage: 0 };
+      where.id = tenantId;
+    }
+
+    // Execução paralela para melhor performance
     const [data, total] = await Promise.all([
-      this.executeWithResilience<Partial<Company>[]>(
-        'find_many_companies',
-        () =>
-          this.db.company.findMany({
-            skip,
-            take: limit,
-            where,
-            orderBy: { name: 'asc' },
-            select: {
-              id: true,
-              name: true,
-              cnpj: true,
-              email: true,
-              status: true,
-            },
-          }),
+      this.executeWithResilience<Partial<Company>[]>('find_many_companies', () =>
+        this.db.company.findMany({
+          skip,
+          take: limit,
+          where,
+          orderBy: { name: 'asc' },
+          select: {
+            id: true,
+            name: true,
+            cnpj: true,
+            email: true,
+            status: true,
+            telefone: true,
+            // --- CAMPOS DE ENDEREÇO INCLUÍDOS ---
+            endereco: true,
+            numero: true,
+            bairro: true,
+            cidade: true,
+            estado: true,
+            cep: true,
+            complemento: true,
+          },
+        }),
       ),
-      // 🔥 Tipagem explícita <number> resolve o erro ts(18046)
       this.executeWithResilience<number>('count_companies', () =>
         this.db.company.count({ where }),
       ),
     ]);
 
-    const result = {
+    const result: PaginatedCompaniesResponse = {
       data,
       total,
       page,
-      lastPage: Math.ceil(total / limit), // Agora 'total' é reconhecido como number
+      lastPage: Math.ceil(total / limit),
     };
-    await this.cacheManager.set(cacheKey, result, 30000); // 30s
+
+    // Salva no cache por 30 segundos
+    await this.cacheManager.set(cacheKey, result, 30000);
+
     return result;
   }
 
