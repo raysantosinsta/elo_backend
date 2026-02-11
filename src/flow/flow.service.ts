@@ -6,27 +6,27 @@
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import {
-  Injectable,
-  NotFoundException,
   BadRequestException,
-  Logger,
-  Inject,
   ForbiddenException,
+  Inject,
+  Injectable,
   InternalServerErrorException,
+  Logger,
+  NotFoundException,
 } from '@nestjs/common';
+import { InjectMetric } from '@willsoto/nestjs-prometheus';
+import type { Cache } from 'cache-manager';
+import { ClsService } from 'nestjs-cls';
+import { Counter, Histogram } from 'prom-client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SupabaseService } from '../supabase/supabase.service';
-import { CACHE_MANAGER } from '@nestjs/cache-manager';
-import type { Cache } from 'cache-manager';
-import { Counter, Histogram } from 'prom-client';
 import {
   CreateFlowDto,
   CreateFlowItemDto,
   CreateStageDto, // 🔥 IMPORTADO
 } from './dto/create-flow.dto';
-import { InjectMetric } from '@willsoto/nestjs-prometheus';
-import { ClsService } from 'nestjs-cls';
 
 // --- MÉTRICAS DE OBSERVABILIDADE ---
 const flowOpsCounter = new Counter({
@@ -212,7 +212,7 @@ export class FlowService {
     );
 
     // 4. Comparação Inteligente
-    
+
     // A. Match Exato (Cenário Ideal)
     if (userRole === stageRequiredRole) {
       return true;
@@ -222,13 +222,15 @@ export class FlowService {
     // Verifica se o cargo do usuário CONTÉM a palavra exigida.
     // Ex: Se usuário é "gerente de produção" e a exigência é "gerente" -> Retorna TRUE.
     if (userRole.includes(stageRequiredRole)) {
-      this.logger.debug(`   - [AUTH_CHECK] Liberado por similaridade (Partial Match).`);
+      this.logger.debug(
+        `   - [AUTH_CHECK] Liberado por similaridade (Partial Match).`,
+      );
       return true;
     }
 
     // 5. Bloqueio Final
     this.logger.warn(`   - ⛔ BLOQUEADO: Cargos não batem.`);
-    
+
     throw new ForbiddenException();
   }
 
@@ -552,7 +554,9 @@ export class FlowService {
         });
 
         if (!targetStage) {
-          throw new BadRequestException('A etapa informada não pertence a este fluxo.');
+          throw new BadRequestException(
+            'A etapa informada não pertence a este fluxo.',
+          );
         }
       } else {
         // Se não foi passado, busca a primeira etapa do fluxo (padrão)
@@ -562,7 +566,9 @@ export class FlowService {
         });
 
         if (!targetStage) {
-          throw new BadRequestException('Este fluxo não possui etapas configuradas.');
+          throw new BadRequestException(
+            'Este fluxo não possui etapas configuradas.',
+          );
         }
       }
 
@@ -614,10 +620,30 @@ export class FlowService {
     userId: string,
     data: any,
   ) {
+    // 1. Buscar usuário para validar permissões
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, companyId },
+      select: { id: true, role: true, professionalRole: true },
+    });
+
+    if (!user) throw new ForbiddenException('Usuário não identificado.');
+    //
     const item = await this.prisma.flowItem.findFirst({
       where: { id: itemId, companyId },
+      include: { stage: true }, // Incluímos o stage para ver o allowedRole
     });
     if (!item) throw new NotFoundException('Item não encontrado');
+
+    // 3. 🛡️ VALIDAÇÃO DE ACESSO À COLUNA
+    // Se o usuário não tiver permissão na coluna atual, ele não pode editar NADA.
+    try {
+      // Reutiliza a lógica central de validação (Admin, Match Exato, Match Parcial)
+      if (item.stage) {
+        this.validateStageAccess(user, item.stage);
+      }
+    } catch (error) {
+      throw new ForbiddenException();
+    }
 
     if (data.removeImageIds)
       for (const id of data.removeImageIds)
