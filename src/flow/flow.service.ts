@@ -188,7 +188,7 @@ export class FlowService {
     );
 
     // 1. Superusuários (Admin/Master/Manager) sempre podem mover
-    if (['MASTER', 'ADMIN', 'MANAGER'].includes(user.role)) {
+    if (['MASTER', 'ADMIN'].includes(user.role)) {
       this.logger.debug(
         `   - [AUTH_CHECK] Liberado: Usuário é Superusuário (${user.role})`,
       );
@@ -229,9 +229,7 @@ export class FlowService {
     // 5. Bloqueio Final
     this.logger.warn(`   - ⛔ BLOQUEADO: Cargos não batem.`);
     
-    throw new ForbiddenException(
-      `Apenas colaboradores com o cargo "${stage.allowedRole}" podem mover itens desta etapa.`,
-    );
+    throw new ForbiddenException();
   }
 
   private async invalidateFlowCache(companyId: string, flowId?: string) {
@@ -526,7 +524,7 @@ export class FlowService {
   }
 
   // ===========================================================================
-  // 🟡 GESTÃO DE ITENS
+  // 🟡 GESTÃO DE ITENS (ATUALIZADO COM VALIDAÇÃO DE CARGO)
   // ===========================================================================
 
   async createFlowItem(
@@ -535,24 +533,56 @@ export class FlowService {
     userId: string,
     dto: CreateFlowItemDto,
   ) {
-    return this.prisma.$transaction(async (tx) => {
-      let targetStageId = dto.stageId;
+    // 1. Buscar dados do usuário para validação de permissão
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, companyId },
+      select: { id: true, role: true, professionalRole: true },
+    });
 
-      if (!targetStageId) {
-        const firstStage = await tx.flowStage.findFirst({
+    if (!user) throw new ForbiddenException('Usuário não identificado.');
+
+    return this.prisma.$transaction(async (tx) => {
+      let targetStage;
+
+      // 2. Determinar a Etapa de Destino
+      if (dto.stageId) {
+        // Se o ID foi passado, busca especificamente essa etapa
+        targetStage = await tx.flowStage.findFirst({
+          where: { id: dto.stageId, flowId },
+        });
+
+        if (!targetStage) {
+          throw new BadRequestException('A etapa informada não pertence a este fluxo.');
+        }
+      } else {
+        // Se não foi passado, busca a primeira etapa do fluxo (padrão)
+        targetStage = await tx.flowStage.findFirst({
           where: { flowId },
           orderBy: { order: 'asc' },
         });
-        if (!firstStage)
-          throw new BadRequestException('Este fluxo não possui etapas.');
-        targetStageId = firstStage.id;
+
+        if (!targetStage) {
+          throw new BadRequestException('Este fluxo não possui etapas configuradas.');
+        }
       }
 
+      // 3. 🛡️ VALIDAÇÃO DE ACESSO
+      // Reutiliza a mesma lógica que você já criou para a movimentação
+      try {
+        this.validateStageAccess(user, targetStage);
+      } catch (error) {
+        throw new ForbiddenException(
+          `Você não tem permissão para criar itens na etapa "${targetStage.name}". Cargo exigido: ${targetStage.allowedRole}`,
+        );
+      }
+
+      // 4. Calcular ordem na etapa
       const lastItem = await tx.flowItem.findFirst({
-        where: { stageId: targetStageId },
+        where: { stageId: targetStage.id },
         orderBy: { orderInStage: 'desc' },
       });
 
+      // 5. Criar o Item
       return tx.flowItem.create({
         data: {
           title: dto.title,
@@ -564,7 +594,7 @@ export class FlowService {
           assignedToId: dto.assignedToId,
           flowId,
           companyId,
-          stageId: targetStageId,
+          stageId: targetStage.id, // Usa o ID da etapa validada
           orderInStage: (lastItem?.orderInStage ?? -1) + 1,
           enteredAt: new Date(),
           dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
