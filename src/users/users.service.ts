@@ -9,6 +9,7 @@
 /* eslint-disable prettier/prettier */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import {
   BadRequestException,
   ConflictException,
@@ -20,11 +21,11 @@ import {
 import { Prisma, SimpleStatus, User, UserRole } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { ClsService } from 'nestjs-cls';
-import { PrismaService } from 'src/prisma/prisma.service';
+import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 
-const SALT_ROUNDS = 10;
+const SALT_ROUNDS = 12;
 
 @Injectable()
 export class UsersService {
@@ -33,21 +34,13 @@ export class UsersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly cls: ClsService,
-  ) { }
+  ) {}
 
-  // ===========================================================================
-  // 🔒 HELPER DE SEGURANÇA
-  // ===========================================================================
-  private validateOwnership(resource: { companyId: string | null }) {
-    const isMaster = this.cls.get<boolean>('isMaster');
-    const tenantId = this.cls.get<string>('tenantId');
-
-    if (isMaster) return;
-
-    if (resource.companyId !== tenantId) {
-      this.logger.warn(`⛔ Tentativa de acesso negado. Tenant: ${tenantId} tentou acessar Company: ${resource.companyId}`);
-      throw new ForbiddenException('Acesso negado: Você não tem permissão para alterar este registro.');
-    }
+  /**
+   * Atalho para o cliente Prisma estendido com Multi-tenant e Auditoria.
+   */
+  private get db() {
+    return this.prisma.extended;
   }
 
   // ===========================================================================
@@ -55,128 +48,102 @@ export class UsersService {
   // ===========================================================================
 
   public async createUser(data: CreateUserDto): Promise<User> {
-    console.log('📦 [Backend Service] Recebido createUser:', JSON.stringify(data));
-
     const { password, ...rest } = data;
-    const hashedPassword = await bcrypt.hash(password, 10);
+    
+    this.logger.log(`Iniciando criação de usuário: ${rest.email}`);
 
-    // Contexto do Usuário Logado (Quem está criando)
+    const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
+
     const isMaster = this.cls.get<boolean>('isMaster');
     const tenantId = this.cls.get<string>('tenantId');
 
-    console.log(`🔒 [Backend Context] IsMaster: ${isMaster}, TenantId: ${tenantId}`);
-
     let targetCompanyId = tenantId;
-    let targetRole: UserRole; // Variável para definir o cargo do novo usuário
+    let targetRole: UserRole = UserRole.EMPLOYER;
 
-    // --- REGRA DE NEGÓCIO: HIERARQUIA DE CRIAÇÃO ---
+    // --- REGRA DE NEGÓCIO E HIERARQUIA ---
+    // Se for Master, ele cria um ADMIN vinculado a uma empresa específica
     if (isMaster) {
-      // 1. MASTER criando
-      // Regra: Master cadastra ADMIN
       targetRole = UserRole.ADMIN;
-
-      // Lógica de Empresa do Master
-      if (data.companyId) {
-        targetCompanyId = data.companyId;
-      }
-    } else {
-      // 2. ADMIN criando
-      // Regra: Admin cadastra EMPLOYER (Colaborador)
-      targetRole = UserRole.EMPLOYER;
-
-      // Admin sempre cria na própria empresa
-      console.log(`👤 [Backend Logic] Admin criando usuário. Forçando Employer.`);
-    }
-
-    // Remove campos sensíveis ou que serão sobrescritos do DTO
-    const { companyId: _, role: __, ...userDataWithoutCompanyAndRole } = rest as any;
-
-    const userData: Prisma.UserUncheckedCreateInput = {
-      ...userDataWithoutCompanyAndRole,
-      password: hashedPassword,
-      status: SimpleStatus.ACTIVE,
-      companyId: targetCompanyId,
-      role: targetRole, // 🔥 AQUI APLICAMOS A REGRA FORÇADA
-    };
-
-    console.log(`💾 [Backend Prisma] Salvando: Role=${userData.role}, CompanyId=${userData.companyId}`);
+      if (data.companyId) targetCompanyId = data.companyId;
+    } 
+    // Se for ADMIN (não master), o tenantId já vem do token e o role é EMPLOYER
 
     try {
-      const user = await this.prisma.extended.user.create({
-        data: userData,
-        // 🔥 ADICIONE ISTO: Retorna o objeto company junto com o user criado
-        include: {
-          company: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
+      return await this.db.user.create({
+        data: {
+          name: rest.name,
+          email: rest.email,
+          password: hashedPassword,
+          contact: rest.contact,
+          document: rest.document,
+          professionalRole: rest.professionalRole,
+          status: rest.status || SimpleStatus.ACTIVE,
+          role: targetRole,
+          companyId: targetCompanyId,
         },
+        include: { company: { select: { id: true, name: true } } }
       });
-      return user;
     } catch (error: any) {
-      console.error('❌ [Backend Error]', error);
       if (error.code === 'P2002') {
-        throw new ConflictException('Email ou CPF já estão em uso.');
+        throw new ConflictException('Email ou CPF já cadastrados.');
       }
-      if (error.code === 'P2003') {
-        throw new BadRequestException('ID da Empresa inválido.');
-      }
-      throw new BadRequestException('Erro ao criar usuário.');
+      
+      this.logger.error(`Erro ao criar usuário: ${error.message}`);
+      throw new BadRequestException('Não foi possível processar o cadastro.');
     }
   }
 
-  // ... (Resto dos métodos update, remove, findAll permanecem iguais) ...
-
   public async updateUser(data: UpdateUserDto & { id: string }): Promise<User> {
-    const { id, password, ...updateFields } = data;
-    const userToUpdate = await this.findUserById(id);
-    this.validateOwnership(userToUpdate);
+    const { id, password, role, ...updateFields } = data;
+    const isMaster = this.cls.get<boolean>('isMaster');
 
-    const updateData: Prisma.UserUpdateInput = { ...updateFields };
+    // Valida se o usuário existe e se pertence ao tenant (via findUserById)
+    await this.findUserById(id);
 
-    if (password) {
-      updateData.password = await bcrypt.hash(password, SALT_ROUNDS);
+    const finalData: Prisma.UserUpdateInput = { ...updateFields };
+    
+    // 🔐 PREVENÇÃO DE ESCALAÇÃO DE PRIVILÉGIO
+    // Apenas Master pode alterar o nível de acesso (Role) de um usuário.
+    if (role && isMaster) {
+      finalData.role = role;
+    } else if (role) {
+      this.logger.warn(`Tentativa de alteração de Role bloqueada para o usuário ${id}`);
     }
 
-    return await this.prisma.extended.user.update({
+    if (password) {
+      finalData.password = await bcrypt.hash(password, SALT_ROUNDS);
+    }
+
+    return await this.db.user.update({
       where: { id },
-      data: updateData,
+      data: finalData,
     });
   }
 
   public async removeUser(userId: string): Promise<User> {
-    const userToDelete = await this.findUserById(userId);
-    this.validateOwnership(userToDelete);
+    // Garante que o usuário logado tem acesso a este ID antes de deletar
+    await this.findUserById(userId);
 
-    return await this.prisma.extended.user.delete({
+    return await this.db.user.delete({
       where: { id: userId },
     });
   }
+
+  // ===========================================================================
+  // 🔍 LEITURA (READ)
+  // ===========================================================================
 
   public async findUserById(userId: string): Promise<User> {
-    const user = await this.prisma.extended.user.findFirst({
+    // O uso de this.db garante a injeção automática de WHERE companyId = tenantId
+    const user = await this.db.user.findUnique({
       where: { id: userId },
       include: { company: { select: { id: true, name: true } } }
     });
-    if (!user) throw new NotFoundException('Usuário não encontrado.');
-    return user;
-  }
 
-  public async searchUsers(query: string): Promise<User[]> {
-    return this.prisma.extended.user.findMany({
-      where: {
-        OR: [
-          { name: { contains: query, mode: 'insensitive' } },
-          { email: { contains: query, mode: 'insensitive' } },
-        ],
-        status: SimpleStatus.ACTIVE,
-      },
-      take: 10,
-      orderBy: { name: 'asc' },
-      include: { company: { select: { id: true, name: true } } }
-    });
+    if (!user) {
+      throw new NotFoundException('Usuário não encontrado ou acesso negado.');
+    }
+    return user;
   }
 
   public async findAll(
@@ -186,19 +153,20 @@ export class UsersService {
   ): Promise<{ data: User[], total: number }> {
     const skip = (page - 1) * limit;
     const isMaster = this.cls.get<boolean>('isMaster');
+    
     const where: any = { ...filters };
-
+    
+    // Limpeza de filtros vazios
     Object.keys(where).forEach(key => where[key] === undefined && delete where[key]);
 
-    if (isMaster && filters.companyId) {
-      where.companyId = filters.companyId;
-    } else if (!isMaster) {
+    // Proteção Multi-tenant: Se não for Master, remove companyId do filtro para usar o tenantId do token
+    if (!isMaster) {
       delete where.companyId;
     }
 
     const [total, data] = await Promise.all([
-      this.prisma.extended.user.count({ where }),
-      this.prisma.extended.user.findMany({
+      this.db.user.count({ where }),
+      this.db.user.findMany({
         skip,
         take: limit,
         where,
@@ -214,13 +182,29 @@ export class UsersService {
     const isMaster = this.cls.get<boolean>('isMaster');
     const tenantId = this.cls.get<string>('tenantId');
 
+    // Validação de acesso manual para reforçar a barreira de segurança
     if (!isMaster && companyId !== tenantId) {
-      throw new ForbiddenException('Acesso negado.');
+      throw new ForbiddenException('Acesso negado: Você só pode listar membros da sua própria empresa.');
     }
 
-    return this.prisma.extended.user.findMany({
+    return this.db.user.findMany({
       where: { companyId, status: SimpleStatus.ACTIVE },
       orderBy: { name: 'asc' },
+    });
+  }
+
+  public async searchUsers(query: string): Promise<User[]> {
+    return this.db.user.findMany({
+      where: {
+        OR: [
+          { name: { contains: query, mode: 'insensitive' } },
+          { email: { contains: query, mode: 'insensitive' } },
+        ],
+        status: SimpleStatus.ACTIVE,
+      },
+      take: 10,
+      orderBy: { name: 'asc' },
+      include: { company: { select: { id: true, name: true } } }
     });
   }
 }

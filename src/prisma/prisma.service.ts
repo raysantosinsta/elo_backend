@@ -90,7 +90,7 @@ export class PrismaService
         };
         args.update = { ...args.update, userUpdateId: userId };
       } else {
-        args.data = { ...args.data, userUpdateId: userId };
+        if (args.data) args.data = { ...args.data, userUpdateId: userId };
       }
     }
   }
@@ -116,6 +116,17 @@ export class PrismaService
       'groupBy',
     ];
 
+    // --- PROTEÇÃO DE ESCRITA: Impede a troca de Tenant via Update ---
+    if (['update', 'updateMany'].includes(operation) && args.data) {
+      if (args.data.companyId) {
+        // Remove qualquer tentativa de sobrescrever o ID da empresa
+        delete args.data.companyId;
+        this.logger.warn(
+          `Tentativa bloqueada de alterar companyId no modelo ${model} pelo usuário.`,
+        );
+      }
+    }
+
     if (operationsWithWhere.includes(operation)) {
       args.where = args.where || {};
       args.where[model === 'Company' ? 'id' : 'companyId'] = tenantId;
@@ -127,7 +138,6 @@ export class PrismaService
           throw new Error(`Model delegate ${modelKey} not found.`);
         }
 
-        // Acesso tipado via keyof this e cast seguro para a interface
         const delegate = this[
           modelKey as keyof this
         ] as unknown as PrismaModelDelegate;
@@ -148,13 +158,11 @@ export class PrismaService
   async onModuleInit() {
     await this.$connect();
 
-    // Pegamos todas as chaves da instância atual
     const keys = Object.keys(this) as Array<keyof this>;
 
     for (const key of keys) {
       const keyStr = String(key);
 
-      // Ignora propriedades internas e o logger/cls
       if (
         keyStr.startsWith('$') ||
         keyStr.startsWith('_') ||
@@ -165,7 +173,6 @@ export class PrismaService
 
       const potentialDelegate = this[key];
 
-      // Verificação de segurança: se é um objeto e possui o método findMany (marca registrada de um model delegate)
       if (
         potentialDelegate &&
         typeof potentialDelegate === 'object' &&
