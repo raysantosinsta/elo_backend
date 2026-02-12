@@ -1,16 +1,10 @@
 /* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-base-to-string */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
-/* eslint-disable prettier/prettier */
-/* eslint-disable @typescript-eslint/no-unsafe-call */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
-/* eslint-disable @typescript-eslint/no-unsafe-return */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import {
   BadRequestException,
@@ -45,7 +39,6 @@ export interface PaginatedCompaniesResponse {
 export class CompaniesService {
   private readonly logger = new Logger(CompaniesService.name);
 
-  // Tipagem correta para evitar Promise<any>
   private inFlightRequests = new Map<string, Promise<unknown>>();
 
   constructor(
@@ -64,69 +57,111 @@ export class CompaniesService {
 
   private async executeWithResilience<T>(
     operation: string,
-    fn: () => Promise<T>, // ← sem signal
+    fn: () => Promise<T>,
     retries = 3,
-    timeoutMs = 30000, // aumentei para 30s como fallback, ajuste depois
+    timeoutMs = 30000,
   ): Promise<T> {
     const endTimer = this.dbHistogram.labels(operation).startTimer();
     let attempt = 0;
 
     while (attempt < retries) {
       attempt++;
+
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+      const timeoutId = setTimeout(() => {
+        controller.abort();
+        this.logger.warn(
+          `[Timeout] Operação ${operation} abortada após ${timeoutMs}ms (tentativa ${attempt}/${retries})`,
+        );
+      }, timeoutMs);
 
       try {
-        // Execute a fn sem passar signal
         const result = await Promise.race([
           fn(),
           new Promise<never>((_, reject) =>
-            controller.signal.addEventListener('abort', () =>
-              reject(new Error('Aborted by timeout')),
-            ),
+            controller.signal.addEventListener('abort', () => {
+              reject(new Error(`Timeout após ${timeoutMs}ms`));
+            }),
           ),
         ]);
+
         clearTimeout(timeoutId);
         endTimer();
         return result;
-      } catch (error: any) {
+      } catch (rawError: unknown) {
         clearTimeout(timeoutId);
 
-        // Seu log detalhado aqui (mantenha!)
-        const errorInfo = {
-          /* ... seu log ... */
+        // LOG DETALHADO
+        const errorInfo: Record<string, any> = {
+          attempt,
+          retries,
+          operation,
+          timeoutMs,
+          errorType: typeof rawError,
+          isError: rawError instanceof Error,
+          errorString: String(rawError),
         };
+
+        if (rawError instanceof Error) {
+          errorInfo.name = rawError.name;
+          errorInfo.message = rawError.message;
+          errorInfo.stack = rawError.stack?.split('\n').slice(0, 6).join('\n');
+        } else if (rawError !== null && typeof rawError === 'object') {
+          errorInfo.objectKeys = Object.keys(rawError);
+          errorInfo.code = (rawError as any).code;
+          errorInfo.meta = (rawError as any).meta;
+        }
+
         this.logger.error(
           `[executeWithResilience] Falha na tentativa ${attempt}/${retries}`,
           errorInfo,
         );
 
+        // DETECÇÃO ROBUSTA DE TIMEOUT
         const isTimeout =
-          error.name === 'AbortError' ||
-          String(error.message).includes('timeout');
+          (rawError instanceof Error && rawError.name === 'AbortError') ||
+          (rawError instanceof Error &&
+            String(rawError.message || '').toLowerCase().includes('timeout')) ||
+          String(rawError).toLowerCase().includes('timeout') ||
+          String(rawError).toLowerCase().includes('abort') ||
+          // Códigos Prisma de timeout
+          (rawError && typeof rawError === 'object' && (rawError as any).code === 'P2024') || // pool timeout
+          (rawError && typeof rawError === 'object' && (rawError as any).code === 'P1008') || // operation timeout
+          (rawError &&
+            typeof rawError === 'object' &&
+            String((rawError as any).message || '').toLowerCase().includes('timeout'));
 
         if (attempt >= retries) {
           endTimer();
+
           this.logger.error(
-            `Falha crítica em ${operation} após ${retries} tentativas.`,
+            `Falha crítica em ${operation} após ${retries} tentativas`,
             errorInfo,
           );
+
           if (isTimeout) {
             throw new RequestTimeoutException(
-              `Timeout na operação ${operation} após ${retries} tentativas`,
+              `Timeout na operação ${operation} após ${retries} tentativas (${timeoutMs}ms cada)`,
             );
           }
-          throw error;
+
+          if (rawError instanceof Error) {
+            throw rawError;
+          } else {
+            throw new InternalServerErrorException(
+              `Erro desconhecido em ${operation}: ${String(rawError || 'sem detalhes')}`,
+            );
+          }
         }
 
-        const delay = 100 * Math.pow(2, attempt) + Math.random() * 80;
-        await new Promise((r) => setTimeout(r, delay));
+        const delay = 100 * Math.pow(2, attempt) + Math.random() * 150;
+        this.logger.debug(`Aguardando ~${Math.round(delay)}ms antes da tentativa ${attempt + 1}`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
       }
     }
 
-    throw new InternalServerErrorException(
-      'Retry loop finalizado inesperadamente',
-    );
+    endTimer();
+    throw new InternalServerErrorException(`Loop de retry finalizado inesperadamente em ${operation}`);
   }
 
   async create(createCompanyDto: CreateCompanyDto): Promise<Company> {
@@ -134,55 +169,45 @@ export class CompaniesService {
       where: { cnpj: createCompanyDto.cnpj },
     });
 
-    if (existing)
-      throw new BadRequestException('Empresa já cadastrada com este CNPJ.');
+    if (existing) throw new BadRequestException('Empresa já cadastrada com este CNPJ.');
 
     const company = await this.executeWithResilience(
       'create_company',
       async () => {
-        // ← sem parâmetro signal
         return this.db.company.create({
           data: {
             ...createCompanyDto,
             status: createCompanyDto.status || SimpleStatus.ACTIVE,
           },
-          // NÃO passe { signal } aqui! Prisma não suporta AbortSignal nos argumentos
         });
       },
-      3, // retries (opcional, pode manter o default)
-      30000, // timeoutMs em milissegundos (recomendo 30s ou mais para create em supabase)
+      3,
+      30000,
     );
 
-    // ADICIONE ESTA LINHA:
     this.companyCounter.inc();
 
     return company;
   }
 
-  async findAll(
-    pagination: PaginationDto,
-  ): Promise<PaginatedCompaniesResponse> {
+  async findAll(pagination: PaginationDto): Promise<PaginatedCompaniesResponse> {
     const { page = 1, limit = 10 } = pagination;
     const isMaster = this.cls.get<boolean>('isMaster');
     const tenantId = this.cls.get<string>('tenantId');
 
     const cacheKey = `list_${isMaster ? 'm' : 't_' + (tenantId ?? 'none')}_p${page}_l${limit}`;
 
-    const cached =
-      await this.cacheManager.get<PaginatedCompaniesResponse>(cacheKey);
+    const cached = await this.cacheManager.get<PaginatedCompaniesResponse>(cacheKey);
     if (cached) return cached;
 
     const existingPromise = this.inFlightRequests.get(cacheKey);
-    if (existingPromise)
-      return existingPromise as Promise<PaginatedCompaniesResponse>;
+    if (existingPromise) return existingPromise as Promise<PaginatedCompaniesResponse>;
 
     const fetchPromise = (async (): Promise<PaginatedCompaniesResponse> => {
       try {
-        // Aumentamos o timeout para 15 segundos para evitar falsos positivos de lentidão
         return await this.executeWithResilience(
           'find_many_companies',
           async () => {
-            // ← sem (signal)
             const skip = (page - 1) * limit;
             const where: any = { status: SimpleStatus.ACTIVE };
 
@@ -191,7 +216,6 @@ export class CompaniesService {
               where.id = tenantId;
             }
 
-            // Execução sequencial (count depois do findMany) continua sendo uma boa prática
             const data = (await this.db.company.findMany({
               skip,
               take: limit,
@@ -212,14 +236,9 @@ export class CompaniesService {
                 estado: true,
                 cep: true,
               },
-              // NÃO passe signal aqui
             })) as Partial<Company>[];
 
-            const totalRaw = await this.db.company.count({
-              where,
-              // NÃO passe signal aqui também
-            });
-
+            const totalRaw = await this.db.company.count({ where });
             const total = Number(totalRaw);
 
             const result = {
@@ -229,13 +248,11 @@ export class CompaniesService {
               lastPage: Math.ceil(total / limit),
             };
 
-            // Cache por 5 minutos (300000 ms)
             await this.cacheManager.set(cacheKey, result, 300000);
-
             return result;
           },
-          3, // número de tentativas
-          30000, // Timeout de 30 segundos por tentativa (recomendado para Supabase + pooler)
+          3,
+          30000,
         );
       } finally {
         this.inFlightRequests.delete(cacheKey);
@@ -268,17 +285,12 @@ export class CompaniesService {
     return company;
   }
 
-  async update(
-    id: string,
-    updateCompanyDto: UpdateCompanyDto,
-  ): Promise<Company> {
+  async update(id: string, updateCompanyDto: UpdateCompanyDto): Promise<Company> {
     const current = await this.findOne(id);
     const isMaster = this.cls.get<boolean>('isMaster');
 
     if (!isMaster && (updateCompanyDto.status || updateCompanyDto.cnpj)) {
-      throw new ForbiddenException(
-        'Permissão negada para alterar campos sensíveis.',
-      );
+      throw new ForbiddenException('Permissão negada para alterar campos sensíveis.');
     }
 
     if (updateCompanyDto.cnpj && updateCompanyDto.cnpj !== current.cnpj) {
