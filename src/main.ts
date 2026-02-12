@@ -70,7 +70,8 @@ async function bootstrap() {
   // Bloqueia dados que não estão nos DTOs (whitelist) e transforma payloads (transform)
   app.useGlobalPipes(
     new ValidationPipe({
-      // whitelist: true, // Remove propriedades não decoradas no DTO (Sanitização)
+      whitelist: true, // Remove propriedades não decoradas no DTO (Sanitização)
+      forbidNonWhitelisted: true,
       // forbidNonWhitelisted: true, // Retorna erro se enviar campo extra (Segurança estrita)
       transform: true, // Converte tipos automaticamente (ex: string "1" -> number 1)
       transformOptions: {

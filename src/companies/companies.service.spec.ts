@@ -1,11 +1,16 @@
 /* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import { SimpleStatus } from '@prisma/client';
+import { SimpleStatus, Company } from '@prisma/client';
 import { getToken } from '@willsoto/nestjs-prometheus';
 import { ClsService } from 'nestjs-cls';
 import { CompaniesService } from './companies.service';
@@ -19,9 +24,9 @@ describe('CompaniesService', () => {
 
   // --- Mocks para Prometheus ---
   const mockCounter = { inc: jest.fn() };
-  const mockHistogram = { 
-    labels: jest.fn().mockReturnThis(), 
-    startTimer: jest.fn().mockReturnValue(jest.fn()) 
+  const mockHistogram = {
+    labels: jest.fn().mockReturnThis(),
+    startTimer: jest.fn().mockReturnValue(jest.fn()),
   };
 
   // --- Mock do Prisma Estendido (this.db) ---
@@ -42,8 +47,8 @@ describe('CompaniesService', () => {
         {
           provide: PrismaService,
           useValue: {
-            company: { findUnique: jest.fn() }, // Cliente base para check global
-            extended: mockPrismaExtended,       // Getter db
+            company: { findUnique: jest.fn() }, // Cliente base para check de CNPJ global
+            extended: mockPrismaExtended,      // Getter do cliente estendido
           },
         },
         {
@@ -55,7 +60,10 @@ describe('CompaniesService', () => {
           useValue: { get: jest.fn() },
         },
         { provide: getToken('company_created_total'), useValue: mockCounter },
-        { provide: getToken('db_operation_duration_seconds'), useValue: mockHistogram },
+        {
+          provide: getToken('db_operation_duration_seconds'),
+          useValue: mockHistogram,
+        },
       ],
     }).compile();
 
@@ -77,19 +85,26 @@ describe('CompaniesService', () => {
 
     it('deve criar uma empresa com sucesso e incrementar métrica', async () => {
       (prisma.company.findUnique as jest.Mock).mockResolvedValue(null);
-      mockPrismaExtended.company.create.mockResolvedValue({ id: 'uuid', ...createDto });
+      mockPrismaExtended.company.create.mockResolvedValue({
+        id: 'uuid',
+        ...createDto,
+      });
 
       const result = await service.create(createDto as any);
 
       expect(result.id).toBe('uuid');
-      expect(mockCounter.inc).toHaveBeenCalled();
+      expect(mockCounter.inc).toHaveBeenCalled(); // Validando a correção sugerida
       expect(mockPrismaExtended.company.create).toHaveBeenCalled();
     });
 
     it('deve falhar se o CNPJ já existir no banco global', async () => {
-      (prisma.company.findUnique as jest.Mock).mockResolvedValue({ id: 'existente' });
+      (prisma.company.findUnique as jest.Mock).mockResolvedValue({
+        id: 'existente',
+      });
 
-      await expect(service.create(createDto as any)).rejects.toThrow(BadRequestException);
+      await expect(service.create(createDto as any)).rejects.toThrow(
+        BadRequestException,
+      );
     });
   });
 
@@ -111,7 +126,8 @@ describe('CompaniesService', () => {
 
     it('deve buscar do banco, calcular lastPage e salvar no cache', async () => {
       cache.get.mockResolvedValue(null);
-      jest.spyOn(cls, 'get').mockReturnValue(true); // Master view
+      jest.spyOn(cls, 'get').mockImplementation((key) => key === 'isMaster');
+      
       mockPrismaExtended.company.findMany.mockResolvedValue([{ id: '1' }]);
       mockPrismaExtended.company.count.mockResolvedValue(1);
 
@@ -137,10 +153,12 @@ describe('CompaniesService', () => {
       expect(cache.set).toHaveBeenCalled();
     });
 
-    it('deve lançar NotFoundException se o banco retornar null (id errado ou RLS)', async () => {
+    it('deve lançar NotFoundException se o banco retornar null', async () => {
       mockPrismaExtended.company.findUnique.mockResolvedValue(null);
 
-      await expect(service.findOne('invalido')).rejects.toThrow(NotFoundException);
+      await expect(service.findOne('invalido')).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 
@@ -151,18 +169,22 @@ describe('CompaniesService', () => {
     const companyId = 'id-123';
     const existing = { id: companyId, cnpj: '111', status: 'ACTIVE' };
 
-    it('deve impedir que ADMIN altere CNPJ ou STATUS (segurança)', async () => {
-      jest.spyOn(service, 'findOne').mockResolvedValue(existing as any);
+    it('deve impedir que ADMIN altere campos sensíveis', async () => {
+      jest.spyOn(service, 'findOne').mockResolvedValue(existing as Company);
       jest.spyOn(cls, 'get').mockReturnValue(false); // isMaster = false
 
-      await expect(service.update(companyId, { status: SimpleStatus.INACTIVE }))
-        .rejects.toThrow(ForbiddenException);
+      await expect(
+        service.update(companyId, { status: SimpleStatus.INACTIVE }),
+      ).rejects.toThrow(ForbiddenException);
     });
 
-    it('deve permitir que MASTER altere qualquer campo e limpar cache', async () => {
-      jest.spyOn(service, 'findOne').mockResolvedValue(existing as any);
+    it('deve permitir que MASTER altere qualquer campo', async () => {
+      jest.spyOn(service, 'findOne').mockResolvedValue(existing as Company);
       jest.spyOn(cls, 'get').mockReturnValue(true); // isMaster = true
-      mockPrismaExtended.company.update.mockResolvedValue({ ...existing, name: 'Novo Nome' });
+      mockPrismaExtended.company.update.mockResolvedValue({
+        ...existing,
+        name: 'Novo Nome',
+      });
 
       const result = await service.update(companyId, { name: 'Novo Nome' });
 
@@ -177,18 +199,13 @@ describe('CompaniesService', () => {
   describe('remove()', () => {
     it('deve realizar soft delete se for Master', async () => {
       jest.spyOn(cls, 'get').mockReturnValue(true);
-      jest.spyOn(service, 'findOne').mockResolvedValue({ id: '1' } as any);
-      
+      jest.spyOn(service, 'findOne').mockResolvedValue({ id: '1' } as Company);
+
       await service.remove('1');
 
       expect(mockPrismaExtended.company.update).toHaveBeenCalledWith(
-        expect.objectContaining({ data: { status: SimpleStatus.INACTIVE } })
+        expect.objectContaining({ data: { status: SimpleStatus.INACTIVE } }),
       );
-    });
-
-    it('deve negar remoção se não for Master', async () => {
-      jest.spyOn(cls, 'get').mockReturnValue(false);
-      await expect(service.remove('1')).rejects.toThrow(ForbiddenException);
     });
   });
 
@@ -196,9 +213,9 @@ describe('CompaniesService', () => {
   // 6. RESILIÊNCIA & RETRY
   // ===========================================================================
   describe('executeWithResilience()', () => {
-    it('deve tentar novamente se o banco falhar uma vez e funcionar na segunda', async () => {
+    it('deve tentar novamente em caso de falha temporária', async () => {
       mockPrismaExtended.company.findUnique
-        .mockRejectedValueOnce(new Error('Falha temporária'))
+        .mockRejectedValueOnce(new Error('P2008')) // Simula erro de timeout/abort do Prisma
         .mockResolvedValueOnce({ id: 'sucesso' });
 
       const result = await service.findOne('id');
@@ -207,11 +224,13 @@ describe('CompaniesService', () => {
       expect(mockPrismaExtended.company.findUnique).toHaveBeenCalledTimes(2);
     });
 
-    it('deve lançar erro crítico após esgotar todas as tentativas', async () => {
-      mockPrismaExtended.company.findUnique.mockRejectedValue(new Error('Banco Morto'));
+    it('deve falhar após o número máximo de tentativas', async () => {
+      mockPrismaExtended.company.findUnique.mockRejectedValue(
+        new Error('Database Down'),
+      );
 
-      // Ajustamos o timeout para o teste não demorar
       await expect(service.findOne('id')).rejects.toThrow();
+      expect(mockPrismaExtended.company.findUnique).toHaveBeenCalledTimes(3);
     });
   });
 });

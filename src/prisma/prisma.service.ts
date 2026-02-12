@@ -1,20 +1,32 @@
-/* eslint-disable prettier/prettier */
-/* eslint-disable @typescript-eslint/no-this-alias */
-/* eslint-disable @typescript-eslint/no-explicit-any */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
-/* eslint-disable @typescript-eslint/no-unsafe-call */
-/* eslint-disable @typescript-eslint/no-unsafe-return */
-
-/* eslint-disable @typescript-eslint/no-explicit-any */
-import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  OnModuleInit,
+  OnModuleDestroy,
+  Logger,
+} from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { ClsService } from 'nestjs-cls';
 
+interface PrismaArgs {
+  where?: Record<string, any>;
+  data?: Record<string, any>;
+  create?: Record<string, any>;
+  update?: Record<string, any>;
+}
+
+interface PrismaModelDelegate {
+  findFirst: (args: PrismaArgs) => Promise<unknown>;
+  findFirstOrThrow: (args: PrismaArgs) => Promise<unknown>;
+}
+
 @Injectable()
-export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
-  private _extendedClient: any;
+export class PrismaService
+  extends PrismaClient
+  implements OnModuleInit, OnModuleDestroy
+{
   private readonly logger = new Logger('PrismaService');
+  private _extendedClient?: ReturnType<typeof this.extendClient>;
+  private readonly availableModels = new Set<string>();
 
   constructor(private readonly cls: ClsService) {
     super({ log: ['error'] });
@@ -22,88 +34,150 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
 
   get extended() {
     if (!this._extendedClient) {
-      const cls = this.cls;
-      const prismaContext = this;
-
-      this._extendedClient = this.$extends({
-        query: {
-          $allModels: {
-            async $allOperations({ model, operation, args, query }) {
-              const tenantId = cls.get<string>('tenantId');
-              const userId = cls.get<string>('userId');
-              const isMaster = cls.get<boolean>('isMaster');
-              const publicModels = ['Plan', 'Subscription'];
-              const safeArgs = (args as any) || {};
-
-              // --- 1. AUDITORIA AUTOMÁTICA ---
-              if (userId) {
-                if (operation === 'create') {
-                  safeArgs.data = { ...safeArgs.data, userCreateId: userId, userUpdateId: userId };
-                } else if (['update', 'updateMany', 'upsert'].includes(operation)) {
-                  if (operation === 'upsert') {
-                    safeArgs.create = { ...safeArgs.create, userCreateId: userId, userUpdateId: userId };
-                    safeArgs.update = { ...safeArgs.update, userUpdateId: userId };
-                  } else {
-                    safeArgs.data = { ...safeArgs.data, userUpdateId: userId };
-                  }
-                }
-              }
-
-              // --- 2. MULTI-TENANT PROTECTION ---
-              // Se for Master, ignora filtros de Tenant
-              if (isMaster) return query(safeArgs);
-
-              // Se não for Master e o modelo não for público, injeta o filtro
-              if (tenantId && !publicModels.includes(model)) {
-                
-                // Injeção de Segurança em Escritas (Update/Delete) e Leituras
-                const operationsWithWhere = [
-                  'findMany', 'findFirst', 'findUnique', 'findUniqueOrThrow',
-                  'count', 'update', 'updateMany', 'delete', 'deleteMany',
-                  'aggregate', 'groupBy'
-                ];
-
-                if (operationsWithWhere.includes(operation)) {
-                  safeArgs.where = safeArgs.where || {};
-                  
-                  // Se o modelo for 'Company', o filtro é no ID (o tenant só vê a si mesmo)
-                  // Se for outro modelo, o filtro é no campo 'companyId'
-                  if (model === 'Company') {
-                    safeArgs.where.id = tenantId;
-                  } else {
-                    safeArgs.where.companyId = tenantId;
-                  }
-
-                  // --- CONVERSÃO FIND UNIQUE -> FIND FIRST ---
-                  // Prisma findUnique exige campos @unique. Ao injetar o tenantId, 
-                  // a query deixa de ser um unique puro. Convertemos para findFirst.
-                  if (operation === 'findUnique' || operation === 'findUniqueOrThrow') {
-                    const camelCaseModel = model.charAt(0).toLowerCase() + model.slice(1);
-                    const delegate = (prismaContext as any)[camelCaseModel];
-                    
-                    if (operation === 'findUnique') return delegate.findFirst(safeArgs);
-                    return delegate.findFirstOrThrow(safeArgs);
-                  }
-                }
-
-                // Injeção de Segurança no Create (vincula ao tenant atual)
-                if (operation === 'create' && model !== 'Company') {
-                  safeArgs.data = { ...safeArgs.data, companyId: tenantId };
-                }
-              }
-
-              return query(safeArgs);
-            },
-          },
-        },
-      });
+      this._extendedClient = this.extendClient();
     }
     return this._extendedClient;
   }
 
+  private extendClient() {
+    return this.$extends({
+      query: {
+        $allModels: {
+          $allOperations: async ({ model, operation, args, query }) => {
+            const tenantId = this.cls.get<string>('tenantId');
+            const userId = this.cls.get<string>('userId');
+            const isMaster = this.cls.get<boolean>('isMaster');
+
+            const publicModels = ['Plan', 'Subscription'];
+            const safeArgs = (args as PrismaArgs) || {};
+
+            if (userId) {
+              this.applyAudit(operation, safeArgs, userId);
+            }
+
+            if (isMaster) return query(safeArgs);
+
+            if (tenantId && !publicModels.includes(model)) {
+              return this.applyTenantFilter(
+                model,
+                operation,
+                safeArgs,
+                tenantId,
+                query,
+              );
+            }
+
+            return query(safeArgs);
+          },
+        },
+      },
+    });
+  }
+
+  private applyAudit(
+    operation: string,
+    args: PrismaArgs,
+    userId: string,
+  ): void {
+    if (operation === 'create') {
+      args.data = { ...args.data, userCreateId: userId, userUpdateId: userId };
+    } else if (['update', 'updateMany', 'upsert'].includes(operation)) {
+      if (operation === 'upsert') {
+        args.create = {
+          ...args.create,
+          userCreateId: userId,
+          userUpdateId: userId,
+        };
+        args.update = { ...args.update, userUpdateId: userId };
+      } else {
+        args.data = { ...args.data, userUpdateId: userId };
+      }
+    }
+  }
+
+  private async applyTenantFilter(
+    model: string,
+    operation: string,
+    args: PrismaArgs,
+    tenantId: string,
+    query: (args: any) => Promise<unknown>,
+  ): Promise<unknown> {
+    const operationsWithWhere = [
+      'findMany',
+      'findFirst',
+      'findUnique',
+      'findUniqueOrThrow',
+      'count',
+      'update',
+      'updateMany',
+      'delete',
+      'deleteMany',
+      'aggregate',
+      'groupBy',
+    ];
+
+    if (operationsWithWhere.includes(operation)) {
+      args.where = args.where || {};
+      args.where[model === 'Company' ? 'id' : 'companyId'] = tenantId;
+
+      if (operation === 'findUnique' || operation === 'findUniqueOrThrow') {
+        const modelKey = model.charAt(0).toLowerCase() + model.slice(1);
+
+        if (!this.availableModels.has(modelKey)) {
+          throw new Error(`Model delegate ${modelKey} not found.`);
+        }
+
+        // Acesso tipado via keyof this e cast seguro para a interface
+        const delegate = this[
+          modelKey as keyof this
+        ] as unknown as PrismaModelDelegate;
+
+        return operation === 'findUnique'
+          ? delegate.findFirst(args)
+          : delegate.findFirstOrThrow(args);
+      }
+    }
+
+    if (operation === 'create' && model !== 'Company') {
+      args.data = { ...args.data, companyId: tenantId };
+    }
+
+    return query(args);
+  }
+
   async onModuleInit() {
     await this.$connect();
-    this.logger.log('✅ Prisma connected with Multi-tenant Extension active.');
+
+    // Pegamos todas as chaves da instância atual
+    const keys = Object.keys(this) as Array<keyof this>;
+
+    for (const key of keys) {
+      const keyStr = String(key);
+
+      // Ignora propriedades internas e o logger/cls
+      if (
+        keyStr.startsWith('$') ||
+        keyStr.startsWith('_') ||
+        ['logger', 'cls', 'availableModels'].includes(keyStr)
+      ) {
+        continue;
+      }
+
+      const potentialDelegate = this[key];
+
+      // Verificação de segurança: se é um objeto e possui o método findMany (marca registrada de um model delegate)
+      if (
+        potentialDelegate &&
+        typeof potentialDelegate === 'object' &&
+        'findMany' in potentialDelegate
+      ) {
+        this.availableModels.add(keyStr);
+      }
+    }
+
+    this.logger.log(
+      `✅ Prisma Service initialized. ${this.availableModels.size} models mapped.`,
+    );
   }
 
   async onModuleDestroy() {
