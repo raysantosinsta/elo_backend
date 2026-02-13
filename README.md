@@ -9,3 +9,6 @@ npx prisma migrate diff \
   mkdir prisma/migrations/20260101_etapa_cargo
 
   npx prisma migrate resolve --applied 20260101_etapa_cargo
+
+
+   npx prisma generate

@@ -5,48 +5,47 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import {
-  Controller,
-  Post,
-  Get,
-  Put,
-  Delete,
+  BadRequestException,
   Body,
+  Controller,
+  Delete,
+  Get,
+  Logger,
   Param,
+  ParseUUIDPipe,
+  Post,
+  Put,
+  Query,
   Req,
+  UploadedFile,
   UseGuards,
   UseInterceptors,
-  UploadedFile,
-  ParseUUIDPipe,
-  Logger,
-  BadRequestException,
-  Query,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
-  ApiOperation,
-  ApiTags,
   ApiConsumes,
-  ApiBody,
+  ApiOperation,
+  ApiTags
 } from '@nestjs/swagger';
 
 // --- Guards e Segurança ---
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { RolesGuard } from '../auth/roles.guard';
-import { PermissionsGuard } from '../auth/permissions.guard';
 import {
-  RequirePermissions,
   AppPermission,
+  RequirePermissions,
 } from '../auth/permissions.decorator';
+import { PermissionsGuard } from '../auth/permissions.guard';
+import { RolesGuard } from '../auth/roles.guard';
 
 // --- Services e DTOs ---
-import { FlowService } from './flow.service';
 import {
   CreateFlowDto,
   CreateFlowItemDto,
+  CreateStageDto,
   FlowFilterDto,
-  CreateStageDto, // 🔥 IMPORTADO
 } from './dto/create-flow.dto';
+import { FlowService } from './flow.service';
 
 @ApiTags('Product Flow (Kanban)')
 @ApiBearerAuth()
