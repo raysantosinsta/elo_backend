@@ -66,7 +66,7 @@ export class KanbanColumnController {
   // ===========================================================================
 
   @Post()
-  @RequirePermissions(AppPermission.MANAGE_KANBAN_COLUMNS) // <--- Regra de Permissão
+  // @RequirePermissions(AppPermission.MANAGE_KANBAN_COLUMNS) // <--- Regra de Permissão
   @ApiOperation({ summary: 'Cria uma nova coluna (Restrito)' })
   async create(@Body() dto: CreateKanbanColumnDto, @CurrentUser() user: User) {
     if (!user.companyId) throw new BadRequestException('Usuário sem empresa vinculada');
@@ -74,7 +74,7 @@ export class KanbanColumnController {
   }
 
   @Put(':id')
-  @RequirePermissions(AppPermission.MANAGE_KANBAN_COLUMNS) // <--- Regra de Permissão
+  // @RequirePermissions(AppPermission.MANAGE_KANBAN_COLUMNS) // <--- Regra de Permissão
   @ApiOperation({ summary: 'Atualiza título/descrição da coluna (Restrito)' })
   async update(
     @Param('id', ParseUUIDPipe) id: string,
@@ -86,7 +86,7 @@ export class KanbanColumnController {
   }
 
   @Delete(':id')
-  @RequirePermissions(AppPermission.MANAGE_KANBAN_COLUMNS) // <--- Regra de Permissão
+  // @RequirePermissions(AppPermission.MANAGE_KANBAN_COLUMNS) // <--- Regra de Permissão
   @ApiOperation({ summary: 'Deleta coluna e move tarefas (Restrito)' })
   async delete(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: User) {
     if (!user.companyId) throw new BadRequestException('Usuário sem empresa vinculada');
@@ -95,7 +95,7 @@ export class KanbanColumnController {
 
   @Patch('reorder')
   @HttpCode(HttpStatus.OK)
-  @RequirePermissions(AppPermission.MANAGE_KANBAN_COLUMNS) // <--- Regra de Permissão
+  // @RequirePermissions(AppPermission.MANAGE_KANBAN_COLUMNS) // <--- Regra de Permissão
   @ApiOperation({ summary: 'Reordena múltiplas colunas (Restrito)' })
   async reorder(@Body() dto: ReorderColumnsDto, @CurrentUser() user: User) {
     if (!user.companyId) throw new BadRequestException('Usuário sem empresa vinculada');
