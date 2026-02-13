@@ -1,7 +1,4 @@
 /* eslint-disable prettier/prettier */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
-/* eslint-disable @typescript-eslint/no-unsafe-call */
-/* eslint-disable @typescript-eslint/no-unsafe-return */
 import { SimpleStatus } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
@@ -11,57 +8,97 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
-  IsUUID,
+  Matches,
   Max,
-  Min
+  Min,
 } from 'class-validator';
+import { PartialType } from '@nestjs/mapped-types';
 
-// --- DTOs (Mantidos) ---
+/**
+ * DTO para Criação de Empresa
+ * Focado em sanidade de dados e integridade.
+ */
 export class CreateCompanyDto {
-  @IsNotEmpty() @IsString() name: string;
-  @IsNotEmpty() @IsString() cnpj: string;
-  @IsNotEmpty() @IsString() telefone: string;
-  @IsNotEmpty() @IsEmail() email: string;
-  @IsNotEmpty() @IsString() endereco: string;
-  @IsNotEmpty() @IsString() numero: string;
-  @IsOptional() @IsString() complemento?: string;
-  @IsNotEmpty() @IsString() bairro: string;
-  @IsNotEmpty() @IsString() cidade: string;
-  @IsNotEmpty() @IsString() estado: string;
-  @IsNotEmpty() @IsString() cep: string;
-  @IsOptional() @IsString() ramoAtividade?: string;
-  @IsOptional() @IsUUID() userCreateId?: string;
-  @IsOptional() @IsEnum(SimpleStatus) status?: SimpleStatus;
+  @IsNotEmpty({ message: 'Nome é obrigatório' })
+  @IsString()
+  name: string;
+
+  @IsNotEmpty({ message: 'CNPJ é obrigatório' })
+  @IsString()
+  @Matches(/^\d{14}$/, { message: 'CNPJ deve conter exatamente 14 números' })
+  cnpj: string;
+
+  @IsNotEmpty({ message: 'E-mail é obrigatório' })
+  @IsEmail({}, { message: 'E-mail em formato inválido' })
+  email: string;
+
+  @IsNotEmpty({ message: 'Telefone é obrigatório' })
+  @IsString()
+  telefone: string;
+
+  @IsNotEmpty()
+  @IsString()
+  endereco: string;
+
+  @IsNotEmpty()
+  @IsString()
+  numero: string;
+
+  @IsOptional()
+  @IsString()
+  complemento?: string;
+
+  @IsNotEmpty()
+  @IsString()
+  bairro: string;
+
+  @IsNotEmpty()
+  @IsString()
+  cidade: string;
+
+  @IsNotEmpty()
+  @IsString()
+  estado: string;
+
+  @IsNotEmpty()
+  @IsString()
+  @Matches(/^\d{8}$/, { message: 'CEP deve conter exatamente 8 números' })
+  cep: string;
+
+  @IsOptional()
+  @IsString()
+  ramoAtividade?: string;
+
+  @IsOptional()
+  @IsEnum(SimpleStatus, { message: 'Status inválido' })
+  status?: SimpleStatus;
+
+  // SEGURANÇA: userCreateId removido. Injeção automática via PrismaService.
 }
 
-export class UpdateCompanyDto {
-  @IsOptional() @IsString() name?: string;
-  @IsOptional() @IsString() cnpj?: string;
-  @IsOptional() @IsString() telefone?: string;
-  @IsOptional() @IsEmail() email?: string;
-  @IsOptional() @IsString() endereco?: string;
-  @IsOptional() @IsString() numero?: string;
-  @IsOptional() @IsString() complemento?: string;
-  @IsOptional() @IsString() bairro?: string;
-  @IsOptional() @IsString() cidade?: string;
-  @IsOptional() @IsString() estado?: string;
-  @IsOptional() @IsString() cep?: string;
-  @IsOptional() @IsString() ramoAtividade?: string;
-  @IsOptional() @IsUUID() userUpdateId?: string;
-  @IsOptional() @IsEnum(SimpleStatus) status?: SimpleStatus;
+/**
+ * DTO para Atualização de Empresa
+ * Herda as validações do Create, mas torna tudo opcional.
+ */
+export class UpdateCompanyDto extends PartialType(CreateCompanyDto) {
+  // SEGURANÇA: userUpdateId removido. Injeção automática via PrismaService.
 }
 
+/**
+ * DTO para Paginação
+ * Garante que os valores de Query String sejam convertidos corretamente.
+ */
 export class PaginationDto {
   @IsOptional()
   @IsInt()
   @Min(1)
-  @Type(() => Number) // <--- Converte "1" para 1
-  page?: number;
+  @Type(() => Number) // Converte string da URL para Number
+  page?: number = 1;
 
   @IsOptional()
   @IsInt()
   @Min(1)
-  @Max(100) // Mantido como você pediu
-  @Type(() => Number) // <--- Converte "100" para 100
-  limit?: number;
+  @Max(100)
+  @Type(() => Number) // Converte string da URL para Number
+  limit?: number = 10;
 }

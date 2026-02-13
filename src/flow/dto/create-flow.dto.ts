@@ -21,10 +21,6 @@ export class CreateFlowDto {
   @IsString()
   @IsOptional()
   color?: string; // 🔥 Campo de cor adicionado
-
-  @IsOptional()
-  @IsUUID()
-  companyId?: string;
 }
 
 export class CreateStageDto {
@@ -32,6 +28,10 @@ export class CreateStageDto {
   @IsString()
   @IsNotEmpty()
   name: string;
+
+  @IsOptional()
+  @IsUUID()
+  flowId?: string;
 
   @ApiProperty({ required: false })
   @IsOptional()
@@ -42,6 +42,15 @@ export class CreateStageDto {
   @IsOptional()
   @IsNumber()
   order?: number;
+
+  // 🔥 NOVO CAMPO: Cargo permitido para mover card
+  @ApiProperty({ 
+    required: false, 
+    description: 'Cargo técnico necessário para mover itens desta etapa (ex: "modelista")' 
+  })
+  @IsOptional()
+  @IsString()
+  allowedRole?: string;
 }
 
 export class CreateFlowItemDto {
@@ -108,6 +117,18 @@ export class CreateFlowItemDto {
   @IsOptional()
   @IsUUID()
   supplierId?: string; // <--- Novo campo para salvar a oficina
+
+   @IsOptional()
+  @IsString()
+  status?: string; // Adicione se o Flow tiver um status
+
+
+
+  @ApiProperty({ description: 'ID do fluxo relacionado', required: false })
+  @IsUUID()        // Se for um UUID, use IsUUID, caso contrário use IsString
+  @IsOptional()
+  flowId?: string;
+
 }
 
 // Crie o DTO de Filtro (Novo)

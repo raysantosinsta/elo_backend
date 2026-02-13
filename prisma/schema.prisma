@@ -886,6 +886,8 @@ model FlowStage {
   order Int     @default(0) @map("ordem")
   color String? @map("cor") @db.VarChar(7)
 
+  allowedRole String? @map("cargo_permitido") @db.VarChar(100)
+
   // Relacionamento com Fluxo
   flowId String      @map("fluxo_id") @db.Uuid
   flow   ProductFlow @relation(fields: [flowId], references: [id])
@@ -907,6 +909,7 @@ model FlowItem {
   id          String @id @default(uuid()) @map("id") @db.Uuid
   title       String @map("titulo") @db.VarChar(200)
   orderNumber String @map("numero_pedido") @db.VarChar(50)
+  status      String @default("PENDENTE") // Verifique se este campo existe aqui!
 
   // Posição
   stageId      String?    @map("etapa_id") @db.Uuid

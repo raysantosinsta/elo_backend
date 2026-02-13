@@ -5,7 +5,7 @@
 /* eslint-disable @typescript-eslint/require-await */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from 'src/prisma/prisma.service';
+import { PrismaService } from '../prisma/prisma.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { Prisma, SimpleStatus } from '@prisma/client';
@@ -15,40 +15,33 @@ import { ClsService } from 'nestjs-cls';
 export class ProductsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly cls: ClsService // Usado apenas para pegar ID no nested write se necessário
+    private readonly cls: ClsService,
   ) {}
 
-  // Atalho para o cliente estendido
   private get db() {
     return this.prisma.extended;
   }
 
   // --- CREATE ---
-  // src/products/products.service.ts
-
-  // --- CREATE ---
   async create(createProductDto: CreateProductDto) {
     const { materials, ...productData } = createProductDto;
     
-    // 1. Pegue os IDs do contexto (CLS)
-    const userId = this.cls.get('userId');
-    const companyId = this.cls.get('tenantId'); // <--- ADICIONE ISSO
+    const userId = this.cls.get<string>('userId');
+    const companyId = this.cls.get<string>('tenantId');
 
     return this.db.product.create({
       data: {
         ...productData,
-        
-        // 2. Injete explicitamente para garantir que não falhe
-        companyId: companyId, // <--- ADICIONE ISSO
-        
-        // O userCreateId parece estar vindo do extended, mas se quiser garantir:
-        // userCreateId: userId, 
-
-        materials: materials && materials?.length > 0 ? {
+        companyId, // Garantindo o vínculo do tenant
+        userCreateId: userId,
+        userUpdateId: userId,
+        materials: materials && materials.length > 0 ? {
           create: materials.map((mat) => ({
             materialId: mat.materialId,
             quantidade: mat.quantidade,
+            // Injeção manual obrigatória em Nested Writes
             userCreateId: userId,
+            userUpdateId: userId,
           })),
         } : undefined,
       },
@@ -64,7 +57,6 @@ export class ProductsService {
   async findAll(page = 1, limit = 10, search?: string) {
     const skip = (page - 1) * limit;
 
-    // O filtro 'companyId' é injetado automaticamente no 'findMany' e 'count'
     const where: Prisma.ProductWhereInput = {
       status: SimpleStatus.ACTIVE,
       ...(search && {
@@ -100,7 +92,6 @@ export class ProductsService {
 
   // --- FIND ONE ---
   async findOne(id: string) {
-    // O extended converte findUnique para findFirst e injeta companyId
     const product = await this.db.product.findUnique({
       where: { id },
       include: {
@@ -117,25 +108,22 @@ export class ProductsService {
 
   // --- UPDATE ---
   async update(id: string, updateProductDto: UpdateProductDto) {
-    // Verifica existência (Opcional, pois o update do extended já filtra por companyId e lançaria erro se não achasse)
-    // await this.findOne(id); 
-
     const { materials, ...productData } = updateProductDto;
-    const userId = this.cls.get('userId');
+    const userId = this.cls.get<string>('userId');
 
-    // Montando o objeto de dados. userUpdateId será injetado pelo extended na raiz.
     const data: Prisma.ProductUpdateInput = {
       ...productData,
     };
 
-    // Tratamento de materiais (Reset: apaga tudo e recria)
     if (materials) {
       data.materials = {
-        deleteMany: {}, // Remove vínculos existentes
+        deleteMany: {}, 
         create: materials.map((mat) => ({
           materialId: mat.materialId,
           quantidade: mat.quantidade,
-          userCreateId: userId, // Injeção manual no nested
+          // Injeção manual obrigatória em Nested Writes
+          userCreateId: userId,
+          userUpdateId: userId,
         })),
       };
     }
@@ -146,7 +134,7 @@ export class ProductsService {
         data,
         include: { materials: true },
       });
-    } catch (error) {
+    } catch (error: any) {
       if (error.code === 'P2025') throw new NotFoundException('Produto não encontrado');
       throw error;
     }
@@ -159,24 +147,19 @@ export class ProductsService {
         where: { id },
         data: {
           status: SimpleStatus.INACTIVE,
-          // userUpdateId injetado automaticamente
         },
       });
-    } catch (error) {
+    } catch (error: any) {
       if (error.code === 'P2025') throw new NotFoundException('Produto não encontrado');
       throw error;
     }
   }
 
-  // --- Métodos de Materiais (Pivô) ---
+  // --- MÉTODOS DE MATERIAIS (PIVÔ) ---
 
   async addMaterial(productId: string, materialId: string, quantidade: number) {
-    // Verifica se o produto pertence à empresa (garantia extra)
     await this.findOne(productId); 
-    
-    // Como ProductMaterial não tem vínculo direto com Company (depende do Product),
-    // o extended pode não filtrar companyId aqui se o modelo ProductMaterial não tiver esse campo.
-    // Mas ele vai injetar userCreateId/userUpdateId.
+    const userId = this.cls.get<string>('userId');
 
     return this.db.productMaterial.upsert({
       where: {
@@ -184,13 +167,14 @@ export class ProductsService {
       },
       update: {
         quantidade,
-        // userUpdateId automático
+        userUpdateId: userId, // Injeção manual pois upsert tem lógica complexa
       },
       create: {
         productId,
         materialId,
         quantidade,
-        // userCreateId automático
+        userCreateId: userId, // CORREÇÃO: userCreateId é obrigatório aqui
+        userUpdateId: userId, // CORREÇÃO: userUpdateId é obrigatório aqui
       },
     });
   }
@@ -204,7 +188,7 @@ export class ProductsService {
           productId_materialId: { productId, materialId },
         },
       });
-    } catch (error) {
+    } catch (error: any) {
       if (error.code === 'P2025') throw new NotFoundException('Vínculo não encontrado');
       throw error;
     }
