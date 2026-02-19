@@ -380,78 +380,78 @@ async saveTemplate(companyId: string, flowId: string, name: string) {
   }
 
   async createFlowItem(
-    companyId: string,
-    flowId: string,
-    userId: string,
-    dto: CreateFlowItemDto,
-  ) {
-    const user = await this.prisma.user.findFirst({
-      where: { id: userId, companyId },
+  companyId: string,
+  flowId: string,
+  userId: string,
+  dto: CreateFlowItemDto,
+) {
+  const user = await this.prisma.user.findFirst({
+    where: { id: userId, companyId },
+  });
+  if (!user) throw new ForbiddenException();
+
+  return this.prisma.$transaction(async (tx) => {
+    // 🔥 CORREÇÃO: Buscar a etapa sem vincular ao flowId
+    const targetStage = dto.stageId
+      ? await tx.flowStage.findFirst({
+          where: { 
+            id: dto.stageId, 
+            companyId,
+            // 🔥 REMOVA flowId daqui - a etapa pode ser de qualquer fluxo
+          },
+        })
+      : await tx.flowStage.findFirst({
+          where: { flowId, companyId },
+          orderBy: { order: 'asc' },
+        });
+
+    if (!targetStage) throw new BadRequestException('Etapa inválida.');
+    
+    // 🔥 Validar permissão na etapa (se necessário)
+    this.validateStageAccess(user, targetStage);
+
+    const lastItem = await tx.flowItem.findFirst({
+      where: { stageId: targetStage.id },
+      orderBy: { orderInStage: 'desc' },
     });
-    if (!user) throw new ForbiddenException();
 
-    return this.prisma.$transaction(async (tx) => {
-      const targetStage = dto.stageId
-        ? await tx.flowStage.findFirst({
-            where: { id: dto.stageId, flowId, companyId },
-          })
-        : await tx.flowStage.findFirst({
-            where: { flowId, companyId },
-            orderBy: { order: 'asc' },
-          });
+    const dataToCreate: any = {
+      title: dto.title,
+      flowId: flowId, // Mantém o flowId escolhido
+      companyId: companyId,
+      stageId: targetStage.id, // Usa a etapa escolhida (pode ser de outro fluxo)
+      orderInStage: (lastItem?.orderInStage ?? -1) + 1,
+      enteredAt: new Date(),
 
-      if (!targetStage) throw new BadRequestException('Etapa inválida.');
-      this.validateStageAccess(user, targetStage);
+      orderNumber: dto.orderNumber || '',
+      productRef: dto.productRef || '',
+      quantity: dto.quantity || 1,
+      priority: dto.priority || 3,
+      status: dto.status || 'PENDENTE',
+      description: dto.description || null,
+      assignedToId: dto.assignedToId || null,
+      supplierId: dto.supplierId || null,
+    };
 
-      const lastItem = await tx.flowItem.findFirst({
-        where: { stageId: targetStage.id },
-        orderBy: { orderInStage: 'desc' },
-      });
+    // Converter datas
+    if (dto.dueDate) {
+      dataToCreate.dueDate = new Date(dto.dueDate);
+    }
+    if (dto.productionStartedAt) {
+      dataToCreate.productionStartedAt = new Date(dto.productionStartedAt);
+    }
+    if (dto.deliveryAt) {
+      dataToCreate.deliveryAt = new Date(dto.deliveryAt);
+    }
 
-      // 🔥 CORREÇÃO: Criar objeto manualmente com conversão direta das datas
-      const dataToCreate: any = {
-        // Campos obrigatórios
-        title: dto.title,
-        flowId: flowId,
-        companyId: companyId,
-        stageId: targetStage.id,
-        orderInStage: (lastItem?.orderInStage ?? -1) + 1,
-        enteredAt: new Date(),
-
-        // Campos opcionais com valores padrão
-        orderNumber: dto.orderNumber || '',
-        productRef: dto.productRef || '',
-        quantity: dto.quantity || 1,
-        priority: dto.priority || 3,
-        status: dto.status || 'PENDENTE',
-        description: dto.description || null,
-        assignedToId: dto.assignedToId || null,
-        supplierId: dto.supplierId || null,
-      };
-
-      // 🔥 Converter dueDate para Date se existir
-      if (dto.dueDate) {
-        dataToCreate.dueDate = new Date(dto.dueDate);
-      }
-
-      // 🔥 Converter productionStartedAt para Date se existir
-      if (dto.productionStartedAt) {
-        dataToCreate.productionStartedAt = new Date(dto.productionStartedAt);
-      }
-
-      // 🔥 Converter deliveryAt para Date se existir
-      if (dto.deliveryAt) {
-        dataToCreate.deliveryAt = new Date(dto.deliveryAt);
-      }
-
-      const item = await tx.flowItem.create({
-        data: dataToCreate,
-      });
-
-      await this.invalidateFlowCache(companyId, flowId);
-      return item;
+    const item = await tx.flowItem.create({
+      data: dataToCreate,
     });
-  }
+
+    await this.invalidateFlowCache(companyId, flowId);
+    return item;
+  });
+}
 
   async updateFlowItem(
     companyId: string,
