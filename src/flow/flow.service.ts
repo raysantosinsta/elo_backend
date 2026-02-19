@@ -32,6 +32,8 @@ import {
   CreateFlowDto,
   CreateFlowItemDto,
   CreateStageDto,
+  DateFilterType,
+  FlowFilterDto,
 } from './dto/create-flow.dto';
 
 // --- MÉTRICAS ---
@@ -350,7 +352,7 @@ export class FlowService {
               orderBy: { orderInStage: 'asc' },
               include: {
                 images: { take: 1, select: { url: true, id: true } },
-                assignedTo: { select: { name: true } },
+                assignedTo: { select: { name: true, id: true } }, // Inclui assignedTo
                 supplier: { select: { name: true } },
                 _count: {
                   select: { images: true, audios: true, videos: true },
@@ -393,16 +395,47 @@ export class FlowService {
         where: { stageId: targetStage.id },
         orderBy: { orderInStage: 'desc' },
       });
+
+      // 🔥 CORREÇÃO: Criar objeto manualmente com conversão direta das datas
+      const dataToCreate: any = {
+        // Campos obrigatórios
+        title: dto.title,
+        flowId: flowId,
+        companyId: companyId,
+        stageId: targetStage.id,
+        orderInStage: (lastItem?.orderInStage ?? -1) + 1,
+        enteredAt: new Date(),
+
+        // Campos opcionais com valores padrão
+        orderNumber: dto.orderNumber || '',
+        productRef: dto.productRef || '',
+        quantity: dto.quantity || 1,
+        priority: dto.priority || 3,
+        status: dto.status || 'PENDENTE',
+        description: dto.description || null,
+        assignedToId: dto.assignedToId || null,
+        supplierId: dto.supplierId || null,
+      };
+
+      // 🔥 Converter dueDate para Date se existir
+      if (dto.dueDate) {
+        dataToCreate.dueDate = new Date(dto.dueDate);
+      }
+
+      // 🔥 Converter productionStartedAt para Date se existir
+      if (dto.productionStartedAt) {
+        dataToCreate.productionStartedAt = new Date(dto.productionStartedAt);
+      }
+
+      // 🔥 Converter deliveryAt para Date se existir
+      if (dto.deliveryAt) {
+        dataToCreate.deliveryAt = new Date(dto.deliveryAt);
+      }
+
       const item = await tx.flowItem.create({
-        data: {
-          ...dto,
-          flowId,
-          companyId,
-          stageId: targetStage.id,
-          orderInStage: (lastItem?.orderInStage ?? -1) + 1,
-          enteredAt: new Date(),
-        } as any,
+        data: dataToCreate,
       });
+
       await this.invalidateFlowCache(companyId, flowId);
       return item;
     });
@@ -435,18 +468,50 @@ export class FlowService {
       this.validateStageAccess(user, newStage);
     }
 
+    // 🔥 CORREÇÃO: Criar objeto de atualização manualmente
+    const updateData: any = {
+      title: data.title,
+      description: data.description,
+      priority: data.priority,
+      quantity: data.quantity,
+      supplierId: data.supplierId,
+      assignedToId: data.assignedToId,
+      stageId: data.stageId,
+      orderNumber: data.orderNumber,
+      productRef: data.productRef,
+      status: data.status,
+      updatedAt: new Date(),
+    };
+
+    // 🔥 Remover campos undefined
+    Object.keys(updateData).forEach((key) => {
+      if (updateData[key] === undefined) {
+        delete updateData[key];
+      }
+    });
+
+    // 🔥 Converter dueDate para Date se existir
+    if (data.dueDate !== undefined) {
+      updateData.dueDate = data.dueDate ? new Date(data.dueDate) : null;
+    }
+
+    // 🔥 Converter productionStartedAt para Date se existir
+    if (data.productionStartedAt !== undefined) {
+      updateData.productionStartedAt = data.productionStartedAt
+        ? new Date(data.productionStartedAt)
+        : null;
+    }
+
+    // 🔥 Converter deliveryAt para Date se existir
+    if (data.deliveryAt !== undefined) {
+      updateData.deliveryAt = data.deliveryAt
+        ? new Date(data.deliveryAt)
+        : null;
+    }
+
     const updated = await this.prisma.flowItem.update({
       where: { id: itemId },
-      data: {
-        title: data.title,
-        description: data.description,
-        priority: data.priority,
-        quantity: data.quantity,
-        supplierId: data.supplierId,
-        assignedToId: data.assignedToId,
-        stageId: data.stageId,
-        updatedAt: new Date(),
-      },
+      data: updateData,
     });
 
     await this.invalidateFlowCache(companyId, item.flowId);
@@ -659,19 +724,269 @@ export class FlowService {
     }
   }
 
-  async getFilteredItems(companyId: string, filters: any) {
-    return this.prisma.flowItem.findMany({
-      where: {
-        companyId,
-        supplierId:
-          filters.onlyOutsourced === 'true' ? { not: null } : undefined,
-      },
+  /**
+   * Filtra itens com base nos critérios fornecidos
+   * @param companyId ID da empresa
+   * @param filters Filtros aplicados
+   * @returns Lista de itens filtrados
+   */
+  async getFilteredItems(companyId: string, filters: FlowFilterDto) {
+    const {
+      startDate,
+      endDate,
+      dateType,
+      isOverdue,
+      isUpcoming,
+      assignedToId,
+      supplierId,
+      status,
+      productRef, // 🔥 NOVO: Desestruturar o productRef
+    } = filters;
+
+    this.logger.log(`🔍 FILTRANDO ITENS para empresa ${companyId}`);
+    this.logger.log(`📦 productRef recebido: "${productRef}"`);
+    this.logger.log(`📦 filters completos:`, JSON.stringify(filters));
+
+    const whereClause: any = {
+      companyId,
+    };
+
+    // Aplicar filtros básicos
+    if (assignedToId) {
+      whereClause.assignedToId = assignedToId;
+    }
+
+    if (supplierId) {
+      whereClause.supplierId = supplierId === 'internal' ? null : supplierId;
+    }
+
+    if (status) {
+      whereClause.status = status;
+    }
+
+    if (productRef && productRef.trim() !== '') {
+      this.logger.log(`🔎 Aplicando filtro productRef: "${productRef}"`);
+      whereClause.productRef = {
+        contains: productRef.trim(),
+        mode: 'insensitive',
+      };
+      this.logger.log(`📝 whereClause gerado:`, JSON.stringify(whereClause));
+    }
+
+    // Lógica para filtro por intervalo de datas
+    if (startDate || endDate) {
+      const dateField =
+        dateType === DateFilterType.DUE_DATE
+          ? 'dueDate'
+          : 'productionStartedAt';
+
+      const dateFilter: any = {};
+
+      if (startDate) {
+        dateFilter.gte = new Date(startDate);
+      }
+
+      if (endDate) {
+        const endDateTime = new Date(endDate);
+        endDateTime.setHours(23, 59, 59, 999);
+        dateFilter.lte = endDateTime;
+      }
+
+      whereClause[dateField] = dateFilter;
+    }
+
+    // Lógica para itens ATRASADOS (overdue)
+    if (isOverdue === 'true') {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      whereClause.AND = [
+        {
+          dueDate: {
+            not: null,
+          },
+        },
+        {
+          dueDate: {
+            lt: today,
+          },
+        },
+        {
+          status: {
+            not: 'CONCLUIDO',
+          },
+        },
+      ];
+    }
+
+    // Lógica para itens PRÓXIMOS A VENCER (próximos 7 dias)
+    if (isUpcoming === 'true') {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const nextWeek = new Date(today);
+      nextWeek.setDate(nextWeek.getDate() + 7);
+
+      whereClause.AND = [
+        {
+          productionStartedAt: {
+            not: null,
+          },
+        },
+        {
+          productionStartedAt: {
+            gte: today,
+            lte: nextWeek,
+          },
+        },
+        {
+          status: {
+            not: 'CONCLUIDO',
+          },
+        },
+      ];
+    }
+
+    // Buscar itens com includes completos
+    try {
+      const items = await this.prisma.flowItem.findMany({
+        where: whereClause,
+        include: {
+          stage: {
+            select: {
+              id: true,
+              name: true,
+              order: true,
+              color: true,
+            },
+          },
+          flow: {
+            select: {
+              id: true,
+              name: true,
+              color: true,
+            },
+          },
+          supplier: {
+            select: {
+              id: true,
+              name: true,
+              category: true,
+            },
+          },
+          assignedTo: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+          images: {
+            select: {
+              id: true,
+              url: true,
+              filename: true,
+            },
+          },
+          audios: {
+            select: {
+              id: true,
+              url: true,
+              filename: true,
+            },
+          },
+          videos: {
+            select: {
+              id: true,
+              url: true,
+              filename: true,
+            },
+          },
+        },
+        orderBy: {
+          [dateType === DateFilterType.DUE_DATE
+            ? 'dueDate'
+            : 'productionStartedAt']: 'asc',
+        },
+      });
+
+      this.logger.log(`✅ Encontrados ${items.length} itens`);
+      this.logger.log(
+        `📋 IDs dos itens encontrados:`,
+        items.map((i) => ({ id: i.id, productRef: i.productRef })),
+      );
+      return items;
+    } catch (error) {
+      this.logger.error('Erro ao filtrar itens:', error);
+      throw new BadRequestException('Erro ao aplicar filtros');
+    }
+  }
+
+  /**
+   * Versão otimizada para o Kanban - retorna o board completo com itens filtrados
+   */
+  async getFilteredKanbanBoard(
+    flowId: string,
+    companyId: string,
+    filters: FlowFilterDto,
+  ) {
+    // Primeiro busca o board completo
+    const board = await this.prisma.productFlow.findFirst({
+      where: { id: flowId, companyId },
       include: {
-        stage: true,
-        supplier: { select: { name: true } },
-        assignedTo: { select: { name: true } },
+        stages: {
+          orderBy: { order: 'asc' },
+          include: {
+            items: {
+              include: {
+                images: { take: 1, select: { url: true, id: true } },
+                assignedTo: { select: { name: true, id: true } },
+                supplier: { select: { name: true, id: true } },
+              },
+            },
+          },
+        },
       },
-      orderBy: { createdAt: 'desc' },
     });
+
+    if (!board) {
+      throw new BadRequestException('Fluxo não encontrado');
+    }
+
+    // Se não há filtros, retorna o board completo
+    if (!this.hasFilters(filters)) {
+      return board;
+    }
+
+    // Aplica os filtros nos itens
+    const filteredItems = await this.getFilteredItems(companyId, {
+      ...filters,
+      // Garante que só busca itens deste flow
+    });
+
+    // Filtra os itens em cada stage baseado nos resultados
+    const filteredStages = board.stages.map((stage) => ({
+      ...stage,
+      items: stage.items.filter((item) =>
+        filteredItems.some((filteredItem) => filteredItem.id === item.id),
+      ),
+    }));
+
+    return {
+      ...board,
+      stages: filteredStages,
+    };
+  }
+
+  private hasFilters(filters: FlowFilterDto): boolean {
+    return !!(
+      filters.startDate ||
+      filters.endDate ||
+      filters.isOverdue === 'true' ||
+      filters.isUpcoming === 'true' ||
+      filters.assignedToId ||
+      filters.supplierId ||
+      filters.status
+    );
   }
 }

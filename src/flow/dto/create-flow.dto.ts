@@ -8,8 +8,16 @@ import {
   IsDateString,
   Min,
   IsEnum,
+  IsBooleanString,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
+
+export enum DateFilterType {
+  PRODUCTION_STARTED = 'productionStartedAt',
+  DUE_DATE = 'dueDate',
+}
+
+
 
 export class CreateFlowDto {
   @ApiProperty({ example: 'Coleção Verão 2025' })
@@ -131,18 +139,40 @@ export class CreateFlowItemDto {
 
 }
 
-// Crie o DTO de Filtro (Novo)
 export class FlowFilterDto {
   @IsOptional()
+  @IsString()
   startDate?: string;
 
   @IsOptional()
+  @IsString()
+  productRef?: string; // 🔥 NOVO: Filtro por referência do produto
+
+  @IsOptional()
+  @IsString()
   endDate?: string;
 
   @IsOptional()
-  @IsEnum(['dueDate', 'productionStartedAt', 'deliveryAt', 'enteredAt'])
-  dateField?: 'dueDate' | 'productionStartedAt' | 'deliveryAt' | 'enteredAt';
+  @IsEnum(DateFilterType)
+  dateType?: DateFilterType;
 
   @IsOptional()
-  onlyOutsourced?: string; // Chega como string 'true' ou 'false' via query param
+  @IsBooleanString()
+  isOverdue?: string;
+
+  @IsOptional()
+  @IsBooleanString()
+  isUpcoming?: string;
+
+  @IsOptional()
+  @IsUUID()
+  assignedToId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  supplierId?: string;
+
+  @IsOptional()
+  @IsString()
+  status?: string;
 }
