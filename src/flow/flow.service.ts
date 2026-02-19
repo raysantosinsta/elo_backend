@@ -424,7 +424,46 @@ export class FlowService {
 
     if (!item || !user)
       throw new NotFoundException('Item ou usuário não encontrado');
+
+    // Validação da etapa ATUAL onde o item está (já existente)
     this.validateStageAccess(user, item.stage!);
+
+    // =========================================================================
+    // 🔒 REGRA DE NEGÓCIO: PROTEÇÃO DE QUANTIDADE (RISCO)
+    // =========================================================================
+    // Verifica se a quantidade foi enviada e se é diferente da atual
+    if (
+      data.quantity !== undefined &&
+      data.quantity !== null &&
+      Number(data.quantity) !== item.quantity
+    ) {
+      // Busca a etapa de "Risco" deste fluxo específico
+      // Nota: O nome deve bater com o cadastro no banco (Case Insensitive)
+      const riscoStage = await this.prisma.flowStage.findFirst({
+        where: {
+          flowId: item.flowId,
+          companyId,
+          name: { contains: 'Risco', mode: 'insensitive' },
+        },
+      });
+
+      // Se existir uma etapa de risco, validamos se o usuário tem acesso a ELA.
+      // Se o usuário for da Costura (e não tiver papel de Risco), isso vai estourar erro.
+      if (riscoStage) {
+        try {
+          // Reutiliza sua lógica central de segurança
+          // Se falhar, o validateStageAccess lança ForbiddenException
+          this.validateStageAccess(user, riscoStage);
+        } catch (error) {
+          this.logger.warn(
+            `Tentativa de alteração de quantidade bloqueada para user ${userId}`,
+          );
+          throw new ForbiddenException(
+            'Somente o responsável pelo Risco pode alterar a quantidade deste item.',
+          );
+        }
+      }
+    }
 
     // Proteção IDOR: Se mudar de etapa, valida se a nova etapa pertence à empresa
     if (data.stageId && data.stageId !== item.stageId) {
