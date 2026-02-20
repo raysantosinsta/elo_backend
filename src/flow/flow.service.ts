@@ -65,6 +65,152 @@ export class FlowService {
     public dbHistogram: Histogram<string>,
   ) {}
 
+  // No seu FlowService, adicione:
+
+async getFilteredItemsByFlow(companyId: string, flowId: string, filters: FlowFilterDto) {
+  const {
+    isOverdue,
+    isUpcoming,
+    assignedToId,
+    supplierId,
+    status,
+    productRef,
+  } = filters;
+
+  this.logger.log(`🔍 FILTRANDO ITENS do fluxo ${flowId} para empresa ${companyId}`);
+
+  // Primeiro verifica se o fluxo pertence à empresa
+  const flow = await this.prisma.productFlow.findFirst({
+    where: { id: flowId, companyId },
+  });
+
+  if (!flow) {
+    throw new NotFoundException('Fluxo não encontrado');
+  }
+
+  const whereClause: any = {
+    companyId,
+    flowId, // 👈 FILTRO POR FLUXO ESPECÍFICO
+  };
+
+  // Aplicar filtros básicos
+  if (assignedToId) {
+    whereClause.assignedToId = assignedToId;
+  }
+
+  if (supplierId) {
+    whereClause.supplierId = supplierId === 'internal' ? null : supplierId;
+  }
+
+  if (status) {
+    whereClause.status = status;
+  }
+
+  if (productRef && productRef.trim() !== '') {
+    whereClause.productRef = {
+      contains: productRef.trim(),
+      mode: 'insensitive',
+    };
+  }
+
+  // Lógica para itens ATRASADOS (overdue)
+  if (isOverdue === 'true') {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    whereClause.AND = [
+      {
+        dueDate: {
+          not: null,
+        },
+      },
+      {
+        dueDate: {
+          lt: today,
+        },
+      },
+      {
+        status: {
+          not: 'CONCLUIDO',
+        },
+      },
+    ];
+  }
+
+  // Lógica para itens PRÓXIMOS A VENCER
+  if (isUpcoming === 'true') {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const endOfDay = new Date(today);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    whereClause.AND = [
+      {
+        productionStartedAt: {
+          not: null,
+        },
+      },
+      {
+        productionStartedAt: {
+          gte: today,
+          lte: endOfDay,
+        },
+      },
+      {
+        status: {
+          not: 'CONCLUIDO',
+        },
+      },
+    ];
+  }
+
+  this.logger.log(`📝 whereClause para fluxo ${flowId}:`, JSON.stringify(whereClause, null, 2));
+
+  // Buscar itens
+  const items = await this.prisma.flowItem.findMany({
+    where: whereClause,
+    include: {
+      stage: {
+        select: {
+          id: true,
+          name: true,
+          order: true,
+          color: true,
+        },
+      },
+      flow: {
+        select: {
+          id: true,
+          name: true,
+          color: true,
+        },
+      },
+      supplier: {
+        select: {
+          id: true,
+          name: true,
+          category: true,
+        },
+      },
+      assignedTo: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+        },
+      },
+    },
+    orderBy: {
+      dueDate: 'asc',
+    },
+  });
+
+  this.logger.log(`✅ Encontrados ${items.length} itens atrasados no fluxo ${flowId}`);
+  
+  return items;
+}
+
   // ===========================================================================
   // 🛡️ LÓGICA DE SEGURANÇA (O CORAÇÃO DO REVIEW)
   // ===========================================================================
@@ -740,12 +886,6 @@ async saveTemplate(companyId: string, flowId: string, name: string) {
 // 🔄 FUNÇÕES DE FILTRO (BACKEND - COM DEBUG)
 // ===========================================================================
 
-/**
- * Filtra itens com base nos critérios fornecidos
- * @param companyId ID da empresa
- * @param filters Filtros aplicados
- * @returns Lista de itens filtrados
- */
 async getFilteredItems(companyId: string, filters: FlowFilterDto) {
   const {
     startDate,
@@ -762,6 +902,31 @@ async getFilteredItems(companyId: string, filters: FlowFilterDto) {
   this.logger.log(`🔍 FILTRANDO ITENS para empresa ${companyId}`);
   this.logger.log(`📦 filters completos:`, JSON.stringify(filters));
 
+  // ===========================================================================
+  // 🔥 LOG 1: Ver TODOS os itens da empresa (sem filtro)
+  // ===========================================================================
+  const allItems = await this.prisma.flowItem.findMany({
+    where: { companyId },
+    select: {
+      id: true,
+      title: true,
+      productionStartedAt: true,
+      dueDate: true,
+      status: true,
+      flowId: true,
+    },
+  });
+
+  this.logger.log(`📊 ===== TODOS OS ITENS DA EMPRESA (${allItems.length}) =====`);
+  allItems.forEach((item, index) => {
+    this.logger.log(`   ${index + 1}. ${item.title}:`);
+    this.logger.log(`      - ID: ${item.id}`);
+    this.logger.log(`      - productionStartedAt: ${item.productionStartedAt?.toISOString() || 'NULL'}`);
+    this.logger.log(`      - dueDate: ${item.dueDate?.toISOString() || 'NULL'}`);
+    this.logger.log(`      - status: ${item.status}`);
+    this.logger.log(`      - flowId: ${item.flowId}`);
+  });
+
   const whereClause: any = {
     companyId,
   };
@@ -769,14 +934,17 @@ async getFilteredItems(companyId: string, filters: FlowFilterDto) {
   // Aplicar filtros básicos
   if (assignedToId) {
     whereClause.assignedToId = assignedToId;
+    this.logger.log(`✅ Filtro assignedToId: ${assignedToId}`);
   }
 
   if (supplierId) {
     whereClause.supplierId = supplierId === 'internal' ? null : supplierId;
+    this.logger.log(`✅ Filtro supplierId: ${supplierId}`);
   }
 
   if (status) {
     whereClause.status = status;
+    this.logger.log(`✅ Filtro status: ${status}`);
   }
 
   if (productRef && productRef.trim() !== '') {
@@ -784,6 +952,7 @@ async getFilteredItems(companyId: string, filters: FlowFilterDto) {
       contains: productRef.trim(),
       mode: 'insensitive',
     };
+    this.logger.log(`✅ Filtro productRef: ${productRef}`);
   }
 
   // Lógica para filtro por intervalo de datas
@@ -797,21 +966,51 @@ async getFilteredItems(companyId: string, filters: FlowFilterDto) {
 
     if (startDate) {
       dateFilter.gte = new Date(startDate);
+      this.logger.log(`📅 startDate: ${new Date(startDate).toISOString()}`);
     }
 
     if (endDate) {
       const endDateTime = new Date(endDate);
       endDateTime.setHours(23, 59, 59, 999);
       dateFilter.lte = endDateTime;
+      this.logger.log(`📅 endDate: ${endDateTime.toISOString()}`);
     }
 
     whereClause[dateField] = dateFilter;
+    this.logger.log(`📅 dateField: ${dateField}`);
   }
 
-  // Lógica para itens ATRASADOS (overdue)
+  // ===========================================================================
+  // 🔥 LOG 2: Lógica para itens ATRASADOS (overdue)
+  // ===========================================================================
   if (isOverdue === 'true') {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+
+    this.logger.log(`📅 ===== FILTRO ATRASADOS =====`);
+    this.logger.log(`   - Data atual (UTC): ${today.toISOString()}`);
+    this.logger.log(`   - Data atual (local): ${today.toLocaleString('pt-BR')}`);
+
+    // Ver itens que poderiam ser considerados atrasados
+    const potentialOverdue = await this.prisma.flowItem.findMany({
+      where: {
+        companyId,
+        dueDate: { not: null },
+        status: { not: 'CONCLUIDO' },
+      },
+      select: {
+        id: true,
+        title: true,
+        dueDate: true,
+        status: true,
+      },
+    });
+
+    this.logger.log(`📊 Itens com dueDate (não concluídos): ${potentialOverdue.length}`);
+    potentialOverdue.forEach(item => {
+      const isLate = item.dueDate! < today;
+      this.logger.log(`   - ${item.title}: dueDate=${item.dueDate?.toISOString()} | ${isLate ? '🔴 ATRASADO' : '✅ no prazo'}`);
+    });
 
     whereClause.AND = [
       {
@@ -832,7 +1031,9 @@ async getFilteredItems(companyId: string, filters: FlowFilterDto) {
     ];
   }
 
-  // 🔥 CORREÇÃO: Lógica para itens PRÓXIMOS A VENCER (APENAS DIA ATUAL)
+  // ===========================================================================
+  // 🔥 LOG 3: Lógica para itens PRÓXIMOS A VENCER (isUpcoming)
+  // ===========================================================================
   if (isUpcoming === 'true') {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -840,9 +1041,44 @@ async getFilteredItems(companyId: string, filters: FlowFilterDto) {
     const endOfDay = new Date(today);
     endOfDay.setHours(23, 59, 59, 999);
 
-    this.logger.log(`📅 Filtrando próximos a vencer:`);
-    this.logger.log(`   - Hoje (início): ${today.toISOString()}`);
-    this.logger.log(`   - Hoje (fim): ${endOfDay.toISOString()}`);
+    this.logger.log(`📅 ===== FILTRO PRÓXIMOS A VENCER (HOJE) =====`);
+    this.logger.log(`   - Hoje (início UTC): ${today.toISOString()}`);
+    this.logger.log(`   - Hoje (fim UTC): ${endOfDay.toISOString()}`);
+    this.logger.log(`   - Hoje (local): ${today.toLocaleDateString('pt-BR')}`);
+
+    // 🔥 LOG 4: Ver TODOS os itens com productionStartedAt
+    const itemsWithStartDate = await this.prisma.flowItem.findMany({
+      where: {
+        companyId,
+        productionStartedAt: { not: null },
+      },
+      select: {
+        id: true,
+        title: true,
+        productionStartedAt: true,
+        status: true,
+      },
+    });
+
+    this.logger.log(`📊 Itens com productionStartedAt preenchido: ${itemsWithStartDate.length}`);
+    
+    itemsWithStartDate.forEach(item => {
+      const startDate = item.productionStartedAt!;
+      const startDateStr = startDate.toISOString();
+      const startDateOnly = startDateStr.split('T')[0];
+      const todayStr = today.toISOString().split('T')[0];
+      
+      const isToday = startDate >= today && startDate <= endOfDay;
+      const isTodayByString = startDateOnly === todayStr;
+
+      this.logger.log(`   - ${item.title}:`);
+      this.logger.log(`     original: ${startDateStr}`);
+      this.logger.log(`     data (YYYY-MM-DD): ${startDateOnly}`);
+      this.logger.log(`     hoje (YYYY-MM-DD): ${todayStr}`);
+      this.logger.log(`     dentro do intervalo? ${isToday ? 'SIM ✅' : 'NÃO ❌'}`);
+      this.logger.log(`     match por string? ${isTodayByString ? 'SIM ✅' : 'NÃO ❌'}`);
+      this.logger.log(`     status: ${item.status}`);
+    });
 
     whereClause.AND = [
       {
@@ -866,7 +1102,9 @@ async getFilteredItems(companyId: string, filters: FlowFilterDto) {
 
   this.logger.log(`📝 whereClause final:`, JSON.stringify(whereClause, null, 2));
 
-  // Buscar itens com includes completos
+  // ===========================================================================
+  // 🔥 LOG 5: Buscar itens com o whereClause final
+  // ===========================================================================
   try {
     const items = await this.prisma.flowItem.findMany({
       where: whereClause,
@@ -929,16 +1167,41 @@ async getFilteredItems(companyId: string, filters: FlowFilterDto) {
       },
     });
 
-    this.logger.log(`✅ Encontrados ${items.length} itens`);
+    this.logger.log(`✅ ===== RESULTADO FINAL =====`);
+    this.logger.log(`✅ Encontrados ${items.length} itens com os filtros aplicados`);
     
-    // Log detalhado de cada item encontrado
-    items.forEach(item => {
-      this.logger.log(`   - Item: ${item.title}, productionStartedAt: ${item.productionStartedAt?.toISOString()}`);
-    });
+    if (items.length > 0) {
+      items.forEach(item => {
+        this.logger.log(`   - Item: ${item.title}`);
+        this.logger.log(`     productionStartedAt: ${item.productionStartedAt?.toISOString()}`);
+        this.logger.log(`     dueDate: ${item.dueDate?.toISOString()}`);
+        this.logger.log(`     status: ${item.status}`);
+        this.logger.log(`     flow: ${item.flow?.name}`);
+        this.logger.log(`     stage: ${item.stage?.name}`);
+      });
+    } else {
+      this.logger.log(`⚠️ NENHUM item encontrado com os filtros aplicados`);
+      
+      // 🔥 LOG 6: Sugestão de diagnóstico
+      if (isUpcoming === 'true') {
+        this.logger.log(`🔍 DIAGNÓSTICO - Dicas para próximo a vencer:`);
+        this.logger.log(`   1. Verifique se o productionStartedAt está preenchido no banco`);
+        this.logger.log(`   2. Verifique o fuso horário (timezone) da data`);
+        this.logger.log(`   3. Verifique se o status não é "CONCLUIDO"`);
+        this.logger.log(`   4. Tente filtrar com intervalo maior para teste`);
+      }
+      
+      if (isOverdue === 'true') {
+        this.logger.log(`🔍 DIAGNÓSTICO - Dicas para atrasados:`);
+        this.logger.log(`   1. Verifique se o dueDate está preenchido no banco`);
+        this.logger.log(`   2. Verifique se a data é anterior a hoje`);
+        this.logger.log(`   3. Verifique se o status não é "CONCLUIDO"`);
+      }
+    }
 
     return items;
   } catch (error) {
-    this.logger.error('Erro ao filtrar itens:', error);
+    this.logger.error('❌ Erro ao filtrar itens:', error);
     throw new BadRequestException('Erro ao aplicar filtros');
   }
 }

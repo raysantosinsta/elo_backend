@@ -27,7 +27,7 @@ import {
   ApiConsumes,
   ApiOperation,
   ApiQuery,
-  ApiTags
+  ApiTags,
 } from '@nestjs/swagger';
 
 // --- Guards e Segurança ---
@@ -57,7 +57,22 @@ export class FlowController {
 
   constructor(private readonly flowService: FlowService) {}
 
-   
+  @Get(':flowId/filter/items')
+  @ApiOperation({ summary: 'Filtra itens de um fluxo específico' })
+  async filterItemsByFlow(
+    @Req() req: any,
+    @Param('flowId', ParseUUIDPipe) flowId: string,
+    @Query() query: FlowFilterDto,
+  ) {
+    this.logger.log(
+      `Filtrando itens do fluxo ${flowId} para empresa ${req.user.companyId}`,
+    );
+    return await this.flowService.getFilteredItemsByFlow(
+      req.user.companyId,
+      flowId,
+      query,
+    );
+  }
 
   // ===========================================================================
   // 🟢 GERENCIAMENTO DE TEMPLATES
@@ -201,14 +216,18 @@ export class FlowController {
     return this.flowService.getKanbanBoard(flowId, req.user.companyId);
   }
 
-    /**
+  /**
    * Endpoint para filtrar itens globalmente
    */
   @Get('filter/items')
   @ApiOperation({ summary: 'Filtra itens com base nos critérios fornecidos' })
   @ApiQuery({ name: 'startDate', required: false, type: String })
   @ApiQuery({ name: 'endDate', required: false, type: String })
-  @ApiQuery({ name: 'dateType', required: false, enum: ['productionStartedAt', 'dueDate'] })
+  @ApiQuery({
+    name: 'dateType',
+    required: false,
+    enum: ['productionStartedAt', 'dueDate'],
+  })
   @ApiQuery({ name: 'isOverdue', required: false, type: Boolean })
   @ApiQuery({ name: 'isUpcoming', required: false, type: Boolean })
   @ApiQuery({ name: 'assignedToId', required: false, type: String })
@@ -231,9 +250,12 @@ export class FlowController {
     @Query() query: FlowFilterDto,
   ) {
     this.logger.log(`Buscando board filtrado para flow ${flowId}`);
-    return this.flowService.getFilteredKanbanBoard(flowId, req.user.companyId, query);
+    return this.flowService.getFilteredKanbanBoard(
+      flowId,
+      req.user.companyId,
+      query,
+    );
   }
-
 
   @Post(':flowId/items')
   async createItem(
