@@ -29,6 +29,10 @@ export class CreateFlowDto {
   @IsString()
   @IsOptional()
   color?: string; // 🔥 Campo de cor adicionado
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  deadline?: string;
 }
 
 export class CreateStageDto {

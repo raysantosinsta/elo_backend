@@ -153,6 +153,30 @@ export class FlowController {
     return this.flowService.createFlow(req.user.companyId, req.user.id, body);
   }
 
+  // No FlowController
+@Put(':flowId')
+@RequirePermissions(AppPermission.MANAGE_FLOW)
+@ApiOperation({ summary: 'Atualiza um fluxo existente' })
+async updateFlow(
+  @Req() req: any,
+  @Param('flowId', ParseUUIDPipe) flowId: string,
+  @Body() body: { name?: string; color?: string; deadline?: string | null }
+) {
+  this.logger.log(`Atualizando fluxo ${flowId} na empresa ${req.user.companyId}`);
+  
+  // Converter deadline para Date se existir
+  let deadline: Date | null = null;
+  if (body.deadline) {
+    deadline = new Date(body.deadline);
+  }
+
+  return this.flowService.updateFlow(req.user.companyId, flowId, {
+    name: body.name,
+    color: body.color,
+    deadline,
+  });
+}
+
   @Delete(':flowId')
   @RequirePermissions(AppPermission.MANAGE_FLOW)
   @ApiOperation({ summary: 'Deleta um fluxo inteiro' })

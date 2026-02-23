@@ -863,6 +863,8 @@ model ProductFlow {
   id    String  @id @default(uuid()) @map("id") @db.Uuid
   name  String  @map("nome") @db.VarChar(100)
   color String? @default("#D35400") @map("cor") @db.VarChar(7)
+  deadline  DateTime? @map("prazo")
+
 
   // Relacionamento com Empresa
   companyId String  @map("empresa_id") @db.Uuid

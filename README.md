@@ -6,9 +6,9 @@ npx prisma migrate diff \
   --to-schema-datamodel prisma/schema.prisma \
   --script 
 
-  mkdir prisma/migrations/20260101_etapa_cargo
+  mkdir prisma/migrations/20260101_deadline_decremento_dias
 
-  npx prisma migrate resolve --applied 20260101_etapa_cargo
+  npx prisma migrate resolve --applied 20260101_deadline_decremento_dias
 
 
    npx prisma generate
