@@ -1,0 +1,1 @@
+ALTER TABLE "fluxos_produto" ADD COLUMN     "prazo" TIMESTAMP(3);

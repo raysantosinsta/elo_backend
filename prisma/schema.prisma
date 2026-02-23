@@ -863,6 +863,8 @@ model ProductFlow {
   id    String  @id @default(uuid()) @map("id") @db.Uuid
   name  String  @map("nome") @db.VarChar(100)
   color String? @default("#D35400") @map("cor") @db.VarChar(7)
+  deadline  DateTime? @map("prazo")
+
 
   // Relacionamento com Empresa
   companyId String  @map("empresa_id") @db.Uuid
@@ -909,7 +911,7 @@ model FlowItem {
   id          String @id @default(uuid()) @map("id") @db.Uuid
   title       String @map("titulo") @db.VarChar(200)
   orderNumber String @map("numero_pedido") @db.VarChar(50)
-  status      String @default("PENDENTE") // Verifique se este campo existe aqui!
+  status      String @default("PENDENTE") @map("status") // Verifique se este campo existe aqui!
 
   // Posição
   stageId      String?    @map("etapa_id") @db.Uuid
