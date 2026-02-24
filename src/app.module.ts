@@ -33,6 +33,7 @@ import { MaterialsModule } from './materials/materials.module';
 import { PrometheusModule } from '@willsoto/nestjs-prometheus';
 import { MetricsController } from './metrics/metrics.controller';
 import { MetricsModule } from './metrics/metrics.module';
+import { AuditModule } from './audit/audit.module';
 
 @Module({
   imports: [
@@ -80,6 +81,7 @@ import { MetricsModule } from './metrics/metrics.module';
     ProductsModule,
     MaterialsModule,
     MetricsModule,
+    AuditModule,
   ],
   // ADICIONE O CONTROLLER AQUI
   controllers: [AppController, MetricsController],
