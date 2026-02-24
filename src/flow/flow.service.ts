@@ -28,6 +28,7 @@ import { ClsService } from 'nestjs-cls';
 import { Counter, Histogram } from 'prom-client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SupabaseService } from '../supabase/supabase.service';
+import { AuditService } from '../audit/audit.service';
 import {
   CreateFlowDto,
   CreateFlowItemDto,
@@ -56,8 +57,9 @@ export class FlowService {
 
   constructor(
     private prisma: PrismaService,
-    private readonly cls: ClsService,
+    private readonly cls: ClsService, // 🔥 USADO PARA PEGAR TENANT ID
     private supabase: SupabaseService,
+    private auditService: AuditService,
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
     @InjectMetric('flow_item_moves_total')
     public moveCounter: Counter<string>,
@@ -65,13 +67,25 @@ export class FlowService {
     public dbHistogram: Histogram<string>,
   ) {}
 
-  // No seu FlowService, adicione:
+  // ===========================================================================
+  // 🔥 MÉTODO UTILITÁRIO PARA PEGAR COMPANY ID DO CLS
+  // ===========================================================================
+  private getCompanyIdFromContext(): string {
+    const companyId = this.cls.get<string>('tenantId');
+    if (!companyId) {
+      this.logger.error('❌ companyId não encontrado no CLS');
+      throw new ForbiddenException('Empresa não identificada');
+    }
+    return companyId;
+  }
 
-  async getFilteredItemsByFlow(
-    companyId: string,
-    flowId: string,
-    filters: FlowFilterDto,
-  ) {
+  // ===========================================================================
+  // MÉTODOS REFATORADOS - SEM companyId NOS PARÂMETROS
+  // ===========================================================================
+
+  async getFilteredItemsByFlow(flowId: string, filters: FlowFilterDto) {
+    const companyId = this.getCompanyIdFromContext(); // 🔥 PEGA DO CLS
+
     const {
       isOverdue,
       isUpcoming,
@@ -96,7 +110,7 @@ export class FlowService {
 
     const whereClause: any = {
       companyId,
-      flowId, // 👈 FILTRO POR FLUXO ESPECÍFICO
+      flowId,
     };
 
     // Aplicar filtros básicos
@@ -171,11 +185,6 @@ export class FlowService {
       ];
     }
 
-    this.logger.log(
-      `📝 whereClause para fluxo ${flowId}:`,
-      JSON.stringify(whereClause, null, 2),
-    );
-
     // Buscar itens
     const items = await this.prisma.flowItem.findMany({
       where: whereClause,
@@ -215,126 +224,21 @@ export class FlowService {
       },
     });
 
-    this.logger.log(
-      `✅ Encontrados ${items.length} itens atrasados no fluxo ${flowId}`,
-    );
-
     return items;
   }
 
-  // ===========================================================================
-  // 🛡️ LÓGICA DE SEGURANÇA (O CORAÇÃO DO REVIEW)
-  // ===========================================================================
-
-  private validateStageAccess(
-    user: { role: string; professionalRole: string | null },
-    stage: { name: string; allowedRole: string | null },
-  ) {
-    console.log(
-      '[VALIDATE_ACCESS] Início → user.role:',
-      user.role,
-      'user.professionalRole:',
-      user.professionalRole,
-      'stage.allowedRole:',
-      stage.allowedRole,
-      'stage.name:',
-      stage.name,
-    );
-
-    if (['MASTER', 'ADMIN'].includes(user.role)) {
-      console.log('[VALIDATE_ACCESS] Liberado por role MASTER/ADMIN');
-      return true;
-    }
-
-    // Se allowedRole for null, undefined, "null" ou string vazia, LIBERA
-    if (
-      !stage.allowedRole ||
-      stage.allowedRole.trim() === '' ||
-      stage.allowedRole === 'null' ||
-      stage.allowedRole === 'all'
-    ) {
-      console.log('[VALIDATE_ACCESS] Liberado por allowedRole vazio/all/null');
-      return true;
-    }
-
-    const userRole = user.professionalRole?.trim().toLowerCase() || '';
-    const required = stage.allowedRole.trim().toLowerCase();
-
-    const roles = userRole.split(',').map((r) => r.trim());
-    const hasAccess = roles.some((r) => r === required); // Match exato
-
-    console.log(
-      '[VALIDATE_ACCESS] Cálculo → userRoles:',
-      roles,
-      'required:',
-      required,
-      'hasAccess:',
-      hasAccess,
-    );
-
-    if (!hasAccess) {
-      console.log('[VALIDATE_ACCESS] Bloqueado → Erro de permissão');
-      throw new ForbiddenException(
-        `Acesso restrito ao cargo: ${stage.allowedRole}`,
-      );
-    }
-
-    console.log('[VALIDATE_ACCESS] Liberado por match de role');
-    return true;
-  }
-
-  private async executeWithResilience<T>(
-    operation: string,
-    fn: () => Promise<T>,
-    retries = 3,
-  ): Promise<T> {
-    const endTimer = this.dbHistogram.labels(operation).startTimer();
-    let attempt = 0;
-    while (attempt < retries) {
-      try {
-        const result = await fn();
-        endTimer();
-        return result;
-      } catch (error: any) {
-        attempt++;
-        if (
-          attempt >= retries ||
-          error instanceof ForbiddenException ||
-          error instanceof NotFoundException
-        ) {
-          endTimer();
-          throw error;
-        }
-        await new Promise((res) => setTimeout(res, 200 * attempt));
-      }
-    }
-    throw new InternalServerErrorException('Database unavailable');
-  }
-
-  private async invalidateFlowCache(companyId: string, flowId?: string) {
-    await this.cacheManager.del(`flows_list_${companyId}`);
-    if (flowId) {
-      await this.cacheManager.del(`flow_board_${flowId}`);
-      await this.cacheManager.del(`flow_stats_${flowId}`);
-    }
-  }
-
-  // ===========================================================================
   // 🟢 GERENCIAMENTO DE TEMPLATES
-  // ===========================================================================
-
-  async getTemplates(companyId: string) {
+  async getTemplates() {
+    const companyId = this.getCompanyIdFromContext();
     return this.prisma.flowTemplate.findMany({
       where: { companyId },
       orderBy: { name: 'asc' },
     });
   }
 
-  // ===========================================================================
-  // 🟢 GERENCIAMENTO DE TEMPLATES (CORRIGIDO)
-  // ===========================================================================
+  async applyTemplate(flowId: string, templateId: string, userId: string) {
+    const companyId = this.getCompanyIdFromContext();
 
-  async applyTemplate(companyId: string, flowId: string, templateId: string) {
     const template = await this.prisma.flowTemplate.findFirst({
       where: { id: templateId, companyId },
     });
@@ -347,27 +251,45 @@ export class FlowService {
     });
 
     let nextOrder = (lastStage?.order ?? -1) + 1;
+    const stagesCreated: any[] = [];
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       for (const s of structure) {
-        await tx.flowStage.create({
+        const stage = await tx.flowStage.create({
           data: {
             name: s.name,
             color: s.color || '#2C3E50',
             order: nextOrder++,
             flowId,
             companyId,
-            // 🔥 IMPORTANTE: Copiar o allowedRole se existir no template
             allowedRole: s.allowedRole || null,
           },
         });
+        stagesCreated.push(stage);
       }
       await this.invalidateFlowCache(companyId, flowId);
-      return { success: true };
+      return { success: true, stages: stagesCreated };
     });
+
+    await this.auditService.log({
+      action: 'APPLY_TEMPLATE',
+      entity: 'FLOW_TEMPLATE',
+      entityId: templateId,
+      userId,
+      companyId,
+      metadata: {
+        templateName: template.name,
+        flowId,
+        stagesAdded: stagesCreated.length,
+      },
+    });
+
+    return result;
   }
 
-  async saveTemplate(companyId: string, flowId: string, name: string) {
+  async saveTemplate(flowId: string, name: string, userId: string) {
+    const companyId = this.getCompanyIdFromContext();
+
     const stages = await this.prisma.flowStage.findMany({
       where: { flowId, flow: { companyId } },
       orderBy: { order: 'asc' },
@@ -375,31 +297,64 @@ export class FlowService {
 
     if (stages.length === 0) throw new BadRequestException('Fluxo sem etapas.');
 
-    // 🔥 IMPORTANTE: Incluir o allowedRole no template
     const structure = stages.map((s) => ({
       name: s.name,
       color: s.color,
-      allowedRole: s.allowedRole, // Adicionar allowedRole
+      allowedRole: s.allowedRole,
     }));
 
-    return this.prisma.flowTemplate.create({
+    const template = await this.prisma.flowTemplate.create({
       data: { name, companyId, structure },
     });
+
+    await this.auditService.log({
+      action: 'SAVE_TEMPLATE',
+      entity: 'FLOW_TEMPLATE',
+      entityId: template.id,
+      userId,
+      companyId,
+      metadata: {
+        templateName: name,
+        flowId,
+        stagesCount: stages.length,
+      },
+    });
+
+    return template;
   }
 
-  async deleteTemplate(companyId: string, templateId: string) {
+  async deleteTemplate(templateId: string, userId: string) {
+    const companyId = this.getCompanyIdFromContext();
+
     const template = await this.prisma.flowTemplate.findFirst({
       where: { id: templateId, companyId },
     });
     if (!template) throw new NotFoundException('Template não encontrado');
-    return this.prisma.flowTemplate.delete({ where: { id: templateId } });
+
+    await this.prisma.flowTemplate.delete({ where: { id: templateId } });
+
+    await this.auditService.log({
+      action: 'DELETE_TEMPLATE',
+      entity: 'FLOW_TEMPLATE',
+      entityId: templateId,
+      userId,
+      companyId,
+      metadata: {
+        templateName: template.name,
+      },
+    });
+
+    return { success: true };
   }
 
-  // ===========================================================================
-  // 🔵 GERENCIAMENTO DE FLUXO (PRODUCT FLOW)
-  // ===========================================================================
+  // 🔵 GERENCIAMENTO DE FLUXO
+  async createFlow(userId: string, dto: CreateFlowDto) {
+    const companyId = this.getCompanyIdFromContext();
 
-  async createFlow(companyId: string, userId: string, dto: CreateFlowDto) {
+    this.logger.log(
+      `📝 Criando fluxo na empresa ${companyId} pelo usuário ${userId}`,
+    );
+
     const flow = await this.prisma.productFlow.create({
       data: {
         name: dto.name,
@@ -408,56 +363,97 @@ export class FlowService {
         deadline: dto.deadline ? new Date(dto.deadline) : null,
       },
     });
+
+    await this.auditService.log({
+      action: 'CREATE',
+      entity: 'FLOW',
+      entityId: flow.id,
+      userId,
+      companyId,
+      oldData: null,
+      newData: {
+        name: flow.name,
+        color: flow.color,
+        deadline: flow.deadline,
+        companyId: flow.companyId,
+      },
+      metadata: {
+        flowName: flow.name,
+        createdAt: flow.createdAt,
+      },
+    });
+
     await this.invalidateFlowCache(companyId);
     return flow;
   }
 
-  // No FlowService
-async updateFlow(companyId: string, flowId: string, data: { name?: string; color?: string; deadline?: Date | null }) {
-  this.logger.log(`📝 Atualizando fluxo ${flowId} na empresa ${companyId}`);
+  async updateFlow(
+    flowId: string,
+    data: { name?: string; color?: string; deadline?: Date | null },
+    userId: string,
+  ) {
+    const companyId = this.getCompanyIdFromContext();
 
-  // Verificar se o fluxo existe e pertence à empresa
-  const flow = await this.prisma.productFlow.findFirst({
-    where: { id: flowId, companyId },
-  });
+    this.logger.log(`📝 Atualizando fluxo ${flowId} na empresa ${companyId}`);
 
-  if (!flow) {
-    throw new NotFoundException('Fluxo não encontrado');
+    const flow = await this.prisma.productFlow.findFirst({
+      where: { id: flowId, companyId },
+    });
+
+    if (!flow) {
+      throw new NotFoundException('Fluxo não encontrado');
+    }
+
+    const updateData: any = {};
+
+    if (data.name !== undefined) {
+      updateData.name = data.name;
+    }
+
+    if (data.color !== undefined) {
+      updateData.color = data.color;
+    }
+
+    if (data.deadline !== undefined) {
+      updateData.deadline = data.deadline ? new Date(data.deadline) : null;
+    }
+
+    const oldData = {
+      name: flow.name,
+      color: flow.color,
+      deadline: flow.deadline,
+    };
+
+    const updatedFlow = await this.prisma.productFlow.update({
+      where: { id: flowId },
+      data: updateData,
+      include: {
+        stages: { orderBy: { order: 'asc' } },
+        _count: { select: { items: true, stages: true } },
+      },
+    });
+
+    await this.auditService.log({
+      action: 'UPDATE',
+      entity: 'FLOW',
+      entityId: flowId,
+      userId,
+      companyId,
+      oldData,
+      newData: {
+        name: updatedFlow.name,
+        color: updatedFlow.color,
+        deadline: updatedFlow.deadline,
+      },
+    });
+
+    await this.invalidateFlowCache(companyId, flowId);
+    return updatedFlow;
   }
 
-  // Preparar dados para atualização
-  const updateData: any = {};
-  
-  if (data.name !== undefined) {
-    updateData.name = data.name;
-  }
-  
-  if (data.color !== undefined) {
-    updateData.color = data.color;
-  }
-  
-  if (data.deadline !== undefined) {
-    updateData.deadline = data.deadline ? new Date(data.deadline) : null;
-  }
+  async getFlows() {
+    const companyId = this.getCompanyIdFromContext();
 
-  // Atualizar o fluxo
-  const updatedFlow = await this.prisma.productFlow.update({
-    where: { id: flowId },
-    data: updateData,
-    include: {
-      stages: { orderBy: { order: 'asc' } },
-      _count: { select: { items: true, stages: true } },
-    },
-  });
-
-  // Invalidar cache
-  await this.invalidateFlowCache(companyId, flowId);
-
-  return updatedFlow;
-}
-
-  // No FlowService, no método getFlows() - já implementei parcialmente
-  async getFlows(companyId: string) {
     const cacheKey = `flows_list_${companyId}`;
     const cached = await this.cacheManager.get(cacheKey);
     if (cached) return cached;
@@ -471,7 +467,6 @@ async updateFlow(companyId: string, flowId: string, data: { name?: string; color
       orderBy: { createdAt: 'desc' },
     });
 
-    // 🔥 Calcular dias restantes para cada fluxo
     const flowsWithCountdown = flows.map((flow) => {
       let daysRemaining: number | null = null;
       let deadlineStatus: 'normal' | 'warning' | 'overdue' | 'expired' =
@@ -487,13 +482,12 @@ async updateFlow(companyId: string, flowId: string, data: { name?: string; color
         const diffTime = deadline.getTime() - today.getTime();
         daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
-        // Classificar status do prazo
         if (daysRemaining < 0) {
-          deadlineStatus = 'expired'; // Prazo expirado
+          deadlineStatus = 'expired';
         } else if (daysRemaining === 0) {
-          deadlineStatus = 'overdue'; // Vence hoje
+          deadlineStatus = 'overdue';
         } else if (daysRemaining <= 3) {
-          deadlineStatus = 'warning'; // 3 dias ou menos
+          deadlineStatus = 'warning';
         } else {
           deadlineStatus = 'normal';
         }
@@ -503,7 +497,6 @@ async updateFlow(companyId: string, flowId: string, data: { name?: string; color
         ...flow,
         daysRemaining,
         deadlineStatus,
-        // Formatar data para exibição
         deadlineFormatted: flow.deadline
           ? new Date(flow.deadline).toLocaleDateString('pt-BR', {
               day: '2-digit',
@@ -519,7 +512,9 @@ async updateFlow(companyId: string, flowId: string, data: { name?: string; color
     return flowsWithCountdown;
   }
 
-  async deleteFlow(flowId: string, companyId: string) {
+  async deleteFlow(flowId: string, userId: string) {
+    const companyId = this.getCompanyIdFromContext();
+
     const flow = await this.prisma.productFlow.findFirst({
       where: { id: flowId, companyId },
       include: {
@@ -534,19 +529,32 @@ async updateFlow(companyId: string, flowId: string, data: { name?: string; color
       this.prisma.flowStage.deleteMany({ where: { flowId } }),
       this.prisma.productFlow.delete({ where: { id: flowId } }),
     ]);
+
+    await this.auditService.log({
+      action: 'DELETE',
+      entity: 'FLOW',
+      entityId: flowId,
+      userId,
+      companyId,
+      oldData: {
+        name: flow.name,
+        itemsCount: flow.items.length,
+      },
+    });
+
     await this.invalidateFlowCache(companyId, flowId);
     return { success: true };
   }
 
-  // ===========================================================================
-  // 🟠 GERENCIAMENTO DE ETAPAS (STAGES)
-  // ===========================================================================
+  // 🟠 GERENCIAMENTO DE ETAPAS
+  async createStage(flowId: string, data: CreateStageDto, userId: string) {
+    const companyId = this.getCompanyIdFromContext();
 
-  async createStage(companyId: string, flowId: string, data: CreateStageDto) {
     const lastStage = await this.prisma.flowStage.findFirst({
       where: { flowId },
       orderBy: { order: 'desc' },
     });
+
     const stage = await this.prisma.flowStage.create({
       data: {
         ...data,
@@ -555,15 +563,43 @@ async updateFlow(companyId: string, flowId: string, data: { name?: string; color
         companyId,
       },
     });
+
+    await this.auditService.log({
+      action: 'CREATE_STAGE',
+      entity: 'FLOW_STAGE',
+      entityId: stage.id,
+      userId,
+      companyId,
+      metadata: {
+        flowId,
+        stageName: stage.name,
+      },
+      newData: {
+        name: stage.name,
+        color: stage.color,
+        order: stage.order,
+        allowedRole: stage.allowedRole,
+      },
+    });
+
     await this.invalidateFlowCache(companyId, flowId);
     return stage;
   }
 
-  async updateStage(companyId: string, stageId: string, data: any) {
+  async updateStage(stageId: string, data: any, userId: string) {
+    const companyId = this.getCompanyIdFromContext();
+
     const stage = await this.prisma.flowStage.findFirst({
       where: { id: stageId, companyId },
     });
     if (!stage) throw new NotFoundException('Etapa não encontrada');
+
+    const oldData = {
+      name: stage.name,
+      color: stage.color,
+      order: stage.order,
+      allowedRole: stage.allowedRole,
+    };
 
     const updated = await this.prisma.flowStage.update({
       where: { id: stageId },
@@ -574,11 +610,29 @@ async updateFlow(companyId: string, flowId: string, data: { name?: string; color
         allowedRole: data.allowedRole,
       },
     });
+
+    await this.auditService.log({
+      action: 'UPDATE_STAGE',
+      entity: 'FLOW_STAGE',
+      entityId: stageId,
+      userId,
+      companyId,
+      oldData,
+      newData: {
+        name: updated.name,
+        color: updated.color,
+        order: updated.order,
+        allowedRole: updated.allowedRole,
+      },
+    });
+
     await this.invalidateFlowCache(companyId, stage.flowId);
     return updated;
   }
 
-  async deleteStage(stageId: string, companyId: string) {
+  async deleteStage(stageId: string, userId: string) {
+    const companyId = this.getCompanyIdFromContext();
+
     const stage = await this.prisma.flowStage.findFirst({
       where: { id: stageId, companyId },
       include: {
@@ -592,15 +646,28 @@ async updateFlow(companyId: string, flowId: string, data: { name?: string; color
       this.prisma.flowItem.deleteMany({ where: { stageId } }),
       this.prisma.flowStage.delete({ where: { id: stageId } }),
     ]);
+
+    await this.auditService.log({
+      action: 'DELETE_STAGE',
+      entity: 'FLOW_STAGE',
+      entityId: stageId,
+      userId,
+      companyId,
+      oldData: {
+        name: stage.name,
+        flowId: stage.flowId,
+        itemsCount: stage.items.length,
+      },
+    });
+
     await this.invalidateFlowCache(companyId, stage.flowId);
     return { success: true };
   }
 
-  // ===========================================================================
   // 🟡 GERENCIAMENTO DE ITENS E KANBAN
-  // ===========================================================================
+  async getKanbanBoard(flowId: string) {
+    const companyId = this.getCompanyIdFromContext();
 
-  async getKanbanBoard(flowId: string, companyId: string) {
     const board = await this.prisma.productFlow.findFirst({
       where: { id: flowId, companyId },
       include: {
@@ -608,11 +675,10 @@ async updateFlow(companyId: string, flowId: string, data: { name?: string; color
           orderBy: { order: 'asc' },
           include: {
             items: {
-              // GARANTE QUE O PRISMA TRAGA NA ORDEM CORRETA PARA O FRONTEND
               orderBy: { orderInStage: 'asc' },
               include: {
                 images: { take: 1, select: { url: true, id: true } },
-                assignedTo: { select: { name: true, id: true } }, // Inclui assignedTo
+                assignedTo: { select: { name: true, id: true } },
                 supplier: { select: { name: true } },
                 _count: {
                   select: { images: true, audios: true, videos: true },
@@ -627,12 +693,9 @@ async updateFlow(companyId: string, flowId: string, data: { name?: string; color
     return board;
   }
 
-  async createFlowItem(
-    companyId: string,
-    flowId: string,
-    userId: string,
-    dto: CreateFlowItemDto,
-  ) {
+  async createFlowItem(flowId: string, userId: string, dto: CreateFlowItemDto) {
+    const companyId = this.getCompanyIdFromContext();
+
     const user = await this.prisma.user.findFirst({
       where: { id: userId, companyId },
     });
@@ -656,17 +719,13 @@ async updateFlow(companyId: string, flowId: string, data: { name?: string; color
         orderBy: { orderInStage: 'desc' },
       });
 
-      // 🔥 CORREÇÃO: Criar objeto manualmente com conversão direta das datas
       const dataToCreate: any = {
-        // Campos obrigatórios
         title: dto.title,
         flowId: flowId,
         companyId: companyId,
         stageId: targetStage.id,
         orderInStage: (lastItem?.orderInStage ?? -1) + 1,
         enteredAt: new Date(),
-
-        // Campos opcionais com valores padrão
         orderNumber: dto.orderNumber || '',
         productRef: dto.productRef || '',
         quantity: dto.quantity || 1,
@@ -677,17 +736,12 @@ async updateFlow(companyId: string, flowId: string, data: { name?: string; color
         supplierId: dto.supplierId || null,
       };
 
-      // 🔥 Converter dueDate para Date se existir
       if (dto.dueDate) {
         dataToCreate.dueDate = new Date(dto.dueDate);
       }
-
-      // 🔥 Converter productionStartedAt para Date se existir
       if (dto.productionStartedAt) {
         dataToCreate.productionStartedAt = new Date(dto.productionStartedAt);
       }
-
-      // 🔥 Converter deliveryAt para Date se existir
       if (dto.deliveryAt) {
         dataToCreate.deliveryAt = new Date(dto.deliveryAt);
       }
@@ -696,17 +750,37 @@ async updateFlow(companyId: string, flowId: string, data: { name?: string; color
         data: dataToCreate,
       });
 
+      await this.auditService.log({
+        action: 'CREATE_ITEM',
+        entity: 'FLOW_ITEM',
+        entityId: item.id,
+        userId,
+        companyId,
+        newData: {
+          title: item.title,
+          flowId: item.flowId,
+          stageId: item.stageId,
+          orderNumber: item.orderNumber,
+          productRef: item.productRef,
+          quantity: item.quantity,
+          priority: item.priority,
+          status: item.status,
+          dueDate: item.dueDate,
+          productionStartedAt: item.productionStartedAt,
+          deliveryAt: item.deliveryAt,
+          assignedToId: item.assignedToId,
+          supplierId: item.supplierId,
+        },
+      });
+
       await this.invalidateFlowCache(companyId, flowId);
       return item;
     });
   }
 
-  async updateFlowItem(
-    companyId: string,
-    itemId: string,
-    userId: string,
-    data: any,
-  ) {
+  async updateFlowItem(itemId: string, userId: string, data: any) {
+    const companyId = this.getCompanyIdFromContext();
+
     const [item, user] = await Promise.all([
       this.prisma.flowItem.findFirst({
         where: { id: itemId, companyId },
@@ -719,7 +793,22 @@ async updateFlow(companyId: string, flowId: string, data: { name?: string; color
       throw new NotFoundException('Item ou usuário não encontrado');
     this.validateStageAccess(user, item.stage!);
 
-    // Proteção IDOR: Se mudar de etapa, valida se a nova etapa pertence à empresa
+    const oldData = {
+      title: item.title,
+      description: item.description,
+      priority: item.priority,
+      quantity: item.quantity,
+      supplierId: item.supplierId,
+      assignedToId: item.assignedToId,
+      stageId: item.stageId,
+      orderNumber: item.orderNumber,
+      productRef: item.productRef,
+      status: item.status,
+      dueDate: item.dueDate,
+      productionStartedAt: item.productionStartedAt,
+      deliveryAt: item.deliveryAt,
+    };
+
     if (data.stageId && data.stageId !== item.stageId) {
       const newStage = await this.prisma.flowStage.findFirst({
         where: { id: data.stageId, companyId },
@@ -728,7 +817,6 @@ async updateFlow(companyId: string, flowId: string, data: { name?: string; color
       this.validateStageAccess(user, newStage);
     }
 
-    // 🔥 CORREÇÃO: Criar objeto de atualização manualmente
     const updateData: any = {
       title: data.title,
       description: data.description,
@@ -743,26 +831,20 @@ async updateFlow(companyId: string, flowId: string, data: { name?: string; color
       updatedAt: new Date(),
     };
 
-    // 🔥 Remover campos undefined
     Object.keys(updateData).forEach((key) => {
       if (updateData[key] === undefined) {
         delete updateData[key];
       }
     });
 
-    // 🔥 Converter dueDate para Date se existir
     if (data.dueDate !== undefined) {
       updateData.dueDate = data.dueDate ? new Date(data.dueDate) : null;
     }
-
-    // 🔥 Converter productionStartedAt para Date se existir
     if (data.productionStartedAt !== undefined) {
       updateData.productionStartedAt = data.productionStartedAt
         ? new Date(data.productionStartedAt)
         : null;
     }
-
-    // 🔥 Converter deliveryAt para Date se existir
     if (data.deliveryAt !== undefined) {
       updateData.deliveryAt = data.deliveryAt
         ? new Date(data.deliveryAt)
@@ -772,6 +854,30 @@ async updateFlow(companyId: string, flowId: string, data: { name?: string; color
     const updated = await this.prisma.flowItem.update({
       where: { id: itemId },
       data: updateData,
+    });
+
+    await this.auditService.log({
+      action: 'UPDATE_ITEM',
+      entity: 'FLOW_ITEM',
+      entityId: itemId,
+      userId,
+      companyId,
+      oldData,
+      newData: {
+        title: updated.title,
+        description: updated.description,
+        priority: updated.priority,
+        quantity: updated.quantity,
+        supplierId: updated.supplierId,
+        assignedToId: updated.assignedToId,
+        stageId: updated.stageId,
+        orderNumber: updated.orderNumber,
+        productRef: updated.productRef,
+        status: updated.status,
+        dueDate: updated.dueDate,
+        productionStartedAt: updated.productionStartedAt,
+        deliveryAt: updated.deliveryAt,
+      },
     });
 
     await this.invalidateFlowCache(companyId, item.flowId);
@@ -807,21 +913,17 @@ async updateFlow(companyId: string, flowId: string, data: { name?: string; color
           throw new NotFoundException('Item, etapa ou usuário não encontrado');
         }
 
-        // ──── VALIDAÇÃO APENAS NA ETAPA DE ORIGEM ────
         console.log(
           '[MOVE_ITEM] Validando permissão apenas na ORIGEM:',
           item.stage?.name,
         );
         this.validateStageAccess(user, item.stage!);
 
-        // NÃO validamos a etapa destino
-        // O usuário pode jogar para qualquer coluna, desde que consiga tirar da atual
+        const oldStageId = item.stageId;
 
-        // ──── LÓGICA DE REORDENAÇÃO ────
         let finalOrder: number;
 
         if (newOrder !== undefined && newOrder >= 0) {
-          // Reordenação explícita
           await tx.flowItem.updateMany({
             where: {
               stageId: newStageId,
@@ -832,7 +934,6 @@ async updateFlow(companyId: string, flowId: string, data: { name?: string; color
           });
           finalOrder = newOrder;
         } else {
-          // Final da coluna
           const last = await tx.flowItem.findFirst({
             where: { stageId: newStageId },
             orderBy: { orderInStage: 'desc' },
@@ -841,7 +942,6 @@ async updateFlow(companyId: string, flowId: string, data: { name?: string; color
           finalOrder = (last?.orderInStage ?? -1) + 1;
         }
 
-        // Atualiza o item
         const updated = await tx.flowItem.update({
           where: { id: itemId },
           data: {
@@ -851,8 +951,22 @@ async updateFlow(companyId: string, flowId: string, data: { name?: string; color
           },
         });
 
-        await this.invalidateFlowCache(companyId, item.flowId);
+        await this.auditService.log({
+          action: 'MOVE_ITEM',
+          entity: 'FLOW_ITEM',
+          entityId: itemId,
+          userId,
+          companyId,
+          metadata: {
+            fromStageId: oldStageId,
+            fromStageName: item.stage?.name,
+            toStageId: newStageId,
+            toStageName: nextStage.name,
+            newOrder: finalOrder,
+          },
+        });
 
+        await this.invalidateFlowCache(companyId, item.flowId);
         console.log('[MOVE_ITEM] Movimentação concluída com sucesso');
         return updated;
       });
@@ -874,24 +988,51 @@ async updateFlow(companyId: string, flowId: string, data: { name?: string; color
       if (!user) throw new ForbiddenException();
 
       this.validateStageAccess(user, item.stage);
+
       const allStages = await tx.flowStage.findMany({
         where: { flowId: item.flowId },
         orderBy: { order: 'asc' },
       });
-      const nextStage =
-        allStages[allStages.findIndex((s) => s.id === item.stageId) + 1];
+
+      const currentIndex = allStages.findIndex((s) => s.id === item.stageId);
+      const nextStage = allStages[currentIndex + 1];
 
       if (!nextStage) throw new BadRequestException('Fim da esteira.');
+
+      const oldStageId = item.stageId;
+
       const updated = await tx.flowItem.update({
         where: { id: itemId },
-        data: { stageId: nextStage.id, updatedAt: new Date() },
+        data: {
+          stageId: nextStage.id,
+          updatedAt: new Date(),
+        },
       });
+
+      await this.auditService.log({
+        action: 'ADVANCE_ITEM',
+        entity: 'FLOW_ITEM',
+        entityId: itemId,
+        userId,
+        companyId,
+        metadata: {
+          fromStageId: oldStageId,
+          fromStageName: item.stage.name,
+          toStageId: nextStage.id,
+          toStageName: nextStage.name,
+          fromOrder: currentIndex,
+          toOrder: currentIndex + 1,
+        },
+      });
+
       await this.invalidateFlowCache(companyId!, item.flowId);
       return updated;
     });
   }
 
-  async deleteItem(itemId: string, companyId: string) {
+  async deleteItem(itemId: string, userId: string) {
+    const companyId = this.getCompanyIdFromContext();
+
     const item = await this.prisma.flowItem.findFirst({
       where: { id: itemId, companyId },
       include: { images: true, audios: true, videos: true },
@@ -900,21 +1041,42 @@ async updateFlow(companyId: string, flowId: string, data: { name?: string; color
 
     await this.cleanUpFlowFiles([item]);
     await this.prisma.flowItem.delete({ where: { id: itemId } });
+
+    await this.auditService.log({
+      action: 'DELETE_ITEM',
+      entity: 'FLOW_ITEM',
+      entityId: itemId,
+      userId,
+      companyId,
+      oldData: {
+        title: item.title,
+        flowId: item.flowId,
+        stageId: item.stageId,
+        orderNumber: item.orderNumber,
+        productRef: item.productRef,
+      },
+      metadata: {
+        mediaCount: {
+          images: item.images.length,
+          audios: item.audios.length,
+          videos: item.videos.length,
+        },
+      },
+    });
+
     await this.invalidateFlowCache(companyId, item.flowId);
     return { success: true };
   }
 
-  // ===========================================================================
   // 📁 MÍDIAS E SUPORTE
-  // ===========================================================================
-
   async addMediaToItem(
-    companyId: string,
     itemId: string,
     file: Express.Multer.File,
     type: 'image' | 'audio' | 'video',
     userId: string,
   ) {
+    const companyId = this.getCompanyIdFromContext();
+
     const item = await this.prisma.flowItem.findFirst({
       where: { id: itemId, companyId },
     });
@@ -930,33 +1092,53 @@ async updateFlow(companyId: string, flowId: string, data: { name?: string; color
       size: upload.size,
     };
 
-    const media =
-      type === 'image'
-        ? await this.prisma.flowImage.create({ data })
-        : type === 'audio'
-          ? await this.prisma.flowAudio.create({
-              data: { ...data, duration: 0 },
-            })
-          : await this.prisma.flowVideo.create({
-              data: { ...data, duration: 0 },
-            });
+    let media;
+    if (type === 'image') {
+      media = await this.prisma.flowImage.create({ data });
+    } else if (type === 'audio') {
+      media = await this.prisma.flowAudio.create({
+        data: { ...data, duration: 0 },
+      });
+    } else {
+      media = await this.prisma.flowVideo.create({
+        data: { ...data, duration: 0 },
+      });
+    }
+
+    await this.auditService.log({
+      action: `ADD_${type.toUpperCase()}`,
+      entity: 'FLOW_ITEM',
+      entityId: itemId,
+      userId,
+      companyId,
+      metadata: {
+        mediaId: media.id,
+        filename: upload.filename,
+        url: upload.url,
+        size: upload.size,
+        type,
+      },
+    });
 
     await this.invalidateFlowCache(companyId, item.flowId);
     return media;
   }
 
   async deleteMedia(
-    companyId: string,
     itemId: string,
     type: 'image' | 'audio' | 'video',
     mediaId: string,
+    userId: string,
   ) {
+    const companyId = this.getCompanyIdFromContext();
+
     const model: any =
       type === 'image'
         ? this.prisma.flowImage
         : type === 'audio'
           ? this.prisma.flowAudio
           : this.prisma.flowVideo;
+
     const media = await model.findFirst({
       where: { id: mediaId, itemId, companyId },
     });
@@ -966,8 +1148,24 @@ async updateFlow(companyId: string, flowId: string, data: { name?: string; color
         await this.supabase
           .deleteFlowFile(media.url)
           .catch((e) => this.logger.error(e));
+
       await model.delete({ where: { id: mediaId } });
+
+      await this.auditService.log({
+        action: `DELETE_${type.toUpperCase()}`,
+        entity: 'FLOW_ITEM',
+        entityId: itemId,
+        userId,
+        companyId,
+        metadata: {
+          mediaId,
+          filename: media.filename,
+          url: media.url,
+          type,
+        },
+      });
     }
+
     await this.invalidateFlowCache(companyId);
     return { success: true };
   }
@@ -984,11 +1182,10 @@ async updateFlow(companyId: string, flowId: string, data: { name?: string; color
     }
   }
 
-  // ===========================================================================
-  // 🔄 FUNÇÕES DE FILTRO (BACKEND - COM DEBUG)
-  // ===========================================================================
+  // 🔄 FUNÇÕES DE FILTRO
+  async getFilteredItems(filters: FlowFilterDto) {
+    const companyId = this.getCompanyIdFromContext();
 
-  async getFilteredItems(companyId: string, filters: FlowFilterDto) {
     const {
       startDate,
       endDate,
@@ -1002,57 +1199,21 @@ async updateFlow(companyId: string, flowId: string, data: { name?: string; color
     } = filters;
 
     this.logger.log(`🔍 FILTRANDO ITENS para empresa ${companyId}`);
-    this.logger.log(`📦 filters completos:`, JSON.stringify(filters));
-
-    // ===========================================================================
-    // 🔥 LOG 1: Ver TODOS os itens da empresa (sem filtro)
-    // ===========================================================================
-    const allItems = await this.prisma.flowItem.findMany({
-      where: { companyId },
-      select: {
-        id: true,
-        title: true,
-        productionStartedAt: true,
-        dueDate: true,
-        status: true,
-        flowId: true,
-      },
-    });
-
-    this.logger.log(
-      `📊 ===== TODOS OS ITENS DA EMPRESA (${allItems.length}) =====`,
-    );
-    allItems.forEach((item, index) => {
-      this.logger.log(`   ${index + 1}. ${item.title}:`);
-      this.logger.log(`      - ID: ${item.id}`);
-      this.logger.log(
-        `      - productionStartedAt: ${item.productionStartedAt?.toISOString() || 'NULL'}`,
-      );
-      this.logger.log(
-        `      - dueDate: ${item.dueDate?.toISOString() || 'NULL'}`,
-      );
-      this.logger.log(`      - status: ${item.status}`);
-      this.logger.log(`      - flowId: ${item.flowId}`);
-    });
 
     const whereClause: any = {
       companyId,
     };
 
-    // Aplicar filtros básicos
     if (assignedToId) {
       whereClause.assignedToId = assignedToId;
-      this.logger.log(`✅ Filtro assignedToId: ${assignedToId}`);
     }
 
     if (supplierId) {
       whereClause.supplierId = supplierId === 'internal' ? null : supplierId;
-      this.logger.log(`✅ Filtro supplierId: ${supplierId}`);
     }
 
     if (status) {
       whereClause.status = status;
-      this.logger.log(`✅ Filtro status: ${status}`);
     }
 
     if (productRef && productRef.trim() !== '') {
@@ -1060,10 +1221,8 @@ async updateFlow(companyId: string, flowId: string, data: { name?: string; color
         contains: productRef.trim(),
         mode: 'insensitive',
       };
-      this.logger.log(`✅ Filtro productRef: ${productRef}`);
     }
 
-    // Lógica para filtro por intervalo de datas
     if (startDate || endDate) {
       const dateField =
         dateType === DateFilterType.DUE_DATE
@@ -1074,57 +1233,19 @@ async updateFlow(companyId: string, flowId: string, data: { name?: string; color
 
       if (startDate) {
         dateFilter.gte = new Date(startDate);
-        this.logger.log(`📅 startDate: ${new Date(startDate).toISOString()}`);
       }
-
       if (endDate) {
         const endDateTime = new Date(endDate);
         endDateTime.setHours(23, 59, 59, 999);
         dateFilter.lte = endDateTime;
-        this.logger.log(`📅 endDate: ${endDateTime.toISOString()}`);
       }
 
       whereClause[dateField] = dateFilter;
-      this.logger.log(`📅 dateField: ${dateField}`);
     }
 
-    // ===========================================================================
-    // 🔥 LOG 2: Lógica para itens ATRASADOS (overdue)
-    // ===========================================================================
     if (isOverdue === 'true') {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-
-      this.logger.log(`📅 ===== FILTRO ATRASADOS =====`);
-      this.logger.log(`   - Data atual (UTC): ${today.toISOString()}`);
-      this.logger.log(
-        `   - Data atual (local): ${today.toLocaleString('pt-BR')}`,
-      );
-
-      // Ver itens que poderiam ser considerados atrasados
-      const potentialOverdue = await this.prisma.flowItem.findMany({
-        where: {
-          companyId,
-          dueDate: { not: null },
-          status: { not: 'CONCLUIDO' },
-        },
-        select: {
-          id: true,
-          title: true,
-          dueDate: true,
-          status: true,
-        },
-      });
-
-      this.logger.log(
-        `📊 Itens com dueDate (não concluídos): ${potentialOverdue.length}`,
-      );
-      potentialOverdue.forEach((item) => {
-        const isLate = item.dueDate! < today;
-        this.logger.log(
-          `   - ${item.title}: dueDate=${item.dueDate?.toISOString()} | ${isLate ? '🔴 ATRASADO' : '✅ no prazo'}`,
-        );
-      });
 
       whereClause.AND = [
         {
@@ -1145,62 +1266,12 @@ async updateFlow(companyId: string, flowId: string, data: { name?: string; color
       ];
     }
 
-    // ===========================================================================
-    // 🔥 LOG 3: Lógica para itens PRÓXIMOS A VENCER (isUpcoming)
-    // ===========================================================================
     if (isUpcoming === 'true') {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
 
       const endOfDay = new Date(today);
       endOfDay.setHours(23, 59, 59, 999);
-
-      this.logger.log(`📅 ===== FILTRO PRÓXIMOS A VENCER (HOJE) =====`);
-      this.logger.log(`   - Hoje (início UTC): ${today.toISOString()}`);
-      this.logger.log(`   - Hoje (fim UTC): ${endOfDay.toISOString()}`);
-      this.logger.log(
-        `   - Hoje (local): ${today.toLocaleDateString('pt-BR')}`,
-      );
-
-      // 🔥 LOG 4: Ver TODOS os itens com productionStartedAt
-      const itemsWithStartDate = await this.prisma.flowItem.findMany({
-        where: {
-          companyId,
-          productionStartedAt: { not: null },
-        },
-        select: {
-          id: true,
-          title: true,
-          productionStartedAt: true,
-          status: true,
-        },
-      });
-
-      this.logger.log(
-        `📊 Itens com productionStartedAt preenchido: ${itemsWithStartDate.length}`,
-      );
-
-      itemsWithStartDate.forEach((item) => {
-        const startDate = item.productionStartedAt!;
-        const startDateStr = startDate.toISOString();
-        const startDateOnly = startDateStr.split('T')[0];
-        const todayStr = today.toISOString().split('T')[0];
-
-        const isToday = startDate >= today && startDate <= endOfDay;
-        const isTodayByString = startDateOnly === todayStr;
-
-        this.logger.log(`   - ${item.title}:`);
-        this.logger.log(`     original: ${startDateStr}`);
-        this.logger.log(`     data (YYYY-MM-DD): ${startDateOnly}`);
-        this.logger.log(`     hoje (YYYY-MM-DD): ${todayStr}`);
-        this.logger.log(
-          `     dentro do intervalo? ${isToday ? 'SIM ✅' : 'NÃO ❌'}`,
-        );
-        this.logger.log(
-          `     match por string? ${isTodayByString ? 'SIM ✅' : 'NÃO ❌'}`,
-        );
-        this.logger.log(`     status: ${item.status}`);
-      });
 
       whereClause.AND = [
         {
@@ -1222,14 +1293,6 @@ async updateFlow(companyId: string, flowId: string, data: { name?: string; color
       ];
     }
 
-    this.logger.log(
-      `📝 whereClause final:`,
-      JSON.stringify(whereClause, null, 2),
-    );
-
-    // ===========================================================================
-    // 🔥 LOG 5: Buscar itens com o whereClause final
-    // ===========================================================================
     try {
       const items = await this.prisma.flowItem.findMany({
         where: whereClause,
@@ -1292,46 +1355,6 @@ async updateFlow(companyId: string, flowId: string, data: { name?: string; color
         },
       });
 
-      this.logger.log(`✅ ===== RESULTADO FINAL =====`);
-      this.logger.log(
-        `✅ Encontrados ${items.length} itens com os filtros aplicados`,
-      );
-
-      if (items.length > 0) {
-        items.forEach((item) => {
-          this.logger.log(`   - Item: ${item.title}`);
-          this.logger.log(
-            `     productionStartedAt: ${item.productionStartedAt?.toISOString()}`,
-          );
-          this.logger.log(`     dueDate: ${item.dueDate?.toISOString()}`);
-          this.logger.log(`     status: ${item.status}`);
-          this.logger.log(`     flow: ${item.flow?.name}`);
-          this.logger.log(`     stage: ${item.stage?.name}`);
-        });
-      } else {
-        this.logger.log(`⚠️ NENHUM item encontrado com os filtros aplicados`);
-
-        // 🔥 LOG 6: Sugestão de diagnóstico
-        if (isUpcoming === 'true') {
-          this.logger.log(`🔍 DIAGNÓSTICO - Dicas para próximo a vencer:`);
-          this.logger.log(
-            `   1. Verifique se o productionStartedAt está preenchido no banco`,
-          );
-          this.logger.log(`   2. Verifique o fuso horário (timezone) da data`);
-          this.logger.log(`   3. Verifique se o status não é "CONCLUIDO"`);
-          this.logger.log(`   4. Tente filtrar com intervalo maior para teste`);
-        }
-
-        if (isOverdue === 'true') {
-          this.logger.log(`🔍 DIAGNÓSTICO - Dicas para atrasados:`);
-          this.logger.log(
-            `   1. Verifique se o dueDate está preenchido no banco`,
-          );
-          this.logger.log(`   2. Verifique se a data é anterior a hoje`);
-          this.logger.log(`   3. Verifique se o status não é "CONCLUIDO"`);
-        }
-      }
-
       return items;
     } catch (error) {
       this.logger.error('❌ Erro ao filtrar itens:', error);
@@ -1339,15 +1362,9 @@ async updateFlow(companyId: string, flowId: string, data: { name?: string; color
     }
   }
 
-  /**
-   * Versão otimizada para o Kanban - retorna o board completo com itens filtrados
-   */
-  async getFilteredKanbanBoard(
-    flowId: string,
-    companyId: string,
-    filters: FlowFilterDto,
-  ) {
-    // Primeiro busca o board completo
+  async getFilteredKanbanBoard(flowId: string, filters: FlowFilterDto) {
+    const companyId = this.getCompanyIdFromContext();
+
     const board = await this.prisma.productFlow.findFirst({
       where: { id: flowId, companyId },
       include: {
@@ -1370,15 +1387,12 @@ async updateFlow(companyId: string, flowId: string, data: { name?: string; color
       throw new BadRequestException('Fluxo não encontrado');
     }
 
-    // Se não há filtros, retorna o board completo
     if (!this.hasFilters(filters)) {
       return board;
     }
 
-    // Aplica os filtros nos itens
-    const filteredItems = await this.getFilteredItems(companyId, filters);
+    const filteredItems = await this.getFilteredItems(filters);
 
-    // Filtra os itens em cada stage baseado nos resultados
     const filteredStages = board.stages.map((stage) => ({
       ...stage,
       items: stage.items.filter((item) =>
@@ -1402,5 +1416,75 @@ async updateFlow(companyId: string, flowId: string, data: { name?: string; color
       filters.supplierId ||
       filters.status
     );
+  }
+
+  // 🛡️ LÓGICA DE SEGURANÇA (mantida igual)
+  private validateStageAccess(
+    user: { role: string; professionalRole: string | null },
+    stage: { name: string; allowedRole: string | null },
+  ) {
+    // ... (mesmo código anterior)
+    if (['MASTER', 'ADMIN'].includes(user.role)) {
+      return true;
+    }
+
+    if (
+      !stage.allowedRole ||
+      stage.allowedRole.trim() === '' ||
+      stage.allowedRole === 'null' ||
+      stage.allowedRole === 'all'
+    ) {
+      return true;
+    }
+
+    const userRole = user.professionalRole?.trim().toLowerCase() || '';
+    const required = stage.allowedRole.trim().toLowerCase();
+
+    const roles = userRole.split(',').map((r) => r.trim());
+    const hasAccess = roles.some((r) => r === required);
+
+    if (!hasAccess) {
+      throw new ForbiddenException(
+        `Acesso restrito ao cargo: ${stage.allowedRole}`,
+      );
+    }
+
+    return true;
+  }
+
+  private async executeWithResilience<T>(
+    operation: string,
+    fn: () => Promise<T>,
+    retries = 3,
+  ): Promise<T> {
+    const endTimer = this.dbHistogram.labels(operation).startTimer();
+    let attempt = 0;
+    while (attempt < retries) {
+      try {
+        const result = await fn();
+        endTimer();
+        return result;
+      } catch (error: any) {
+        attempt++;
+        if (
+          attempt >= retries ||
+          error instanceof ForbiddenException ||
+          error instanceof NotFoundException
+        ) {
+          endTimer();
+          throw error;
+        }
+        await new Promise((res) => setTimeout(res, 200 * attempt));
+      }
+    }
+    throw new InternalServerErrorException('Database unavailable');
+  }
+
+  private async invalidateFlowCache(companyId: string, flowId?: string) {
+    await this.cacheManager.del(`flows_list_${companyId}`);
+    if (flowId) {
+      await this.cacheManager.del(`flow_board_${flowId}`);
+      await this.cacheManager.del(`flow_stats_${flowId}`);
+    }
   }
 }

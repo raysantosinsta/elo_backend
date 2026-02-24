@@ -7,11 +7,13 @@ import { CacheModule } from '@nestjs/cache-manager';
 import { PrismaModule } from 'src/prisma/prisma.module';
 import { SupabaseModule } from 'src/supabase/supabase.module';
 import { makeCounterProvider, makeHistogramProvider } from '@willsoto/nestjs-prometheus';
+import { AuditModule } from 'src/audit/audit.module';
 
 @Module({
   imports: [
     PrismaModule,
     SupabaseModule, 
+    AuditModule,
     CacheModule.register(),
   ],
   controllers: [FlowController],

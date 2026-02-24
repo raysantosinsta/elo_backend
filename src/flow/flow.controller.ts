@@ -57,6 +57,11 @@ export class FlowController {
 
   constructor(private readonly flowService: FlowService) {}
 
+  // ===========================================================================
+  // 🔥 IMPORTANTE: NENHUM MÉTODO RECEBE companyId DO FRONTEND!
+  // O service pega do CLS: this.cls.get('tenantId')
+  // ===========================================================================
+
   @Get(':flowId/filter/items')
   @ApiOperation({ summary: 'Filtra itens de um fluxo específico' })
   async filterItemsByFlow(
@@ -64,11 +69,9 @@ export class FlowController {
     @Param('flowId', ParseUUIDPipe) flowId: string,
     @Query() query: FlowFilterDto,
   ) {
-    this.logger.log(
-      `Filtrando itens do fluxo ${flowId} para empresa ${req.user.companyId}`,
-    );
+    this.logger.log(`Filtrando itens do fluxo ${flowId}`);
+    // 🔥 REMOVIDO: req.user.companyId - O service pega do CLS
     return await this.flowService.getFilteredItemsByFlow(
-      req.user.companyId,
       flowId,
       query,
     );
@@ -81,10 +84,9 @@ export class FlowController {
   @Get('templates')
   @ApiOperation({ summary: 'Lista todos os templates de etapas da empresa' })
   async getTemplates(@Req() req: any) {
-    this.logger.log(
-      `Chamada GET /flow/templates - Empresa: ${req.user.companyId}`,
-    );
-    return this.flowService.getTemplates(req.user.companyId);
+    this.logger.log(`Chamada GET /flow/templates`);
+    // 🔥 REMOVIDO: req.user.companyId
+    return this.flowService.getTemplates();
   }
 
   @Post(':flowId/save-template')
@@ -95,18 +97,15 @@ export class FlowController {
     @Param('flowId', ParseUUIDPipe) flowId: string,
     @Body('name') name: string,
   ) {
-    this.logger.log(
-      `Chamada POST /flow/${flowId}/save-template - User: ${req.user.id}`,
-    );
+    this.logger.log(`Chamada POST /flow/${flowId}/save-template - User: ${req.user.id}`);
 
     if (!name) {
-      this.logger.warn(
-        `Tentativa de salvar template sem nome - FlowID: ${flowId}`,
-      );
+      this.logger.warn(`Tentativa de salvar template sem nome - FlowID: ${flowId}`);
       throw new BadRequestException('O nome do template é obrigatório');
     }
 
-    return this.flowService.saveTemplate(req.user.companyId, flowId, name);
+    // 🔥 REMOVIDO: req.user.companyId
+    return this.flowService.saveTemplate(flowId, name, req.user.id);
   }
 
   @Post(':flowId/apply-template/:templateId')
@@ -116,13 +115,12 @@ export class FlowController {
     @Param('flowId', ParseUUIDPipe) flowId: string,
     @Param('templateId', ParseUUIDPipe) templateId: string,
   ) {
-    this.logger.log(
-      `Chamada POST /flow/${flowId}/apply-template/${templateId}`,
-    );
+    this.logger.log(`Chamada POST /flow/${flowId}/apply-template/${templateId}`);
+    // 🔥 REMOVIDO: req.user.companyId
     return this.flowService.applyTemplate(
-      req.user.companyId,
       flowId,
       templateId,
+      req.user.id,
     );
   }
 
@@ -133,10 +131,9 @@ export class FlowController {
     @Req() req: any,
     @Param('templateId', ParseUUIDPipe) templateId: string,
   ) {
-    this.logger.log(
-      `Chamada DELETE /flow/templates/${templateId} - User: ${req.user.id}`,
-    );
-    return this.flowService.deleteTemplate(req.user.companyId, templateId);
+    this.logger.log(`Chamada DELETE /flow/templates/${templateId} - User: ${req.user.id}`);
+    // 🔥 REMOVIDO: req.user.companyId
+    return this.flowService.deleteTemplate(templateId, req.user.id);
   }
 
   // ===========================================================================
@@ -147,35 +144,38 @@ export class FlowController {
   @RequirePermissions(AppPermission.MANAGE_FLOW)
   @ApiOperation({ summary: 'Cria um novo fluxo de produção' })
   async createFlow(@Req() req: any, @Body() body: CreateFlowDto) {
-    this.logger.log(
-      `Criando fluxo na empresa ${req.user.companyId} pelo usuário ${req.user.id}`,
+    this.logger.log(`Criando fluxo pelo usuário ${req.user.id}`);
+    // 🔥 REMOVIDO: req.user.companyId
+    return this.flowService.createFlow(req.user.id, body);
+  }
+
+  @Put(':flowId')
+  @RequirePermissions(AppPermission.MANAGE_FLOW)
+  @ApiOperation({ summary: 'Atualiza um fluxo existente' })
+  async updateFlow(
+    @Req() req: any,
+    @Param('flowId', ParseUUIDPipe) flowId: string,
+    @Body() body: { name?: string; color?: string; deadline?: string | null }
+  ) {
+    this.logger.log(`Atualizando fluxo ${flowId} pelo usuário ${req.user.id}`);
+    
+    // Converter deadline para Date se existir
+    let deadline: Date | null = null;
+    if (body.deadline) {
+      deadline = new Date(body.deadline);
+    }
+
+    // 🔥 REMOVIDO: req.user.companyId
+    return this.flowService.updateFlow(
+      flowId, 
+      {
+        name: body.name,
+        color: body.color,
+        deadline,
+      },
+      req.user.id,
     );
-    return this.flowService.createFlow(req.user.companyId, req.user.id, body);
   }
-
-  // No FlowController
-@Put(':flowId')
-@RequirePermissions(AppPermission.MANAGE_FLOW)
-@ApiOperation({ summary: 'Atualiza um fluxo existente' })
-async updateFlow(
-  @Req() req: any,
-  @Param('flowId', ParseUUIDPipe) flowId: string,
-  @Body() body: { name?: string; color?: string; deadline?: string | null }
-) {
-  this.logger.log(`Atualizando fluxo ${flowId} na empresa ${req.user.companyId}`);
-  
-  // Converter deadline para Date se existir
-  let deadline: Date | null = null;
-  if (body.deadline) {
-    deadline = new Date(body.deadline);
-  }
-
-  return this.flowService.updateFlow(req.user.companyId, flowId, {
-    name: body.name,
-    color: body.color,
-    deadline,
-  });
-}
 
   @Delete(':flowId')
   @RequirePermissions(AppPermission.MANAGE_FLOW)
@@ -184,7 +184,8 @@ async updateFlow(
     @Req() req: any,
     @Param('flowId', ParseUUIDPipe) flowId: string,
   ) {
-    return this.flowService.deleteFlow(flowId, req.user.companyId);
+    // 🔥 REMOVIDO: req.user.companyId
+    return this.flowService.deleteFlow(flowId, req.user.id);
   }
 
   // ===========================================================================
@@ -196,12 +197,13 @@ async updateFlow(
   async createStage(
     @Req() req: any,
     @Param('flowId', ParseUUIDPipe) flowId: string,
-    @Body() body: CreateStageDto, // 🔥 Agora usa o DTO completo
+    @Body() body: CreateStageDto,
   ) {
+    // 🔥 REMOVIDO: req.user.companyId
     return this.flowService.createStage(
-      req.user.companyId,
       flowId,
-      body, // 🔥 Passa o objeto body inteiro, não campos soltos
+      body,
+      req.user.id,
     );
   }
 
@@ -210,9 +212,14 @@ async updateFlow(
   async updateStage(
     @Req() req: any,
     @Param('stageId', ParseUUIDPipe) stageId: string,
-    @Body() body: Partial<CreateStageDto>, // 🔥 Usa Partial do DTO para tipagem
+    @Body() body: Partial<CreateStageDto>,
   ) {
-    return this.flowService.updateStage(req.user.companyId, stageId, body);
+    // 🔥 REMOVIDO: req.user.companyId
+    return this.flowService.updateStage(
+      stageId, 
+      body,
+      req.user.id,
+    );
   }
 
   @Delete('stages/:stageId')
@@ -220,7 +227,11 @@ async updateFlow(
     @Req() req: any,
     @Param('stageId', ParseUUIDPipe) stageId: string,
   ) {
-    return this.flowService.deleteStage(stageId, req.user.companyId);
+    // 🔥 REMOVIDO: req.user.companyId
+    return this.flowService.deleteStage(
+      stageId,
+      req.user.id,
+    );
   }
 
   // ===========================================================================
@@ -229,7 +240,8 @@ async updateFlow(
 
   @Get()
   async getFlows(@Req() req: any) {
-    return this.flowService.getFlows(req.user.companyId);
+    // 🔥 REMOVIDO: req.user.companyId
+    return this.flowService.getFlows();
   }
 
   @Get(':flowId/board')
@@ -237,12 +249,10 @@ async updateFlow(
     @Req() req: any,
     @Param('flowId', ParseUUIDPipe) flowId: string,
   ) {
-    return this.flowService.getKanbanBoard(flowId, req.user.companyId);
+    // 🔥 REMOVIDO: req.user.companyId
+    return this.flowService.getKanbanBoard(flowId);
   }
 
-  /**
-   * Endpoint para filtrar itens globalmente
-   */
   @Get('filter/items')
   @ApiOperation({ summary: 'Filtra itens com base nos critérios fornecidos' })
   @ApiQuery({ name: 'startDate', required: false, type: String })
@@ -257,15 +267,13 @@ async updateFlow(
   @ApiQuery({ name: 'assignedToId', required: false, type: String })
   @ApiQuery({ name: 'supplierId', required: false, type: String })
   @ApiQuery({ name: 'status', required: false, type: String })
-  @ApiQuery({ name: 'productRef', required: false, type: String }) // 🔥 NOVO
+  @ApiQuery({ name: 'productRef', required: false, type: String })
   async filterItems(@Req() req: any, @Query() query: FlowFilterDto) {
-    this.logger.log(`Filtrando itens para empresa ${req.user.companyId}`);
-    return this.flowService.getFilteredItems(req.user.companyId, query);
+    this.logger.log(`Filtrando itens`);
+    // 🔥 REMOVIDO: req.user.companyId
+    return this.flowService.getFilteredItems(query);
   }
 
-  /**
-   * Endpoint para obter board com filtros aplicados
-   */
   @Get(':flowId/filtered-board')
   @ApiOperation({ summary: 'Retorna o Kanban board com filtros aplicados' })
   async getFilteredBoard(
@@ -274,9 +282,9 @@ async updateFlow(
     @Query() query: FlowFilterDto,
   ) {
     this.logger.log(`Buscando board filtrado para flow ${flowId}`);
+    // 🔥 REMOVIDO: req.user.companyId
     return this.flowService.getFilteredKanbanBoard(
       flowId,
-      req.user.companyId,
       query,
     );
   }
@@ -287,8 +295,8 @@ async updateFlow(
     @Param('flowId', ParseUUIDPipe) flowId: string,
     @Body() body: CreateFlowItemDto,
   ) {
+    // 🔥 REMOVIDO: req.user.companyId
     return this.flowService.createFlowItem(
-      req.user.companyId,
       flowId,
       req.user.id,
       body,
@@ -310,8 +318,8 @@ async updateFlow(
     } catch (e) {
       dto = body;
     }
+    // 🔥 REMOVIDO: req.user.companyId
     return this.flowService.createFlowItem(
-      req.user.companyId,
       flowId,
       req.user.id,
       dto,
@@ -324,15 +332,14 @@ async updateFlow(
     @Param('itemId', ParseUUIDPipe) itemId: string,
     @Body() body: any,
   ) {
+    // 🔥 REMOVIDO: req.user.companyId
     return this.flowService.updateFlowItem(
-      req.user.companyId,
       itemId,
       req.user.id,
       body,
     );
   }
 
-  // ✅ Rota de Mover (Drag & Drop)
   @Put('items/:itemId/move')
   @ApiOperation({ summary: 'Move item entre colunas (Drag & Drop)' })
   async moveItem(
@@ -343,7 +350,6 @@ async updateFlow(
     return this.flowService.moveItem(itemId, body.newStageId, req.user.id);
   }
 
-  // ✅ Rota de Avançar (Botão Automático)
   @Post('items/:itemId/advance')
   @ApiOperation({
     summary: 'Automação: Move o card para a próxima coluna da esteira',
@@ -360,7 +366,8 @@ async updateFlow(
     @Req() req: any,
     @Param('itemId', ParseUUIDPipe) itemId: string,
   ) {
-    return this.flowService.deleteItem(itemId, req.user.companyId);
+    // 🔥 REMOVIDO: req.user.companyId
+    return this.flowService.deleteItem(itemId, req.user.id);
   }
 
   @Post('items/:itemId/media/:type')
@@ -378,8 +385,8 @@ async updateFlow(
     if (!file) {
       throw new BadRequestException('Nenhum arquivo enviado.');
     }
+    // 🔥 REMOVIDO: req.user.companyId
     return this.flowService.addMediaToItem(
-      req.user.companyId,
       itemId,
       file,
       type as any,
@@ -394,11 +401,12 @@ async updateFlow(
     @Param('type') type: string,
     @Param('mediaId', ParseUUIDPipe) mediaId: string,
   ) {
+    // 🔥 REMOVIDO: req.user.companyId
     return this.flowService.deleteMedia(
-      req.user.companyId,
       itemId,
       type as any,
       mediaId,
+      req.user.id,
     );
   }
 }

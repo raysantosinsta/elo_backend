@@ -139,6 +139,8 @@ model Company {
   suppliers     Supplier[]
   budgetGroups  BudgetGroup[]
 
+  auditLogs AuditLog[]
+
   @@index([cnpj])
   @@index([status])
   @@index([createdAt])
@@ -225,6 +227,8 @@ model User {
   flowImages FlowImage[]
   flowAudios FlowAudio[]
   flowVideos FlowVideo[]
+
+  auditLogs AuditLog[]
 
   @@index([companyId])
   @@index([email])
@@ -860,11 +864,10 @@ model ChatMessage {
 
 // 1. FLUXO DE PRODUÇÃO (Esteira)
 model ProductFlow {
-  id    String  @id @default(uuid()) @map("id") @db.Uuid
-  name  String  @map("nome") @db.VarChar(100)
-  color String? @default("#D35400") @map("cor") @db.VarChar(7)
-  deadline  DateTime? @map("prazo")
-
+  id       String    @id @default(uuid()) @map("id") @db.Uuid
+  name     String    @map("nome") @db.VarChar(100)
+  color    String?   @default("#D35400") @map("cor") @db.VarChar(7)
+  deadline DateTime? @map("prazo")
 
   // Relacionamento com Empresa
   companyId String  @map("empresa_id") @db.Uuid
@@ -1053,6 +1056,44 @@ model FlowVideo {
   @@index([companyId])
   @@index([itemId])
   @@map("videos_fluxo")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid()) @map("id") @db.Uuid
+  createdAt DateTime @default(now()) @map("criado_em")
+
+  // Usuário que executou a ação
+  userId String @map("usuario_id") @db.Uuid
+  user   User   @relation(fields: [userId], references: [id])
+
+  // Tipo da ação (CREATE, UPDATE, DELETE, MOVE, ASSIGN, COMPLETE, etc.)
+  action String @map("acao")
+
+  // Entidade afetada (FLOW_ITEM, TASK, BUDGET, USER, etc.)
+  entity String @map("entidade")
+
+  // ID do registro afetado
+  entityId String @map("entidade_id") @db.Uuid
+
+  // Dados antes/depois da alteração (armazenar como JSON)
+  oldData Json? @map("dados_antigos")
+  newData Json? @map("dados_novos")
+
+  // Metadados adicionais (IP, userAgent, informações específicas)
+  metadata Json? @map("metadados")
+
+  // Empresa (para filtrar logs por empresa)
+  companyId String?  @map("empresa_id") @db.Uuid
+  company   Company? @relation(fields: [companyId], references: [id])
+
+  // Índices para performance
+  @@index([userId])
+  @@index([action])
+  @@index([entity])
+  @@index([entityId])
+  @@index([companyId])
+  @@index([createdAt])
+  @@map("auditoria")
 }
 
 // model Subscription {
