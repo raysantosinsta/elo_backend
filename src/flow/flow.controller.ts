@@ -319,7 +319,8 @@ export class FlowController {
   @ApiOperation({ summary: 'Move item entre colunas (Drag & Drop)' })
   async moveItem(
     @Param('itemId', ParseUUIDPipe) itemId: string,
-    @Body() body: { newStageId: string; assignedToId?: string },
+    @Body()
+    body: { newStageId: string; assignedToId?: string; supplierId?: string },
     @Req() req: any,
   ) {
     return this.flowService.moveItem(
@@ -327,7 +328,8 @@ export class FlowController {
       body.newStageId,
       req.user.id,
       undefined, // newOrder
-      body.assignedToId, // responsável selecionado
+      body.assignedToId, // responsável funcionário
+      body.supplierId, // responsável oficina
     );
   }
 
