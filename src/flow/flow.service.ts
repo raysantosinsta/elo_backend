@@ -885,167 +885,171 @@ export class FlowService {
   }
 
   async moveItem(
-    itemId: string,
-    newStageId: string,
-    userId: string,
-    newOrder?: number,
-  ) {
-    console.log('[MOVE_ITEM] Início da movimentação', {
-      itemId,
-      newStageId,
-      userId,
-    });
+  itemId: string,
+  newStageId: string,
+  userId: string,
+  newOrder?: number,
+  selectedResponsibleId?: string, // NOVO PARÂMETRO
+) {
+  console.log('[MOVE_ITEM] Início da movimentação', {
+    itemId,
+    newStageId,
+    userId,
+    selectedResponsibleId,
+  });
 
-    return this.executeWithResilience('move_item', async () => {
-      return this.prisma.$transaction(async (tx) => {
-        const companyId = this.cls.get<string>('tenantId');
+  return this.executeWithResilience('move_item', async () => {
+    return this.prisma.$transaction(async (tx) => {
+      const companyId = this.cls.get<string>('tenantId');
 
-        const [item, nextStage, user] = await Promise.all([
-          tx.flowItem.findFirst({
-            where: { id: itemId, companyId },
-            include: {
-              stage: true,
-              assignedTo: true,
-            },
-          }),
-          tx.flowStage.findFirst({
-            where: { id: newStageId, companyId },
-          }),
-          tx.user.findFirst({
-            where: { id: userId, companyId },
-          }),
-        ]);
+      const [item, nextStage, user] = await Promise.all([
+        tx.flowItem.findFirst({
+          where: { id: itemId, companyId },
+          include: {
+            stage: true,
+            assignedTo: true,
+          },
+        }),
+        tx.flowStage.findFirst({
+          where: { id: newStageId, companyId },
+        }),
+        tx.user.findFirst({
+          where: { id: userId, companyId },
+        }),
+      ]);
 
-        if (!item || !nextStage || !user) {
-          throw new NotFoundException('Item, etapa ou usuário não encontrado');
-        }
+      if (!item || !nextStage || !user) {
+        throw new NotFoundException('Item, etapa ou usuário não encontrado');
+      }
 
-        console.log(
-          '[MOVE_ITEM] Validando permissão apenas na ORIGEM:',
-          item.stage?.name,
+      console.log(
+        '[MOVE_ITEM] Validando permissão apenas na ORIGEM:',
+        item.stage?.name,
+      );
+      this.validateStageAccess(user, item.stage!);
+
+      const oldStageId = item.stageId;
+      const oldAssignedToId = item.assignedToId;
+
+      // =========================================================================
+      // 🔥 NOVA LÓGICA: Priorizar responsável selecionado no modal
+      // =========================================================================
+      let newAssignedToId = item.assignedToId; // Mantém o atual por padrão
+
+      if (selectedResponsibleId) {
+        // Se veio do modal, usa o responsável selecionado
+        newAssignedToId = selectedResponsibleId;
+        console.log(`[MOVE_ITEM] ✅ Responsável selecionado no modal: ${selectedResponsibleId}`);
+      } else if (
+        nextStage.allowedRole &&
+        nextStage.allowedRole.trim() !== '' &&
+        nextStage.allowedRole !== 'all' &&
+        nextStage.allowedRole !== 'null'
+      ) {
+        // Fallback: busca automática baseada no cargo
+        const responsibleId = await this.findResponsibleByRole(
+          companyId,
+          nextStage.allowedRole,
         );
-        this.validateStageAccess(user, item.stage!);
 
-        const oldStageId = item.stageId;
-        const oldAssignedToId = item.assignedToId;
-
-        // =========================================================================
-        // 🔥 NOVA LÓGICA: Atribuir responsável baseado no cargo da coluna destino
-        // =========================================================================
-        let newAssignedToId = item.assignedToId; // Mantém o atual por padrão
-
-        if (
-          nextStage.allowedRole &&
-          nextStage.allowedRole.trim() !== '' &&
-          nextStage.allowedRole !== 'all' &&
-          nextStage.allowedRole !== 'null'
-        ) {
-          // Busca um responsável com o cargo da coluna destino
-          const responsibleId = await this.findResponsibleByRole(
-            companyId,
-            nextStage.allowedRole,
+        if (responsibleId) {
+          newAssignedToId = responsibleId;
+          console.log(
+            `[MOVE_ITEM] ✅ Responsável automático encontrado: ${responsibleId} para cargo ${nextStage.allowedRole}`,
           );
-
-          if (responsibleId) {
-            newAssignedToId = responsibleId;
-            console.log(
-              `[MOVE_ITEM] ✅ Responsável automático encontrado: ${responsibleId} para cargo ${nextStage.allowedRole}`,
-            );
-          } else {
-            console.log(
-              `[MOVE_ITEM] ⚠️ Nenhum usuário encontrado com o cargo: ${nextStage.allowedRole}`,
-            );
-            // Opcional: Se quiser remover o responsável quando não encontrar
-            // newAssignedToId = null;
-          }
         } else {
           console.log(
-            '[MOVE_ITEM] ℹ️ Coluna sem cargo específico, mantendo responsável atual',
+            `[MOVE_ITEM] ⚠️ Nenhum usuário encontrado com o cargo: ${nextStage.allowedRole}`,
           );
         }
+      } else {
+        console.log(
+          '[MOVE_ITEM] ℹ️ Coluna sem cargo específico, mantendo responsável atual',
+        );
+      }
 
-        // Lógica de reordenação
-        let finalOrder: number;
+      // Lógica de reordenação (mantida igual)
+      let finalOrder: number;
 
-        if (newOrder !== undefined && newOrder >= 0) {
-          await tx.flowItem.updateMany({
-            where: {
-              stageId: newStageId,
-              orderInStage: { gte: newOrder },
-              id: { not: itemId },
-            },
-            data: { orderInStage: { increment: 1 } },
-          });
-          finalOrder = newOrder;
-        } else {
-          const last = await tx.flowItem.findFirst({
-            where: { stageId: newStageId },
-            orderBy: { orderInStage: 'desc' },
-            select: { orderInStage: true },
-          });
-          finalOrder = (last?.orderInStage ?? -1) + 1;
-        }
-
-        // Atualiza o item com o novo responsável (se mudou)
-        const updateData: any = {
-          stageId: newStageId,
-          orderInStage: finalOrder,
-          updatedAt: new Date(),
-        };
-
-        // Só atualiza o assignedToId se encontrou um novo responsável
-        if (newAssignedToId !== oldAssignedToId) {
-          updateData.assignedToId = newAssignedToId;
-        }
-
-        const updated = await tx.flowItem.update({
-          where: { id: itemId },
-          data: updateData,
-          include: {
-            assignedTo: {
-              select: { id: true, name: true },
-            },
+      if (newOrder !== undefined && newOrder >= 0) {
+        await tx.flowItem.updateMany({
+          where: {
+            stageId: newStageId,
+            orderInStage: { gte: newOrder },
+            id: { not: itemId },
           },
+          data: { orderInStage: { increment: 1 } },
         });
-
-        // Registrar auditoria com informações do responsável
-        const metadata: any = {
-          fromStageId: oldStageId,
-          fromStageName: item.stage?.name,
-          toStageId: newStageId,
-          toStageName: nextStage.name,
-          newOrder: finalOrder,
-        };
-
-        // Adiciona informações de responsável se houve mudança
-        if (newAssignedToId !== oldAssignedToId) {
-          metadata.responsibleChanged = true;
-          metadata.oldResponsibleId = oldAssignedToId;
-          metadata.newResponsibleId = newAssignedToId;
-          metadata.newResponsibleName = updated.assignedTo?.name;
-          metadata.reason = `Atribuído automaticamente pelo cargo da coluna: ${nextStage.allowedRole}`;
-        }
-
-        await this.auditService.log({
-          action: 'MOVE_ITEM',
-          entity: 'FLOW_ITEM',
-          entityId: itemId,
-          userId,
-          companyId,
-          metadata,
+        finalOrder = newOrder;
+      } else {
+        const last = await tx.flowItem.findFirst({
+          where: { stageId: newStageId },
+          orderBy: { orderInStage: 'desc' },
+          select: { orderInStage: true },
         });
+        finalOrder = (last?.orderInStage ?? -1) + 1;
+      }
 
-        await this.invalidateFlowCache(companyId, item.flowId);
+      // Atualiza o item com o novo responsável (se mudou)
+      const updateData: any = {
+        stageId: newStageId,
+        orderInStage: finalOrder,
+        updatedAt: new Date(),
+      };
 
-        console.log('[MOVE_ITEM] Movimentação concluída com sucesso', {
-          newStage: nextStage.name,
-          newResponsible: updated.assignedTo?.name || 'Não atribuído',
-        });
+      if (newAssignedToId !== oldAssignedToId) {
+        updateData.assignedToId = newAssignedToId;
+      }
 
-        return updated;
+      const updated = await tx.flowItem.update({
+        where: { id: itemId },
+        data: updateData,
+        include: {
+          assignedTo: {
+            select: { id: true, name: true },
+          },
+        },
       });
+
+      // Registrar auditoria com informações do responsável
+      const metadata: any = {
+        fromStageId: oldStageId,
+        fromStageName: item.stage?.name,
+        toStageId: newStageId,
+        toStageName: nextStage.name,
+        newOrder: finalOrder,
+      };
+
+      if (newAssignedToId !== oldAssignedToId) {
+        metadata.responsibleChanged = true;
+        metadata.oldResponsibleId = oldAssignedToId;
+        metadata.newResponsibleId = newAssignedToId;
+        metadata.newResponsibleName = updated.assignedTo?.name;
+        metadata.reason = selectedResponsibleId 
+          ? 'Responsável selecionado manualmente no modal' 
+          : `Atribuído automaticamente pelo cargo da coluna: ${nextStage.allowedRole}`;
+      }
+
+      await this.auditService.log({
+        action: 'MOVE_ITEM',
+        entity: 'FLOW_ITEM',
+        entityId: itemId,
+        userId,
+        companyId,
+        metadata,
+      });
+
+      await this.invalidateFlowCache(companyId, item.flowId);
+
+      console.log('[MOVE_ITEM] Movimentação concluída com sucesso', {
+        newStage: nextStage.name,
+        newResponsible: updated.assignedTo?.name || 'Não atribuído',
+      });
+
+      return updated;
     });
-  }
+  });
+}
 
   async advanceItemToNextStage(itemId: string, userId: string) {
     const companyId = this.cls.get<string>('tenantId');
