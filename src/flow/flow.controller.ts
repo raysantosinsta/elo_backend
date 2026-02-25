@@ -71,10 +71,7 @@ export class FlowController {
   ) {
     this.logger.log(`Filtrando itens do fluxo ${flowId}`);
     // 🔥 REMOVIDO: req.user.companyId - O service pega do CLS
-    return await this.flowService.getFilteredItemsByFlow(
-      flowId,
-      query,
-    );
+    return await this.flowService.getFilteredItemsByFlow(flowId, query);
   }
 
   // ===========================================================================
@@ -97,10 +94,14 @@ export class FlowController {
     @Param('flowId', ParseUUIDPipe) flowId: string,
     @Body('name') name: string,
   ) {
-    this.logger.log(`Chamada POST /flow/${flowId}/save-template - User: ${req.user.id}`);
+    this.logger.log(
+      `Chamada POST /flow/${flowId}/save-template - User: ${req.user.id}`,
+    );
 
     if (!name) {
-      this.logger.warn(`Tentativa de salvar template sem nome - FlowID: ${flowId}`);
+      this.logger.warn(
+        `Tentativa de salvar template sem nome - FlowID: ${flowId}`,
+      );
       throw new BadRequestException('O nome do template é obrigatório');
     }
 
@@ -115,13 +116,11 @@ export class FlowController {
     @Param('flowId', ParseUUIDPipe) flowId: string,
     @Param('templateId', ParseUUIDPipe) templateId: string,
   ) {
-    this.logger.log(`Chamada POST /flow/${flowId}/apply-template/${templateId}`);
-    // 🔥 REMOVIDO: req.user.companyId
-    return this.flowService.applyTemplate(
-      flowId,
-      templateId,
-      req.user.id,
+    this.logger.log(
+      `Chamada POST /flow/${flowId}/apply-template/${templateId}`,
     );
+    // 🔥 REMOVIDO: req.user.companyId
+    return this.flowService.applyTemplate(flowId, templateId, req.user.id);
   }
 
   @Delete('templates/:templateId')
@@ -131,7 +130,9 @@ export class FlowController {
     @Req() req: any,
     @Param('templateId', ParseUUIDPipe) templateId: string,
   ) {
-    this.logger.log(`Chamada DELETE /flow/templates/${templateId} - User: ${req.user.id}`);
+    this.logger.log(
+      `Chamada DELETE /flow/templates/${templateId} - User: ${req.user.id}`,
+    );
     // 🔥 REMOVIDO: req.user.companyId
     return this.flowService.deleteTemplate(templateId, req.user.id);
   }
@@ -155,10 +156,10 @@ export class FlowController {
   async updateFlow(
     @Req() req: any,
     @Param('flowId', ParseUUIDPipe) flowId: string,
-    @Body() body: { name?: string; color?: string; deadline?: string | null }
+    @Body() body: { name?: string; color?: string; deadline?: string | null },
   ) {
     this.logger.log(`Atualizando fluxo ${flowId} pelo usuário ${req.user.id}`);
-    
+
     // Converter deadline para Date se existir
     let deadline: Date | null = null;
     if (body.deadline) {
@@ -167,7 +168,7 @@ export class FlowController {
 
     // 🔥 REMOVIDO: req.user.companyId
     return this.flowService.updateFlow(
-      flowId, 
+      flowId,
       {
         name: body.name,
         color: body.color,
@@ -200,11 +201,7 @@ export class FlowController {
     @Body() body: CreateStageDto,
   ) {
     // 🔥 REMOVIDO: req.user.companyId
-    return this.flowService.createStage(
-      flowId,
-      body,
-      req.user.id,
-    );
+    return this.flowService.createStage(flowId, body, req.user.id);
   }
 
   @Put('stages/:stageId')
@@ -215,11 +212,7 @@ export class FlowController {
     @Body() body: Partial<CreateStageDto>,
   ) {
     // 🔥 REMOVIDO: req.user.companyId
-    return this.flowService.updateStage(
-      stageId, 
-      body,
-      req.user.id,
-    );
+    return this.flowService.updateStage(stageId, body, req.user.id);
   }
 
   @Delete('stages/:stageId')
@@ -228,10 +221,7 @@ export class FlowController {
     @Param('stageId', ParseUUIDPipe) stageId: string,
   ) {
     // 🔥 REMOVIDO: req.user.companyId
-    return this.flowService.deleteStage(
-      stageId,
-      req.user.id,
-    );
+    return this.flowService.deleteStage(stageId, req.user.id);
   }
 
   // ===========================================================================
@@ -283,10 +273,7 @@ export class FlowController {
   ) {
     this.logger.log(`Buscando board filtrado para flow ${flowId}`);
     // 🔥 REMOVIDO: req.user.companyId
-    return this.flowService.getFilteredKanbanBoard(
-      flowId,
-      query,
-    );
+    return this.flowService.getFilteredKanbanBoard(flowId, query);
   }
 
   @Post(':flowId/items')
@@ -296,11 +283,7 @@ export class FlowController {
     @Body() body: CreateFlowItemDto,
   ) {
     // 🔥 REMOVIDO: req.user.companyId
-    return this.flowService.createFlowItem(
-      flowId,
-      req.user.id,
-      body,
-    );
+    return this.flowService.createFlowItem(flowId, req.user.id, body);
   }
 
   @Post(':flowId/items/upload')
@@ -319,11 +302,7 @@ export class FlowController {
       dto = body;
     }
     // 🔥 REMOVIDO: req.user.companyId
-    return this.flowService.createFlowItem(
-      flowId,
-      req.user.id,
-      dto,
-    );
+    return this.flowService.createFlowItem(flowId, req.user.id, dto);
   }
 
   @Put('items/:itemId')
@@ -333,21 +312,23 @@ export class FlowController {
     @Body() body: any,
   ) {
     // 🔥 REMOVIDO: req.user.companyId
-    return this.flowService.updateFlowItem(
-      itemId,
-      req.user.id,
-      body,
-    );
+    return this.flowService.updateFlowItem(itemId, req.user.id, body);
   }
 
   @Put('items/:itemId/move')
   @ApiOperation({ summary: 'Move item entre colunas (Drag & Drop)' })
   async moveItem(
     @Param('itemId', ParseUUIDPipe) itemId: string,
-    @Body() body: { newStageId: string },
+    @Body() body: { newStageId: string; assignedToId?: string },
     @Req() req: any,
   ) {
-    return this.flowService.moveItem(itemId, body.newStageId, req.user.id);
+    return this.flowService.moveItem(
+      itemId,
+      body.newStageId,
+      req.user.id,
+      undefined, // newOrder
+      body.assignedToId, // responsável selecionado
+    );
   }
 
   @Post('items/:itemId/advance')

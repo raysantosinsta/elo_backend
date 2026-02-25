@@ -149,12 +149,25 @@ export class UsersService {
   public async findAll(
     page: number,
     limit: number,
-    filters: { status?: SimpleStatus; role?: UserRole; companyId?: string }
+    filters: { 
+      status?: SimpleStatus; 
+      role?: UserRole; 
+      companyId?: string;
+      professionalRole?: string; // 🔥 NOVO
+    }
   ): Promise<{ data: User[], total: number }> {
     const skip = (page - 1) * limit;
     const isMaster = this.cls.get<boolean>('isMaster');
     
     const where: any = { ...filters };
+    
+    // 🔥 Tratamento especial para professionalRole (busca parcial)
+    if (where.professionalRole) {
+      where.professionalRole = {
+        contains: where.professionalRole,
+        mode: 'insensitive',
+      };
+    }
     
     // Limpeza de filtros vazios
     Object.keys(where).forEach(key => where[key] === undefined && delete where[key]);
@@ -191,6 +204,50 @@ export class UsersService {
       where: { companyId, status: SimpleStatus.ACTIVE },
       orderBy: { name: 'asc' },
     });
+  }
+
+  // ===========================================================================
+  // 🔥 NOVO MÉTODO: Buscar usuários por cargo profissional
+  // ===========================================================================
+  public async findByProfessionalRole(professionalRole: string) {
+    this.logger.log(`Buscando usuários com cargo: ${professionalRole}`);
+
+    const tenantId = this.cls.get<string>('tenantId');
+    const isMaster = this.cls.get<boolean>('isMaster');
+
+    const where: any = {
+      status: SimpleStatus.ACTIVE,
+      professionalRole: {
+        contains: professionalRole,
+        mode: 'insensitive',
+      },
+    };
+
+    // Se não for master, filtra pela empresa do token
+    if (!isMaster) {
+      where.companyId = tenantId;
+    }
+
+    const users = await this.db.user.findMany({
+      where,
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        professionalRole: true,
+        status: true,
+        company: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+      orderBy: { name: 'asc' },
+    });
+
+    this.logger.log(`Encontrados ${users.length} usuários com o cargo ${professionalRole}`);
+    return users;
   }
 
   public async searchUsers(query: string): Promise<User[]> {
