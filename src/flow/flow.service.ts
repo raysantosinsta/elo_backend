@@ -1408,6 +1408,18 @@ export class FlowService {
             not: 'CONCLUIDO',
           },
         },
+        {
+          OR: [
+            {
+              dueDate: null, // Se não tem dueDate, considera válido
+            },
+            {
+              dueDate: {
+                gte: today,
+              },
+            },
+          ],
+        },
       ];
     }
 
