@@ -50,6 +50,9 @@ const dbLatency = new Histogram({
   labelNames: ['method'],
 });
 
+// --- CONSTANTES ---
+const CORTE_KEYWORDS = ['corte', 'cortador', 'cortar', 'cut'];
+
 @Injectable()
 export class FlowService {
   private readonly logger = new Logger(FlowService.name);
@@ -57,7 +60,7 @@ export class FlowService {
 
   constructor(
     private prisma: PrismaService,
-    private readonly cls: ClsService, // 🔥 USADO PARA PEGAR TENANT ID
+    private readonly cls: ClsService,
     private supabase: SupabaseService,
     private auditService: AuditService,
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
@@ -80,11 +83,144 @@ export class FlowService {
   }
 
   // ===========================================================================
+  // 🔥 MÉTODO PARA VERIFICAR SE UMA ETAPA É DE CORTE
+  // ===========================================================================
+  private isCorteStage(stageName: string): boolean {
+    const name = stageName?.toLowerCase().trim() || '';
+    const result = CORTE_KEYWORDS.some((keyword) => name.includes(keyword));
+    this.logger.debug(
+      `🔍 [isCorteStage] "${stageName}" -> ${result ? 'É CORTE' : 'NÃO É CORTE'}`,
+    );
+    return result;
+  }
+
+  // ===========================================================================
+  // 🔥 MÉTODO PARA VALIDAR QUANTIDADE ANTES DE MOVER
+  // ===========================================================================
+  private async validateQuantityBeforeMove(
+    itemId: string,
+    targetStageId: string,
+    companyId: string,
+  ): Promise<void> {
+    this.logger.log(
+      `🔍 Validando quantidade para movimentação do item ${itemId} para stage ${targetStageId}`,
+    );
+
+    // Busca o item com sua etapa atual
+    const item = await this.prisma.flowItem.findFirst({
+      where: { id: itemId, companyId },
+      include: {
+        stage: true,
+        flow: {
+          include: {
+            stages: {
+              orderBy: { order: 'asc' },
+            },
+          },
+        },
+      },
+    });
+
+    if (!item) {
+      this.logger.error(`❌ Item ${itemId} não encontrado`);
+      throw new NotFoundException('Item não encontrado');
+    }
+
+    this.logger.debug(`📦 Item encontrado:`, {
+      id: item.id,
+      title: item.title,
+      quantity: item.quantity,
+      currentStageId: item.stageId,
+      currentStageName: item.stage?.name,
+    });
+
+    // Busca a etapa de destino
+    const targetStage = await this.prisma.flowStage.findFirst({
+      where: { id: targetStageId, companyId },
+    });
+
+    if (!targetStage) {
+      this.logger.error(`❌ Stage destino ${targetStageId} não encontrado`);
+      throw new NotFoundException('Etapa destino não encontrada');
+    }
+
+    // Ordena todas as etapas do fluxo
+    const sortedStages = [...item.flow.stages].sort(
+      (a, b) => a.order - b.order,
+    );
+    this.logger.debug(
+      `📊 Stages ordenadas:`,
+      sortedStages.map((s) => ({ id: s.id, name: s.name, order: s.order })),
+    );
+
+    // Encontra o índice da etapa de Corte
+    const corteIndex = sortedStages.findIndex((s) => this.isCorteStage(s.name));
+    this.logger.debug(`📍 Índice da etapa Corte: ${corteIndex}`);
+
+    // Se não tem coluna Corte, não aplica a regra
+    if (corteIndex === -1) {
+      this.logger.debug(
+        '✅ Nenhuma etapa de Corte encontrada, movimentação permitida',
+      );
+      return;
+    }
+
+    // Encontra o índice da etapa atual do item
+    const currentStageIndex = sortedStages.findIndex(
+      (s) => s.id === item.stageId,
+    );
+    this.logger.debug(`📍 Índice da etapa atual do item: ${currentStageIndex}`);
+
+    // Encontra o índice da etapa de destino
+    const targetStageIndex = sortedStages.findIndex(
+      (s) => s.id === targetStageId,
+    );
+    this.logger.debug(`📍 Índice da etapa destino: ${targetStageIndex}`);
+
+    // Verifica se o item já passou pela coluna Corte
+    const hasPassedCorte = currentStageIndex > corteIndex;
+    this.logger.debug(`📍 Item já passou pelo Corte? ${hasPassedCorte}`);
+
+    // Verifica se está tentando mover para depois do Corte
+    const isMovingToAfterCorte = targetStageIndex > corteIndex;
+    this.logger.debug(
+      `📍 Movendo para depois do Corte? ${isMovingToAfterCorte}`,
+    );
+
+    // REGRA DE NEGÓCIO: Se o item já passou do Corte OU está tentando mover para depois do Corte
+    if (hasPassedCorte || isMovingToAfterCorte) {
+      this.logger.debug(`🔍 Verificando quantidade do item: ${item.quantity}`);
+
+      if (!item.quantity || item.quantity < 1) {
+        this.logger.error(
+          `❌ VALIDAÇÃO FALHOU: Item ${itemId} com quantidade ${item.quantity} tentou passar do Corte`,
+        );
+
+        if (hasPassedCorte) {
+          throw new BadRequestException(
+            'Este item já passou pela coluna Corte. A quantidade é obrigatória e deve ser maior que zero.',
+          );
+        } else {
+          throw new BadRequestException(
+            'Não é possível mover este item para depois da coluna Corte sem uma quantidade válida (maior que zero).',
+          );
+        }
+      }
+
+      this.logger.debug(`✅ Quantidade válida: ${item.quantity}`);
+    } else {
+      this.logger.debug(
+        `✅ Item ainda não passou pelo Corte, quantidade não é obrigatória`,
+      );
+    }
+  }
+
+  // ===========================================================================
   // MÉTODOS REFATORADOS - SEM companyId NOS PARÂMETROS
   // ===========================================================================
 
   async getFilteredItemsByFlow(flowId: string, filters: FlowFilterDto) {
-    const companyId = this.getCompanyIdFromContext(); // 🔥 PEGA DO CLS
+    const companyId = this.getCompanyIdFromContext();
 
     const {
       isOverdue,
@@ -99,7 +235,6 @@ export class FlowService {
       `🔍 FILTRANDO ITENS do fluxo ${flowId} para empresa ${companyId}`,
     );
 
-    // Primeiro verifica se o fluxo pertence à empresa
     const flow = await this.prisma.productFlow.findFirst({
       where: { id: flowId, companyId },
     });
@@ -113,7 +248,6 @@ export class FlowService {
       flowId,
     };
 
-    // Aplicar filtros básicos
     if (assignedToId) {
       whereClause.assignedToId = assignedToId;
     }
@@ -133,7 +267,6 @@ export class FlowService {
       };
     }
 
-    // Lógica para itens ATRASADOS (overdue)
     if (isOverdue === 'true') {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
@@ -157,7 +290,6 @@ export class FlowService {
       ];
     }
 
-    // Lógica para itens PRÓXIMOS A VENCER
     if (isUpcoming === 'true') {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
@@ -185,7 +317,6 @@ export class FlowService {
       ];
     }
 
-    // Buscar itens
     const items = await this.prisma.flowItem.findMany({
       where: whereClause,
       include: {
@@ -889,8 +1020,8 @@ export class FlowService {
     newStageId: string,
     userId: string,
     newOrder?: number,
-    selectedResponsibleId?: string, // para funcionário
-    selectedSupplierId?: string, // para oficina
+    selectedResponsibleId?: string,
+    selectedSupplierId?: string,
   ) {
     console.log('[MOVE_ITEM] Início da movimentação', {
       itemId,
@@ -901,147 +1032,153 @@ export class FlowService {
     });
 
     return this.executeWithResilience('move_item', async () => {
-      return this.prisma.$transaction(async (tx) => {
-        const companyId = this.cls.get<string>('tenantId');
+      return this.prisma.$transaction(
+        async (tx) => {
+          const companyId = this.cls.get<string>('tenantId');
 
-        const [item, nextStage, user] = await Promise.all([
-          tx.flowItem.findFirst({
-            where: { id: itemId, companyId },
+          // 🔥 VALIDAÇÃO DE QUANTIDADE ANTES DE MOVER
+          await this.validateQuantityBeforeMove(itemId, newStageId, companyId);
+
+          const [item, nextStage, user] = await Promise.all([
+            tx.flowItem.findFirst({
+              where: { id: itemId, companyId },
+              include: {
+                stage: true,
+                assignedTo: true,
+                supplier: true,
+              },
+            }),
+            tx.flowStage.findFirst({
+              where: { id: newStageId, companyId },
+            }),
+            tx.user.findFirst({
+              where: { id: userId, companyId },
+            }),
+          ]);
+
+          if (!item || !nextStage || !user) {
+            throw new NotFoundException(
+              'Item, etapa ou usuário não encontrado',
+            );
+          }
+
+          this.validateStageAccess(user, item.stage!);
+
+          const oldStageId = item.stageId;
+          const oldAssignedToId = item.assignedToId;
+          const oldSupplierId = item.supplierId;
+
+          const isOficina = nextStage.name.trim().toLowerCase() === 'oficina';
+
+          if (isOficina) {
+            if (!selectedSupplierId) {
+              throw new BadRequestException(
+                'É obrigatório selecionar uma oficina para a coluna "Oficina"',
+              );
+            }
+            if (selectedResponsibleId) {
+              throw new BadRequestException(
+                'Não é permitido atribuir funcionário para a coluna "Oficina"',
+              );
+            }
+          } else {
+            if (selectedSupplierId) {
+              throw new BadRequestException(
+                'Não é permitido atribuir oficina para colunas que não sejam "Oficina"',
+              );
+            }
+          }
+
+          let finalOrder: number;
+
+          if (newOrder !== undefined && newOrder >= 0) {
+            await tx.flowItem.updateMany({
+              where: {
+                stageId: newStageId,
+                orderInStage: { gte: newOrder },
+                id: { not: itemId },
+              },
+              data: { orderInStage: { increment: 1 } },
+            });
+            finalOrder = newOrder;
+          } else {
+            const last = await tx.flowItem.findFirst({
+              where: { stageId: newStageId },
+              orderBy: { orderInStage: 'desc' },
+              select: { orderInStage: true },
+            });
+            finalOrder = (last?.orderInStage ?? -1) + 1;
+          }
+
+          const updateData: any = {
+            stageId: newStageId,
+            orderInStage: finalOrder,
+            updatedAt: new Date(),
+          };
+
+          if (isOficina) {
+            updateData.assignedToId = null;
+            updateData.supplierId = selectedSupplierId;
+          } else {
+            updateData.supplierId = null;
+            if (selectedResponsibleId) {
+              updateData.assignedToId = selectedResponsibleId;
+            }
+          }
+
+          const updated = await tx.flowItem.update({
+            where: { id: itemId },
+            data: updateData,
             include: {
-              stage: true,
-              assignedTo: true,
-              supplier: true,
+              assignedTo: { select: { id: true, name: true } },
+              supplier: { select: { id: true, name: true } },
             },
-          }),
-          tx.flowStage.findFirst({
-            where: { id: newStageId, companyId },
-          }),
-          tx.user.findFirst({
-            where: { id: userId, companyId },
-          }),
-        ]);
-
-        if (!item || !nextStage || !user) {
-          throw new NotFoundException('Item, etapa ou usuário não encontrado');
-        }
-
-        this.validateStageAccess(user, item.stage!);
-
-        const oldStageId = item.stageId;
-        const oldAssignedToId = item.assignedToId;
-        const oldSupplierId = item.supplierId;
-
-        // 🔥 VALIDAÇÃO: Se coluna é oficina, só aceita supplierId
-        const isOficina = nextStage.name.trim().toLowerCase() === 'oficina';
-
-        if (isOficina) {
-          if (!selectedSupplierId) {
-            throw new BadRequestException(
-              'É obrigatório selecionar uma oficina para a coluna "Oficina"',
-            );
-          }
-          if (selectedResponsibleId) {
-            throw new BadRequestException(
-              'Não é permitido atribuir funcionário para a coluna "Oficina"',
-            );
-          }
-        } else {
-          if (selectedSupplierId) {
-            throw new BadRequestException(
-              'Não é permitido atribuir oficina para colunas que não sejam "Oficina"',
-            );
-          }
-        }
-
-        // Lógica de reordenação
-        let finalOrder: number;
-
-        if (newOrder !== undefined && newOrder >= 0) {
-          await tx.flowItem.updateMany({
-            where: {
-              stageId: newStageId,
-              orderInStage: { gte: newOrder },
-              id: { not: itemId },
-            },
-            data: { orderInStage: { increment: 1 } },
           });
-          finalOrder = newOrder;
-        } else {
-          const last = await tx.flowItem.findFirst({
-            where: { stageId: newStageId },
-            orderBy: { orderInStage: 'desc' },
-            select: { orderInStage: true },
-          });
-          finalOrder = (last?.orderInStage ?? -1) + 1;
-        }
 
-        // Prepara dados de atualização
-        const updateData: any = {
-          stageId: newStageId,
-          orderInStage: finalOrder,
-          updatedAt: new Date(),
-        };
+          const metadata: any = {
+            fromStageId: oldStageId,
+            fromStageName: item.stage?.name,
+            toStageId: newStageId,
+            toStageName: nextStage.name,
+            newOrder: finalOrder,
+            isOficina,
+          };
 
-        // Atualiza baseado no tipo
-        if (isOficina) {
-          updateData.assignedToId = null; // Remove funcionário
-          updateData.supplierId = selectedSupplierId;
-        } else {
-          updateData.supplierId = null; // Remove oficina
-          if (selectedResponsibleId) {
-            updateData.assignedToId = selectedResponsibleId;
+          if (isOficina) {
+            metadata.oldSupplierId = oldSupplierId;
+            metadata.newSupplierId = selectedSupplierId;
+            metadata.newSupplierName = updated.supplier?.name;
+          } else {
+            metadata.oldResponsibleId = oldAssignedToId;
+            metadata.newResponsibleId = selectedResponsibleId;
+            metadata.newResponsibleName = updated.assignedTo?.name;
           }
-        }
 
-        const updated = await tx.flowItem.update({
-          where: { id: itemId },
-          data: updateData,
-          include: {
-            assignedTo: { select: { id: true, name: true } },
-            supplier: { select: { id: true, name: true } },
-          },
-        });
+          await this.auditService.log({
+            action: 'MOVE_ITEM',
+            entity: 'FLOW_ITEM',
+            entityId: itemId,
+            userId,
+            companyId,
+            metadata,
+          });
 
-        // Auditoria
-        const metadata: any = {
-          fromStageId: oldStageId,
-          fromStageName: item.stage?.name,
-          toStageId: newStageId,
-          toStageName: nextStage.name,
-          newOrder: finalOrder,
-          isOficina,
-        };
+          await this.invalidateFlowCache(companyId, item.flowId);
 
-        if (isOficina) {
-          metadata.oldSupplierId = oldSupplierId;
-          metadata.newSupplierId = selectedSupplierId;
-          metadata.newSupplierName = updated.supplier?.name;
-        } else {
-          metadata.oldResponsibleId = oldAssignedToId;
-          metadata.newResponsibleId = selectedResponsibleId;
-          metadata.newResponsibleName = updated.assignedTo?.name;
-        }
+          console.log('[MOVE_ITEM] Movimentação concluída com sucesso', {
+            newStage: nextStage.name,
+            newResponsible: isOficina
+              ? updated.supplier?.name
+              : updated.assignedTo?.name,
+          });
 
-        await this.auditService.log({
-          action: 'MOVE_ITEM',
-          entity: 'FLOW_ITEM',
-          entityId: itemId,
-          userId,
-          companyId,
-          metadata,
-        });
-
-        await this.invalidateFlowCache(companyId, item.flowId);
-
-        console.log('[MOVE_ITEM] Movimentação concluída com sucesso', {
-          newStage: nextStage.name,
-          newResponsible: isOficina
-            ? updated.supplier?.name
-            : updated.assignedTo?.name,
-        });
-
-        return updated;
-      });
+          return updated;
+        },
+        {
+          timeout: 30000,
+          maxWait: 30000,
+        },
+      );
     });
   }
 
@@ -1077,9 +1214,6 @@ export class FlowService {
       const oldStageId = item.stageId;
       const oldAssignedToId = item.assignedToId;
 
-      // =========================================================================
-      // 🔥 MESMA LÓGICA: Atribuir responsável baseado no cargo da coluna destino
-      // =========================================================================
       let newAssignedToId = item.assignedToId;
 
       if (
@@ -1411,7 +1545,7 @@ export class FlowService {
         {
           OR: [
             {
-              dueDate: null, // Se não tem dueDate, considera válido
+              dueDate: null,
             },
             {
               dueDate: {
@@ -1536,7 +1670,6 @@ export class FlowService {
     };
   }
 
-  // No FlowService, adicione este método:
   private async findResponsibleByRole(
     companyId: string,
     allowedRole: string,
@@ -1550,7 +1683,6 @@ export class FlowService {
       return null;
     }
 
-    // Busca usuários com o cargo correspondente
     const users = await this.prisma.user.findMany({
       where: {
         companyId,
@@ -1561,9 +1693,9 @@ export class FlowService {
         },
       },
       orderBy: {
-        createdAt: 'asc', // Pega o mais antigo primeiro (ou use 'id' para mais recente)
+        createdAt: 'asc',
       },
-      take: 1, // Pega apenas o primeiro
+      take: 1,
     });
 
     return users.length > 0 ? users[0].id : null;
@@ -1581,12 +1713,10 @@ export class FlowService {
     );
   }
 
-  // 🛡️ LÓGICA DE SEGURANÇA (mantida igual)
   private validateStageAccess(
     user: { role: string; professionalRole: string | null },
     stage: { name: string; allowedRole: string | null },
   ) {
-    // ... (mesmo código anterior)
     if (['MASTER', 'ADMIN'].includes(user.role)) {
       return true;
     }
