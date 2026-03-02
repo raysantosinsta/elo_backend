@@ -267,4 +267,13 @@ export class FlowFilterDto {
   @IsOptional()
   @IsString()
   status?: string;
+
+  // 👇 ADICIONE ISSO - está faltando!
+  @ApiProperty({
+    required: false,
+    description: 'Filtrar por nome da coluna (stage)',
+  })
+  @IsOptional()
+  @IsString()
+  stageName?: string;
 }
