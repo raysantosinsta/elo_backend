@@ -95,12 +95,35 @@ export class FlowService {
   }
 
   // ===========================================================================
-  // 🔥 MÉTODO PARA VALIDAR QUANTIDADE ANTES DE MOVER
+  // 🔥 MÉTODO PARA VERIFICAR SE USUÁRIO É ADMIN
+  // ===========================================================================
+  private async isUserAdmin(
+    userId: string,
+    companyId: string,
+  ): Promise<boolean> {
+    const user = await this.prisma.user.findFirst({
+      where: {
+        id: userId,
+        companyId,
+        status: 'ACTIVE',
+      },
+      select: { role: true },
+    });
+
+    if (!user) return false;
+
+    const adminRoles = ['MASTER', 'ADMIN', 'MANAGER'];
+    return adminRoles.includes(user.role);
+  }
+
+  // ===========================================================================
+  // 🔥 MÉTODO PARA VALIDAR QUANTIDADE ANTES DE MOVER - BLOQUEIA TODOS COM QTD ZERO
   // ===========================================================================
   private async validateQuantityBeforeMove(
     itemId: string,
     targetStageId: string,
     companyId: string,
+    userId: string,
   ): Promise<void> {
     this.logger.log(
       `🔍 Validando quantidade para movimentação do item ${itemId} para stage ${targetStageId}`,
@@ -122,17 +145,24 @@ export class FlowService {
     });
 
     if (!item) {
-      this.logger.error(`❌ Item ${itemId} não encontrado`);
       throw new NotFoundException('Item não encontrado');
     }
 
-    this.logger.debug(`📦 Item encontrado:`, {
-      id: item.id,
-      title: item.title,
-      quantity: item.quantity,
-      currentStageId: item.stageId,
-      currentStageName: item.stage?.name,
+    // Busca o usuário (para mensagem personalizada)
+    const user = await this.prisma.user.findFirst({
+      where: {
+        id: userId,
+        companyId,
+        status: 'ACTIVE',
+      },
+      select: {
+        role: true,
+        name: true,
+      },
     });
+
+    const adminRoles = ['MASTER', 'ADMIN', 'MANAGER'];
+    const isAdmin = user && adminRoles.includes(user.role);
 
     // Busca a etapa de destino
     const targetStage = await this.prisma.flowStage.findFirst({
@@ -140,7 +170,6 @@ export class FlowService {
     });
 
     if (!targetStage) {
-      this.logger.error(`❌ Stage destino ${targetStageId} não encontrado`);
       throw new NotFoundException('Etapa destino não encontrada');
     }
 
@@ -148,70 +177,64 @@ export class FlowService {
     const sortedStages = [...item.flow.stages].sort(
       (a, b) => a.order - b.order,
     );
-    this.logger.debug(
-      `📊 Stages ordenadas:`,
-      sortedStages.map((s) => ({ id: s.id, name: s.name, order: s.order })),
-    );
 
     // Encontra o índice da etapa de Corte
     const corteIndex = sortedStages.findIndex((s) => this.isCorteStage(s.name));
-    this.logger.debug(`📍 Índice da etapa Corte: ${corteIndex}`);
 
     // Se não tem coluna Corte, não aplica a regra
     if (corteIndex === -1) {
-      this.logger.debug(
-        '✅ Nenhuma etapa de Corte encontrada, movimentação permitida',
-      );
       return;
     }
 
-    // Encontra o índice da etapa atual do item
+    // Encontra os índices
     const currentStageIndex = sortedStages.findIndex(
       (s) => s.id === item.stageId,
     );
-    this.logger.debug(`📍 Índice da etapa atual do item: ${currentStageIndex}`);
 
-    // Encontra o índice da etapa de destino
     const targetStageIndex = sortedStages.findIndex(
       (s) => s.id === targetStageId,
     );
-    this.logger.debug(`📍 Índice da etapa destino: ${targetStageIndex}`);
 
-    // Verifica se o item já passou pela coluna Corte
+    // Verifica posições em relação ao Corte
     const hasPassedCorte = currentStageIndex > corteIndex;
-    this.logger.debug(`📍 Item já passou pelo Corte? ${hasPassedCorte}`);
-
-    // Verifica se está tentando mover para depois do Corte
     const isMovingToAfterCorte = targetStageIndex > corteIndex;
-    this.logger.debug(
-      `📍 Movendo para depois do Corte? ${isMovingToAfterCorte}`,
-    );
 
-    // REGRA DE NEGÓCIO: Se o item já passou do Corte OU está tentando mover para depois do Corte
+    // Se o item já passou do Corte OU está tentando mover para depois do Corte
     if (hasPassedCorte || isMovingToAfterCorte) {
-      this.logger.debug(`🔍 Verificando quantidade do item: ${item.quantity}`);
+      // Validar se quantidade existe
+      if (item.quantity === null || item.quantity === undefined) {
+        const message = isAdmin
+          ? '⚠️ Quantidade não definida! Como ADMIN, você precisa definir uma quantidade para mover itens para depois da coluna Corte.'
+          : 'Quantidade não definida.';
 
-      if (!item.quantity || item.quantity < 1) {
-        this.logger.error(
-          `❌ VALIDAÇÃO FALHOU: Item ${itemId} com quantidade ${item.quantity} tentou passar do Corte`,
-        );
-
-        if (hasPassedCorte) {
-          throw new BadRequestException(
-            'Este item já passou pela coluna Corte. A quantidade é obrigatória e deve ser maior que zero.',
-          );
-        } else {
-          throw new BadRequestException(
-            'Não é possível mover este item para depois da coluna Corte sem uma quantidade válida (maior que zero).',
-          );
-        }
+        throw new BadRequestException(message);
       }
 
-      this.logger.debug(`✅ Quantidade válida: ${item.quantity}`);
-    } else {
-      this.logger.debug(
-        `✅ Item ainda não passou pelo Corte, quantidade não é obrigatória`,
-      );
+      // Converter para número
+      const quantityNum = Number(item.quantity);
+
+      // Verificar se é NaN
+      if (isNaN(quantityNum)) {
+        const message = isAdmin
+          ? `⚠️ Quantidade inválida ("${item.quantity}")! Como ADMIN, você precisa definir uma quantidade numérica válida.`
+          : 'Quantidade inválida.';
+
+        throw new BadRequestException(message);
+      }
+
+      // 🔥 VERIFICAÇÃO CRÍTICA: quantidade deve ser > 0
+      if (quantityNum < 1) {
+        const message = isAdmin
+          ? `⚠️ Quantidade zero (${quantityNum})! Você está tentando mover um item para depois da coluna Corte com quantidade zero. Como ADMIN, defina uma quantidade maior que zero antes de prosseguir.`
+          : 'Quantidade deve ser maior que zero para mover para depois da coluna Corte.';
+
+        this.logger.error(
+          `❌ BLOQUEADO: ${isAdmin ? 'Admin' : 'Usuário'} ${user?.name} tentou mover item com quantidade ${quantityNum}`,
+        );
+        throw new BadRequestException(message);
+      }
+
+      this.logger.debug(`✅ Quantidade válida: ${quantityNum}`);
     }
   }
 
@@ -909,21 +932,54 @@ export class FlowService {
     });
   }
 
+  // ===========================================================================
+  // 🔥 ATUALIZAR ITEM DO FLUXO - COM SUPORTE A ADMIN
+  // ===========================================================================
   async updateFlowItem(itemId: string, userId: string, data: any) {
     const companyId = this.getCompanyIdFromContext();
 
+    this.logger.log(`📝 Atualizando item ${itemId} pelo usuário ${userId}`);
+
+    // Busca item e usuário em paralelo
     const [item, user] = await Promise.all([
       this.prisma.flowItem.findFirst({
         where: { id: itemId, companyId },
-        include: { stage: true },
+        include: {
+          stage: true,
+          assignedTo: true,
+          supplier: true,
+        },
       }),
-      this.prisma.user.findFirst({ where: { id: userId, companyId } }),
+      this.prisma.user.findFirst({
+        where: { id: userId, companyId },
+      }),
     ]);
 
-    if (!item || !user)
-      throw new NotFoundException('Item ou usuário não encontrado');
-    this.validateStageAccess(user, item.stage!);
+    if (!item) {
+      this.logger.error(`❌ Item ${itemId} não encontrado`);
+      throw new NotFoundException('Item não encontrado');
+    }
 
+    if (!user) {
+      this.logger.error(`❌ Usuário ${userId} não encontrado`);
+      throw new NotFoundException('Usuário não encontrado');
+    }
+
+    // 🔥 VERIFICAR SE É ADMIN
+    const adminRoles = ['MASTER', 'ADMIN', 'MANAGER'];
+    const isAdmin = adminRoles.includes(user.role);
+
+    if (isAdmin) {
+      this.logger.debug(
+        `👑 ADMIN DETECTADO (${user.role}) - Pulando validação de acesso`,
+      );
+    } else {
+      // Só valida acesso se NÃO for admin
+      this.logger.debug(`👤 Usuário comum - Validando acesso à etapa`);
+      this.validateStageAccess(user, item.stage!);
+    }
+
+    // Guardar dados antigos para auditoria
     const oldData = {
       title: item.title,
       description: item.description,
@@ -940,14 +996,70 @@ export class FlowService {
       deliveryAt: item.deliveryAt,
     };
 
+    // Se estiver mudando de stage, validar a nova stage
     if (data.stageId && data.stageId !== item.stageId) {
+      this.logger.debug(
+        `📍 Item mudando de stage: ${item.stageId} -> ${data.stageId}`,
+      );
+
       const newStage = await this.prisma.flowStage.findFirst({
         where: { id: data.stageId, companyId },
       });
-      if (!newStage) throw new BadRequestException('Etapa de destino inválida');
-      this.validateStageAccess(user, newStage);
+
+      if (!newStage) {
+        this.logger.error(`❌ Stage destino ${data.stageId} não encontrada`);
+        throw new BadRequestException('Etapa de destino inválida');
+      }
+
+      // Se NÃO for admin, validar acesso à nova stage
+      if (!isAdmin) {
+        this.logger.debug(`👤 Usuário comum - Validando acesso à nova stage`);
+        this.validateStageAccess(user, newStage);
+      } else {
+        this.logger.debug(`👑 ADMIN - Pulando validação da nova stage`);
+      }
     }
 
+    // 🔥 SE FOR ADMIN, PODE ATUALIZAR QUANTIDADE EM QUALQUER LUGAR
+    // Se NÃO for admin, aplicar validações de quantidade
+    if (!isAdmin) {
+      // Validar quantidade se estiver mexendo nela
+      if (data.quantity !== undefined) {
+        this.logger.debug(
+          `🔍 Usuário comum alterando quantidade para: ${data.quantity}`,
+        );
+
+        // Verificar se o item está em uma posição que exige quantidade
+        const sortedStages = await this.prisma.flowStage.findMany({
+          where: { flowId: item.flowId, companyId },
+          orderBy: { order: 'asc' },
+        });
+
+        const corteIndex = sortedStages.findIndex((s) =>
+          this.isCorteStage(s.name),
+        );
+
+        if (corteIndex !== -1) {
+          const currentStageIndex = sortedStages.findIndex(
+            (s) => s.id === item.stageId,
+          );
+          const hasPassedCorte = currentStageIndex > corteIndex;
+
+          if (hasPassedCorte) {
+            const quantityNum = Number(data.quantity);
+            if (!quantityNum || quantityNum < 1) {
+              throw new BadRequestException(
+                'Item já passou pela coluna Corte. A quantidade é obrigatória e deve ser maior que zero.',
+              );
+            }
+          }
+        }
+      }
+    } else {
+      this.logger.debug(`👑 ADMIN - Pode alterar quantidade sem restrições`);
+    }
+
+    // Preparar dados para atualização
     const updateData: any = {
       title: data.title,
       description: data.description,
@@ -962,12 +1074,14 @@ export class FlowService {
       updatedAt: new Date(),
     };
 
+    // Remover campos undefined
     Object.keys(updateData).forEach((key) => {
       if (updateData[key] === undefined) {
         delete updateData[key];
       }
     });
 
+    // Tratar datas
     if (data.dueDate !== undefined) {
       updateData.dueDate = data.dueDate ? new Date(data.dueDate) : null;
     }
@@ -982,11 +1096,22 @@ export class FlowService {
         : null;
     }
 
+    this.logger.debug(`📦 Atualizando item com dados:`, updateData);
+
+    // Executar update
     const updated = await this.prisma.flowItem.update({
       where: { id: itemId },
       data: updateData,
+      include: {
+        assignedTo: { select: { id: true, name: true } },
+        supplier: { select: { id: true, name: true } },
+        stage: { select: { id: true, name: true } },
+      },
     });
 
+    this.logger.debug(`✅ Item atualizado com sucesso`);
+
+    // Log de auditoria
     await this.auditService.log({
       action: 'UPDATE_ITEM',
       entity: 'FLOW_ITEM',
@@ -1009,12 +1134,21 @@ export class FlowService {
         productionStartedAt: updated.productionStartedAt,
         deliveryAt: updated.deliveryAt,
       },
+      metadata: {
+        isAdmin,
+        adminRole: isAdmin ? user.role : undefined,
+      },
     });
 
+    // Invalidar cache
     await this.invalidateFlowCache(companyId, item.flowId);
+
     return updated;
   }
 
+  // ===========================================================================
+  // 🔥 MOVER ITEM ENTRE COLUNAS - COM VALIDAÇÃO PARA TODOS (INCLUSIVE ADMIN)
+  // ===========================================================================
   async moveItem(
     itemId: string,
     newStageId: string,
@@ -1023,10 +1157,14 @@ export class FlowService {
     selectedResponsibleId?: string,
     selectedSupplierId?: string,
   ) {
-    console.log('[MOVE_ITEM] Início da movimentação', {
+    const startTime = Date.now();
+
+    this.logger.log('🎯 [MOVE_ITEM] ========================================');
+    this.logger.log('🎯 [MOVE_ITEM] Início da movimentação', {
       itemId,
       newStageId,
       userId,
+      newOrder,
       selectedResponsibleId,
       selectedSupplierId,
     });
@@ -1036,62 +1174,153 @@ export class FlowService {
         async (tx) => {
           const companyId = this.cls.get<string>('tenantId');
 
-          // 🔥 VALIDAÇÃO DE QUANTIDADE ANTES DE MOVER
-          await this.validateQuantityBeforeMove(itemId, newStageId, companyId);
+          if (!companyId) {
+            this.logger.error('❌ [MOVE_ITEM] companyId não encontrado no CLS');
+            throw new ForbiddenException('Empresa não identificada');
+          }
 
-          const [item, nextStage, user] = await Promise.all([
+          // Buscar usuário para verificar role
+          const user = await tx.user.findFirst({
+            where: {
+              id: userId,
+              companyId,
+              status: 'ACTIVE',
+            },
+            select: {
+              id: true,
+              role: true,
+              name: true,
+              professionalRole: true,
+            },
+          });
+
+          if (!user) {
+            this.logger.error(
+              `❌ [MOVE_ITEM] Usuário ${userId} não encontrado`,
+            );
+            throw new NotFoundException('Usuário não encontrado');
+          }
+
+          const adminRoles = ['MASTER', 'ADMIN', 'MANAGER'];
+          const isAdmin = adminRoles.includes(user.role);
+
+          this.logger.log(
+            `👤 [MOVE_ITEM] Usuário: ${user.name} (${user.role}) - Admin: ${isAdmin}`,
+          );
+
+          // 🔥 VALIDAÇÃO DE QUANTIDADE - APLICADA PARA TODOS, INCLUSIVE ADMIN
+          this.logger.log(
+            `🔍 [MOVE_ITEM] Validando quantidade para ${isAdmin ? 'ADMIN' : 'usuário comum'}`,
+          );
+
+          await this.validateQuantityBeforeMove(
+            itemId,
+            newStageId,
+            companyId,
+            userId, // Passamos o userId para a validação saber se é admin e dar mensagem personalizada
+          );
+
+          // Buscar item e stage destino
+          const [item, nextStage] = await Promise.all([
             tx.flowItem.findFirst({
               where: { id: itemId, companyId },
               include: {
                 stage: true,
                 assignedTo: true,
                 supplier: true,
+                flow: {
+                  select: {
+                    id: true,
+                    name: true,
+                  },
+                },
               },
             }),
             tx.flowStage.findFirst({
               where: { id: newStageId, companyId },
             }),
-            tx.user.findFirst({
-              where: { id: userId, companyId },
-            }),
           ]);
 
-          if (!item || !nextStage || !user) {
-            throw new NotFoundException(
-              'Item, etapa ou usuário não encontrado',
-            );
+          if (!item) {
+            this.logger.error(`❌ [MOVE_ITEM] Item ${itemId} não encontrado`);
+            throw new NotFoundException('Item não encontrado');
           }
 
-          this.validateStageAccess(user, item.stage!);
+          if (!nextStage) {
+            this.logger.error(
+              `❌ [MOVE_ITEM] Stage ${newStageId} não encontrado`,
+            );
+            throw new NotFoundException('Etapa destino não encontrada');
+          }
+
+          this.logger.log(
+            `📦 [MOVE_ITEM] Item: "${item.title}" (Qtd: ${item.quantity})`,
+          );
+          this.logger.log(
+            `📍 [MOVE_ITEM] De: "${item.stage?.name}" -> Para: "${nextStage.name}"`,
+          );
+
+          // Validar acesso à stage (pula se for admin)
+          if (!isAdmin) {
+            this.logger.log(
+              `👤 [MOVE_ITEM] Validando acesso do usuário à stage origem`,
+            );
+            this.validateStageAccess(user, item.stage!);
+          } else {
+            this.logger.log(
+              `👑 [MOVE_ITEM] ADMIN - Pulando validação de acesso`,
+            );
+          }
 
           const oldStageId = item.stageId;
           const oldAssignedToId = item.assignedToId;
           const oldSupplierId = item.supplierId;
 
+          // Verificar se é coluna OFICINA
           const isOficina = nextStage.name.trim().toLowerCase() === 'oficina';
+          this.logger.log(`🏭 [MOVE_ITEM] É coluna OFICINA? ${isOficina}`);
 
-          if (isOficina) {
-            if (!selectedSupplierId) {
-              throw new BadRequestException(
-                'É obrigatório selecionar uma oficina para a coluna "Oficina"',
-              );
-            }
-            if (selectedResponsibleId) {
-              throw new BadRequestException(
-                'Não é permitido atribuir funcionário para a coluna "Oficina"',
-              );
+          // Validações específicas por tipo de coluna (NÃO se aplicam a admin)
+          if (!isAdmin) {
+            if (isOficina) {
+              if (!selectedSupplierId) {
+                this.logger.error(
+                  `❌ [MOVE_ITEM] Oficina selecionada mas sem supplierId`,
+                );
+                throw new BadRequestException(
+                  'É obrigatório selecionar uma oficina para a coluna "Oficina"',
+                );
+              }
+              if (selectedResponsibleId) {
+                this.logger.error(`❌ [MOVE_ITEM] Oficina com responsibleId`);
+                throw new BadRequestException(
+                  'Não é permitido atribuir funcionário para a coluna "Oficina"',
+                );
+              }
+            } else {
+              if (selectedSupplierId) {
+                this.logger.error(
+                  `❌ [MOVE_ITEM] Coluna não-oficina com supplierId`,
+                );
+                throw new BadRequestException(
+                  'Não é permitido atribuir oficina para colunas que não sejam "Oficina"',
+                );
+              }
             }
           } else {
-            if (selectedSupplierId) {
-              throw new BadRequestException(
-                'Não é permitido atribuir oficina para colunas que não sejam "Oficina"',
-              );
-            }
+            this.logger.log(
+              `👑 [MOVE_ITEM] ADMIN - Pulando validações de responsável/oficina`,
+            );
           }
 
+          // Calcular nova ordem
           let finalOrder: number;
 
           if (newOrder !== undefined && newOrder >= 0) {
+            this.logger.log(
+              `📊 [MOVE_ITEM] Usando ordem específica: ${newOrder}`,
+            );
+
             await tx.flowItem.updateMany({
               where: {
                 stageId: newStageId,
@@ -1108,24 +1337,57 @@ export class FlowService {
               select: { orderInStage: true },
             });
             finalOrder = (last?.orderInStage ?? -1) + 1;
+            this.logger.log(`📊 [MOVE_ITEM] Ordem automática: ${finalOrder}`);
           }
 
+          // Preparar dados de atualização
           const updateData: any = {
             stageId: newStageId,
             orderInStage: finalOrder,
             updatedAt: new Date(),
           };
 
-          if (isOficina) {
-            updateData.assignedToId = null;
-            updateData.supplierId = selectedSupplierId;
-          } else {
-            updateData.supplierId = null;
+          // Admin pode escolher qualquer combinação
+          if (isAdmin) {
+            this.logger.log(
+              `👑 [MOVE_ITEM] ADMIN - Processando responsáveis livremente`,
+            );
+
             if (selectedResponsibleId) {
               updateData.assignedToId = selectedResponsibleId;
+              updateData.supplierId = null;
+              this.logger.log(
+                `👑 [MOVE_ITEM] ADMIN atribuindo funcionário: ${selectedResponsibleId}`,
+              );
+            }
+
+            if (selectedSupplierId) {
+              updateData.supplierId = selectedSupplierId;
+              updateData.assignedToId = null;
+              this.logger.log(
+                `👑 [MOVE_ITEM] ADMIN atribuindo oficina: ${selectedSupplierId}`,
+              );
+            }
+          } else {
+            // Lógica normal para não-admin
+            if (isOficina) {
+              updateData.assignedToId = null;
+              updateData.supplierId = selectedSupplierId;
+              this.logger.log(
+                `🏭 [MOVE_ITEM] Atribuindo oficina: ${selectedSupplierId}`,
+              );
+            } else {
+              updateData.supplierId = null;
+              if (selectedResponsibleId) {
+                updateData.assignedToId = selectedResponsibleId;
+                this.logger.log(
+                  `👤 [MOVE_ITEM] Atribuindo responsável: ${selectedResponsibleId}`,
+                );
+              }
             }
           }
 
+          // Executar update
           const updated = await tx.flowItem.update({
             where: { id: itemId },
             data: updateData,
@@ -1135,6 +1397,9 @@ export class FlowService {
             },
           });
 
+          this.logger.log(`✅ [MOVE_ITEM] Item movido com sucesso!`);
+
+          // Preparar metadata para auditoria
           const metadata: any = {
             fromStageId: oldStageId,
             fromStageName: item.stage?.name,
@@ -1142,6 +1407,9 @@ export class FlowService {
             toStageName: nextStage.name,
             newOrder: finalOrder,
             isOficina,
+            isAdmin,
+            adminRole: isAdmin ? user.role : undefined,
+            executionTimeMs: Date.now() - startTime,
           };
 
           if (isOficina) {
@@ -1154,6 +1422,7 @@ export class FlowService {
             metadata.newResponsibleName = updated.assignedTo?.name;
           }
 
+          // Log de auditoria
           await this.auditService.log({
             action: 'MOVE_ITEM',
             entity: 'FLOW_ITEM',
@@ -1163,20 +1432,44 @@ export class FlowService {
             metadata,
           });
 
+          // Invalidar cache
           await this.invalidateFlowCache(companyId, item.flowId);
 
-          console.log('[MOVE_ITEM] Movimentação concluída com sucesso', {
-            newStage: nextStage.name,
-            newResponsible: isOficina
-              ? updated.supplier?.name
-              : updated.assignedTo?.name,
-          });
+          // Incrementar métrica - COM TRY/CATCH PARA EVITAR ERRO 500
+          try {
+            this.moveCounter.inc({
+              operation: 'move',
+              status: 'success',
+              from_stage: oldStageId || 'unknown',
+              to_stage: newStageId,
+              is_admin: String(isAdmin),
+            });
+          } catch (metricError) {
+            this.logger.error(
+              `Erro ao incrementar métrica: ${metricError.message}`,
+            );
+            // Não estoura o erro - apenas loga
+          }
+
+          this.logger.log(
+            '🎯 [MOVE_ITEM] ========================================',
+          );
+          this.logger.log(
+            `🎯 [MOVE_ITEM] Movimentação concluída em ${Date.now() - startTime}ms`,
+            {
+              newStage: nextStage.name,
+              newResponsible: isOficina
+                ? updated.supplier?.name
+                : updated.assignedTo?.name,
+            },
+          );
 
           return updated;
         },
         {
           timeout: 30000,
           maxWait: 30000,
+          isolationLevel: 'ReadCommitted',
         },
       );
     });
