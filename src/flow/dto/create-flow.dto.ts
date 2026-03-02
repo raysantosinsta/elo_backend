@@ -6,9 +6,10 @@ import {
   IsNumber,
   IsUUID,
   IsDateString,
-  Min,
   IsEnum,
   IsBooleanString,
+  IsInt,
+  IsArray,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
@@ -16,8 +17,6 @@ export enum DateFilterType {
   PRODUCTION_STARTED = 'productionStartedAt',
   DUE_DATE = 'dueDate',
 }
-
-
 
 export class CreateFlowDto {
   @ApiProperty({ example: 'Coleção Verão 2025' })
@@ -56,9 +55,10 @@ export class CreateStageDto {
   order?: number;
 
   // 🔥 NOVO CAMPO: Cargo permitido para mover card
-  @ApiProperty({ 
-    required: false, 
-    description: 'Cargo técnico necessário para mover itens desta etapa (ex: "modelista")' 
+  @ApiProperty({
+    required: false,
+    description:
+      'Cargo técnico necessário para mover itens desta etapa (ex: "modelista")',
   })
   @IsOptional()
   @IsString()
@@ -84,7 +84,6 @@ export class CreateFlowItemDto {
   @ApiProperty({ required: false })
   @IsOptional()
   @IsNumber()
-  @Min(1)
   quantity?: number;
 
   @ApiProperty({ required: false })
@@ -130,17 +129,106 @@ export class CreateFlowItemDto {
   @IsUUID()
   supplierId?: string; // <--- Novo campo para salvar a oficina
 
-   @IsOptional()
+  @IsOptional()
   @IsString()
   status?: string; // Adicione se o Flow tiver um status
 
-
-
   @ApiProperty({ description: 'ID do fluxo relacionado', required: false })
-  @IsUUID()        // Se for um UUID, use IsUUID, caso contrário use IsString
+  @IsUUID() // Se for um UUID, use IsUUID, caso contrário use IsString
   @IsOptional()
   flowId?: string;
+}
 
+// Adicione isso no mesmo arquivo, após o CreateFlowItemDto
+
+export class UpdateFlowItemDto {
+  @ApiProperty({ required: false, example: 'Camisa Social Azul - Alterada' })
+  @IsOptional()
+  @IsString({ message: 'O título precisa ser um texto' })
+  title?: string;
+
+  @ApiProperty({ required: false, example: 'PED-2024-001' })
+  @IsOptional()
+  @IsString()
+  orderNumber?: string;
+
+  @ApiProperty({ required: false, example: 'REF-12345' })
+  @IsOptional()
+  @IsString()
+  productRef?: string;
+
+  @ApiProperty({
+    required: false,
+    example: 5,
+    description: 'Quantidade do item (mínimo 1)',
+  })
+  @IsOptional()
+  @IsNumber({}, { message: 'A quantidade precisa ser um número' })
+  @IsInt({ message: 'A quantidade precisa ser um número inteiro' })
+  quantity?: number;
+
+  @ApiProperty({ required: false, example: 3 })
+  @IsOptional()
+  @IsNumber()
+  priority?: number;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsDateString()
+  dueDate?: string | Date;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsDateString()
+  productionStartedAt?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsDateString()
+  deliveryAt?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsUUID()
+  assignedToId?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsUUID()
+  stageId?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsUUID()
+  supplierId?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  status?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  removeImageIds?: string[];
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  removeVideoIds?: string[];
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  removeAudioIds?: string[];
 }
 
 export class FlowFilterDto {

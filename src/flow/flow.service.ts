@@ -856,6 +856,38 @@ export class FlowService {
     if (!user) throw new ForbiddenException();
 
     return this.prisma.$transaction(async (tx) => {
+      // 🔍 VALIDAÇÃO DE DUPLICIDADE - TÍTULO OU REFERÊNCIA
+      this.logger.log(
+        `🔍 Verificando duplicidade para título: "${dto.title}" e referência: "${dto.productRef}"`,
+      );
+
+      // Verifica se já existe um item com o mesmo título OU mesma referência
+      const existingItem = await tx.flowItem.findFirst({
+        where: {
+          companyId,
+          OR: [{ title: dto.title }, { productRef: dto.productRef }],
+        },
+      });
+
+      if (existingItem) {
+        // Determina qual campo causou a duplicidade para mensagem mais precisa
+        if (existingItem.title === dto.title) {
+          this.logger.error(
+            `❌ Já existe um item com o título: "${dto.title}"`,
+          );
+          throw new BadRequestException(
+            `Já existe um item cadastrado com o título "${dto.title}". Por favor, utilize um título diferente.`,
+          );
+        } else if (existingItem.productRef === dto.productRef) {
+          this.logger.error(
+            `❌ Já existe um item com a referência: "${dto.productRef}"`,
+          );
+          throw new BadRequestException(
+            `Já existe um item cadastrado com a referência "${dto.productRef}". Por favor, utilize uma referência diferente.`,
+          );
+        }
+      }
+
       const targetStage = dto.stageId
         ? await tx.flowStage.findFirst({
             where: { id: dto.stageId, flowId, companyId },
@@ -933,7 +965,7 @@ export class FlowService {
   }
 
   // ===========================================================================
-  // 🔥 ATUALIZAR ITEM DO FLUXO - COM SUPORTE A ADMIN
+  // 🔥 ATUALIZAR ITEM DO FLUXO - COM SUPORTE A ADMIN E VALIDAÇÃO DE DUPLICIDADE
   // ===========================================================================
   async updateFlowItem(itemId: string, userId: string, data: any) {
     const companyId = this.getCompanyIdFromContext();
@@ -963,6 +995,50 @@ export class FlowService {
     if (!user) {
       this.logger.error(`❌ Usuário ${userId} não encontrado`);
       throw new NotFoundException('Usuário não encontrado');
+    }
+
+    // 🔍 VALIDAÇÃO DE DUPLICIDADE AO ATUALIZAR
+    // Verifica se está tentando alterar título ou referência para valores já existentes
+    if (data.title || data.productRef) {
+      this.logger.log(
+        `🔍 Verificando duplicidade para atualização do item ${itemId}`,
+      );
+
+      const whereClause: any = {
+        companyId,
+        NOT: { id: itemId }, // Exclui o próprio item da verificação
+        OR: [],
+      };
+
+      // Adiciona condições apenas para os campos que estão sendo alterados
+      if (data.title && data.title !== item.title) {
+        whereClause.OR.push({ title: data.title });
+      }
+
+      if (data.productRef && data.productRef !== item.productRef) {
+        whereClause.OR.push({ productRef: data.productRef });
+      }
+
+      // Só executa a consulta se houver algo para verificar
+      if (whereClause.OR.length > 0) {
+        const existingItem = await this.prisma.flowItem.findFirst({
+          where: whereClause,
+        });
+
+        if (existingItem) {
+          this.logger.error(`❌ Conflito de duplicidade detectado`);
+
+          if (existingItem.title === data.title) {
+            throw new BadRequestException(
+              `Já existe outro item com o título "${data.title}". Por favor, utilize um título diferente.`,
+            );
+          } else if (existingItem.productRef === data.productRef) {
+            throw new BadRequestException(
+              `Já existe outro item com a referência "${data.productRef}". Por favor, utilize uma referência diferente.`,
+            );
+          }
+        }
+      }
     }
 
     // 🔥 VERIFICAR SE É ADMIN

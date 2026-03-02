@@ -45,6 +45,7 @@ import {
   CreateFlowItemDto,
   CreateStageDto,
   FlowFilterDto,
+  UpdateFlowItemDto,
 } from './dto/create-flow.dto';
 import { FlowService } from './flow.service';
 
@@ -309,7 +310,7 @@ export class FlowController {
   async updateItem(
     @Req() req: any,
     @Param('itemId', ParseUUIDPipe) itemId: string,
-    @Body() body: any,
+    @Body() body: UpdateFlowItemDto,
   ) {
     // 🔥 REMOVIDO: req.user.companyId
     return this.flowService.updateFlowItem(itemId, req.user.id, body);
