@@ -1,16 +1,11 @@
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/require-await */
+/* eslint-disable prettier/prettier */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
-/* eslint-disable prettier/prettier */
-import {
-  Controller,
-  Get,
-  Param,
-  Query,
-  Req,
-  UseGuards
-} from '@nestjs/common';
+import { Controller, Get, Param, Query, Req, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { AuditService } from './audit.service';
 
@@ -58,9 +53,12 @@ export class AuditController {
     @Param('id') id: string,
   ) {
     // 🔥 NÃO PRECISA MAIS PASSAR companyId!
-    return this.auditService.getEntityHistory(
-      entity.toUpperCase(),
-      id,
-    );
+    return this.auditService.getEntityHistory(entity.toUpperCase(), id);
+  }
+
+  @Get('item/:itemId')
+  async getItemLogs(@Param('itemId') itemId: string) {
+    // 🔥 O companyId será obtido dentro do service via CLS
+    return this.auditService.getItemLogs(itemId);
   }
 }

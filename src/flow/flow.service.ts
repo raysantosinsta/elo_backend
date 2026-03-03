@@ -936,28 +936,66 @@ export class FlowService {
         data: dataToCreate,
       });
 
-      await this.auditService.log({
-        action: 'CREATE_ITEM',
-        entity: 'FLOW_ITEM',
-        entityId: item.id,
-        userId,
-        companyId,
-        newData: {
+      // =======================================================================
+      // 🔥 AUDIT LOG CORRETO - COM TODOS OS DADOS DO ITEM
+      // =======================================================================
+      try {
+        // Primeiro, vamos verificar os dados que serão enviados
+        const newDataForAudit = {
           title: item.title,
-          flowId: item.flowId,
-          stageId: item.stageId,
-          orderNumber: item.orderNumber,
+          description: item.description,
           productRef: item.productRef,
           quantity: item.quantity,
-          priority: item.priority,
           status: item.status,
+          stageId: item.stageId,
+          assignedToId: item.assignedToId,
+          supplierId: item.supplierId,
           dueDate: item.dueDate,
           productionStartedAt: item.productionStartedAt,
           deliveryAt: item.deliveryAt,
-          assignedToId: item.assignedToId,
-          supplierId: item.supplierId,
-        },
-      });
+          orderNumber: item.orderNumber,
+          priority: item.priority,
+        };
+
+        const metadataForAudit = {
+          flowId: item.flowId,
+          createdAt: item.createdAt,
+          flowName: (
+            await tx.productFlow.findUnique({
+              where: { id: item.flowId },
+              select: { name: true },
+            })
+          )?.name,
+          stageName: targetStage.name,
+        };
+
+        this.logger.debug('📝 Enviando para auditoria:', {
+          newDataKeys: Object.keys(newDataForAudit),
+          newDataPreview: newDataForAudit,
+          metadataKeys: Object.keys(metadataForAudit),
+        });
+
+        await this.auditService.log({
+          action: 'CREATE_ITEM',
+          entity: 'FLOW_ITEM',
+          entityId: item.id,
+          userId,
+          companyId,
+          oldData: null, // Usar null em vez de {} para criação
+          newData: newDataForAudit, // TODOS os dados do item aqui
+          metadata: metadataForAudit, // Metadados adicionais aqui
+        });
+
+        this.logger.debug(
+          `✅ AUDIT - CREATE_ITEM registrado para item ${item.id}`,
+        );
+      } catch (auditError) {
+        // Log do erro mas não impede a criação do item
+        this.logger.error(
+          `❌ Erro ao registrar auditoria para item ${item.id}:`,
+          auditError,
+        );
+      }
 
       await this.invalidateFlowCache(companyId, flowId);
       return item;
@@ -965,7 +1003,7 @@ export class FlowService {
   }
 
   // ===========================================================================
-  // 🔥 ATUALIZAR ITEM DO FLUXO - COM SUPORTE A ADMIN E VALIDAÇÃO DE DUPLICIDADE
+  // 🔥 ATUALIZAR ITEM DO FLUXO - COM DETECÇÃO CORRETA DE CAMPOS ALTERADOS
   // ===========================================================================
   async updateFlowItem(itemId: string, userId: string, data: any) {
     const companyId = this.getCompanyIdFromContext();
@@ -998,7 +1036,6 @@ export class FlowService {
     }
 
     // 🔍 VALIDAÇÃO DE DUPLICIDADE AO ATUALIZAR
-    // Verifica se está tentando alterar título ou referência para valores já existentes
     if (data.title || data.productRef) {
       this.logger.log(
         `🔍 Verificando duplicidade para atualização do item ${itemId}`,
@@ -1006,11 +1043,10 @@ export class FlowService {
 
       const whereClause: any = {
         companyId,
-        NOT: { id: itemId }, // Exclui o próprio item da verificação
+        NOT: { id: itemId },
         OR: [],
       };
 
-      // Adiciona condições apenas para os campos que estão sendo alterados
       if (data.title && data.title !== item.title) {
         whereClause.OR.push({ title: data.title });
       }
@@ -1019,15 +1055,12 @@ export class FlowService {
         whereClause.OR.push({ productRef: data.productRef });
       }
 
-      // Só executa a consulta se houver algo para verificar
       if (whereClause.OR.length > 0) {
         const existingItem = await this.prisma.flowItem.findFirst({
           where: whereClause,
         });
 
         if (existingItem) {
-          this.logger.error(`❌ Conflito de duplicidade detectado`);
-
           if (existingItem.title === data.title) {
             throw new BadRequestException(
               `Já existe outro item com o título "${data.title}". Por favor, utilize um título diferente.`,
@@ -1050,7 +1083,6 @@ export class FlowService {
         `👑 ADMIN DETECTADO (${user.role}) - Pulando validação de acesso`,
       );
     } else {
-      // Só valida acesso se NÃO for admin
       this.logger.debug(`👤 Usuário comum - Validando acesso à etapa`);
       this.validateStageAccess(user, item.stage!);
     }
@@ -1087,7 +1119,6 @@ export class FlowService {
         throw new BadRequestException('Etapa de destino inválida');
       }
 
-      // Se NÃO for admin, validar acesso à nova stage
       if (!isAdmin) {
         this.logger.debug(`👤 Usuário comum - Validando acesso à nova stage`);
         this.validateStageAccess(user, newStage);
@@ -1096,42 +1127,37 @@ export class FlowService {
       }
     }
 
-    // 🔥 SE FOR ADMIN, PODE ATUALIZAR QUANTIDADE EM QUALQUER LUGAR
-    // Se NÃO for admin, aplicar validações de quantidade
-    if (!isAdmin) {
-      // Validar quantidade se estiver mexendo nela
-      if (data.quantity !== undefined) {
-        this.logger.debug(
-          `🔍 Usuário comum alterando quantidade para: ${data.quantity}`,
+    // 🔥 VALIDAÇÕES DE QUANTIDADE PARA NÃO-ADMIN
+    if (!isAdmin && data.quantity !== undefined) {
+      this.logger.debug(
+        `🔍 Usuário comum alterando quantidade para: ${data.quantity}`,
+      );
+
+      const sortedStages = await this.prisma.flowStage.findMany({
+        where: { flowId: item.flowId, companyId },
+        orderBy: { order: 'asc' },
+      });
+
+      const corteIndex = sortedStages.findIndex((s) =>
+        this.isCorteStage(s.name),
+      );
+
+      if (corteIndex !== -1) {
+        const currentStageIndex = sortedStages.findIndex(
+          (s) => s.id === item.stageId,
         );
+        const hasPassedCorte = currentStageIndex > corteIndex;
 
-        // Verificar se o item está em uma posição que exige quantidade
-        const sortedStages = await this.prisma.flowStage.findMany({
-          where: { flowId: item.flowId, companyId },
-          orderBy: { order: 'asc' },
-        });
-
-        const corteIndex = sortedStages.findIndex((s) =>
-          this.isCorteStage(s.name),
-        );
-
-        if (corteIndex !== -1) {
-          const currentStageIndex = sortedStages.findIndex(
-            (s) => s.id === item.stageId,
-          );
-          const hasPassedCorte = currentStageIndex > corteIndex;
-
-          if (hasPassedCorte) {
-            const quantityNum = Number(data.quantity);
-            if (!quantityNum || quantityNum < 1) {
-              throw new BadRequestException(
-                'Item já passou pela coluna Corte. A quantidade é obrigatória e deve ser maior que zero.',
-              );
-            }
+        if (hasPassedCorte) {
+          const quantityNum = Number(data.quantity);
+          if (!quantityNum || quantityNum < 1) {
+            throw new BadRequestException(
+              'Item já passou pela coluna Corte. A quantidade é obrigatória e deve ser maior que zero.',
+            );
           }
         }
       }
-    } else {
+    } else if (isAdmin) {
       this.logger.debug(`👑 ADMIN - Pode alterar quantidade sem restrições`);
     }
 
@@ -1172,7 +1198,65 @@ export class FlowService {
         : null;
     }
 
-    this.logger.debug(`📦 Atualizando item com dados:`, updateData);
+    // =======================================================================
+    // 🔥 NOVA LÓGICA: DETECTAR APENAS OS CAMPOS QUE REALMENTE MUDARAM
+    // =======================================================================
+    const changedFields = Object.keys(updateData).filter((key) => {
+      // Ignora campos de sistema
+      if (key === 'updatedAt' || key === 'id' || key === 'createdAt') {
+        return false;
+      }
+
+      // Pega os valores antigo e novo
+      const oldValue = oldData[key as keyof typeof oldData];
+      const newValue = updateData[key];
+
+      // Se o campo não existia no oldData, considera como mudança
+      if (!(key in oldData)) return true;
+
+      // Trata null/undefined como equivalentes
+      if (oldValue === null && newValue === undefined) return false;
+      if (oldValue === undefined && newValue === null) return false;
+      if (oldValue === null && newValue === null) return false;
+      if (oldValue === undefined && newValue === undefined) return false;
+
+      // Para datas, compara como strings ISO
+      if (
+        oldValue instanceof Date ||
+        (oldValue && typeof oldValue === 'string' && oldValue.includes('T'))
+      ) {
+        const oldStr =
+          oldValue instanceof Date ? oldValue.toISOString() : oldValue;
+        const newStr =
+          newValue instanceof Date ? newValue.toISOString() : newValue;
+
+        // Extrai apenas a parte da data (YYYY-MM-DD) se for campo de data
+        if (key.includes('Date') || key.includes('At')) {
+          return oldStr.split('T')[0] !== newStr.split('T')[0];
+        }
+        return oldStr !== newStr;
+      }
+
+      // Para IDs, considera mudança se o valor for diferente
+      if (key === 'supplierId' || key === 'assignedToId' || key === 'stageId') {
+        return oldValue !== newValue;
+      }
+
+      // Comparação normal
+      return JSON.stringify(oldValue) !== JSON.stringify(newValue);
+    });
+
+    // Cria objetos apenas com os campos alterados
+    const oldChangedData: Record<string, any> = {};
+    const newChangedData: Record<string, any> = {};
+
+    changedFields.forEach((field) => {
+      oldChangedData[field] = oldData[field as keyof typeof oldData];
+      newChangedData[field] = updateData[field];
+    });
+
+    this.logger.debug(`📝 Campos que realmente mudaram:`, changedFields);
+    // =======================================================================
 
     // Executar update
     const updated = await this.prisma.flowItem.update({
@@ -1187,32 +1271,21 @@ export class FlowService {
 
     this.logger.debug(`✅ Item atualizado com sucesso`);
 
-    // Log de auditoria
+    // Log de auditoria com informações detalhadas
     await this.auditService.log({
       action: 'UPDATE_ITEM',
       entity: 'FLOW_ITEM',
       entityId: itemId,
       userId,
       companyId,
-      oldData,
-      newData: {
-        title: updated.title,
-        description: updated.description,
-        priority: updated.priority,
-        quantity: updated.quantity,
-        supplierId: updated.supplierId,
-        assignedToId: updated.assignedToId,
-        stageId: updated.stageId,
-        orderNumber: updated.orderNumber,
-        productRef: updated.productRef,
-        status: updated.status,
-        dueDate: updated.dueDate,
-        productionStartedAt: updated.productionStartedAt,
-        deliveryAt: updated.deliveryAt,
-      },
+      oldData: oldChangedData, // Só os campos que mudaram
+      newData: newChangedData, // Só os campos que mudaram
       metadata: {
         isAdmin,
         adminRole: isAdmin ? user.role : undefined,
+        changedFields, // Lista dos campos que mudaram
+        totalChanged: changedFields.length,
+        timestamp: new Date().toISOString(),
       },
     });
 
@@ -1995,227 +2068,279 @@ export class FlowService {
     }
   }
 
-
   // ===========================================================================
-// 🔥 MÉTODO CORRIGIDO - Mantém stages vazias quando filtradas por nome
-// ===========================================================================
-async getFilteredKanbanBoard(flowId: string, filters: FlowFilterDto) {
-  const companyId = this.getCompanyIdFromContext();
-  
-  console.log('\n');
-  console.log('='.repeat(80));
-  console.log('🔍 [getFilteredKanbanBoard] INICIANDO FILTRAGEM');
-  console.log('='.repeat(80));
-  console.log('📌 flowId:', flowId);
-  console.log('📌 companyId:', companyId);
-  console.log('📌 filters recebidos:', JSON.stringify(filters, null, 2));
-  console.log('📌 stageName:', filters.stageName);
-  console.log('📌 stageName.trim():', filters.stageName?.trim());
-  console.log('📌 stageName existe?', !!filters.stageName);
-  console.log('📌 stageName length:', filters.stageName?.length);
+  // 🔥 MÉTODO CORRIGIDO - Mantém stages vazias quando filtradas por nome
+  // ===========================================================================
+  async getFilteredKanbanBoard(flowId: string, filters: FlowFilterDto) {
+    const companyId = this.getCompanyIdFromContext();
 
-  // Busca o fluxo com as stages
-  console.log('\n🔍 Buscando fluxo no banco...');
-  const board = await this.prisma.productFlow.findFirst({
-    where: { id: flowId, companyId },
-    include: {
-      stages: {
-        orderBy: { order: 'asc' },
-        include: {
-          items: {
-            include: {
-              images: { take: 1, select: { url: true, id: true } },
-              assignedTo: { select: { name: true, id: true } },
-              supplier: { select: { name: true, id: true } },
+    console.log('\n');
+    console.log('='.repeat(80));
+    console.log('🔍 [getFilteredKanbanBoard] INICIANDO FILTRAGEM');
+    console.log('='.repeat(80));
+    console.log('📌 flowId:', flowId);
+    console.log('📌 companyId:', companyId);
+    console.log('📌 filters recebidos:', JSON.stringify(filters, null, 2));
+    console.log('📌 stageName:', filters.stageName);
+    console.log('📌 stageName.trim():', filters.stageName?.trim());
+    console.log('📌 stageName existe?', !!filters.stageName);
+    console.log('📌 stageName length:', filters.stageName?.length);
+
+    // Busca o fluxo com as stages
+    console.log('\n🔍 Buscando fluxo no banco...');
+    const board = await this.prisma.productFlow.findFirst({
+      where: { id: flowId, companyId },
+      include: {
+        stages: {
+          orderBy: { order: 'asc' },
+          include: {
+            items: {
+              include: {
+                images: { take: 1, select: { url: true, id: true } },
+                assignedTo: { select: { name: true, id: true } },
+                supplier: { select: { name: true, id: true } },
+              },
             },
           },
         },
       },
-    },
-  });
+    });
 
-  if (!board) {
-    console.error('❌ Fluxo não encontrado!');
-    throw new BadRequestException('Fluxo não encontrado');
-  }
+    if (!board) {
+      console.error('❌ Fluxo não encontrado!');
+      throw new BadRequestException('Fluxo não encontrado');
+    }
 
-  console.log('✅ Fluxo encontrado:', board.name);
-  console.log('📊 Total de stages no fluxo:', board.stages.length);
-  console.log('📋 Nomes das stages:', board.stages.map(s => `"${s.name}"`).join(', '));
+    console.log('✅ Fluxo encontrado:', board.name);
+    console.log('📊 Total de stages no fluxo:', board.stages.length);
+    console.log(
+      '📋 Nomes das stages:',
+      board.stages.map((s) => `"${s.name}"`).join(', '),
+    );
 
-  // ====================================================
-  // PASSO 1: SE TIVER FILTRO POR NOME DA COLUNA
-  // ====================================================
-  if (filters.stageName && filters.stageName.trim() !== '') {
-    const stageNameLower = filters.stageName.trim().toLowerCase();
-    
+    // ====================================================
+    // PASSO 1: SE TIVER FILTRO POR NOME DA COLUNA
+    // ====================================================
+    if (filters.stageName && filters.stageName.trim() !== '') {
+      const stageNameLower = filters.stageName.trim().toLowerCase();
+
+      console.log('\n' + '-'.repeat(40));
+      console.log('🎯 FILTRO POR NOME DA COLUNA ATIVADO');
+      console.log('-'.repeat(40));
+      console.log('🔍 stageName original:', filters.stageName);
+      console.log('🔍 stageName lowerCase:', stageNameLower);
+
+      // 🔥 FILTRA APENAS A COLUNA QUE CORRESPONDE AO NOME BUSCADO
+      console.log('\n🔍 Filtrando stages que contém:', stageNameLower);
+
+      const matchingStages = board.stages.filter((stage) => {
+        const stageName = stage.name.toLowerCase();
+        const matches = stageName.includes(stageNameLower);
+        console.log(
+          `   Stage "${stage.name}" (${stageName}) -> ${matches ? '✅ MATCH' : '❌'}`,
+        );
+        return matches;
+      });
+
+      console.log(
+        `\n✅ Encontradas ${matchingStages.length} stage(s) com o nome "${filters.stageName}"`,
+      );
+
+      if (matchingStages.length > 0) {
+        console.log(
+          '📋 Stages encontradas:',
+          matchingStages.map((s) => `"${s.name}"`).join(', '),
+        );
+      }
+
+      // Se não encontrar nenhuma stage, retorna board com stages vazio
+      if (matchingStages.length === 0) {
+        console.warn(
+          `⚠️ Nenhuma stage encontrada com o nome: "${filters.stageName}"`,
+        );
+        console.log('📤 Retornando board com stages vazio');
+        return {
+          ...board,
+          stages: [],
+        };
+      }
+
+      // ====================================================
+      // PASSO 2: APLICAR OUTROS FILTROS NOS ITENS DA COLUNA ENCONTRADA
+      // ====================================================
+      const hasOtherFilters = this.hasFilters(filters);
+      console.log('\n🔍 Verificando outros filtros:', hasOtherFilters);
+      console.log('📊 Outros filtros presentes:', {
+        startDate: !!filters.startDate,
+        endDate: !!filters.endDate,
+        isOverdue: filters.isOverdue === 'true',
+        isUpcoming: filters.isUpcoming === 'true',
+        assignedToId: !!filters.assignedToId,
+        supplierId: !!filters.supplierId,
+        status: !!filters.status,
+        productRef: !!filters.productRef,
+        dateType: !!filters.dateType,
+      });
+
+      if (!hasOtherFilters) {
+        console.log(
+          '\n✅ Sem outros filtros, retornando APENAS as stages encontradas',
+        );
+        console.log(
+          '📤 Stages sendo retornadas:',
+          matchingStages.map((s) => `"${s.name}"`).join(', '),
+        );
+        console.log(
+          '📊 Total de itens:',
+          matchingStages.reduce((acc, s) => acc + s.items.length, 0),
+        );
+
+        return {
+          ...board,
+          stages: matchingStages, // 🔥 Retorna as stages encontradas, mesmo sem itens
+        };
+      }
+
+      // Se tem outros filtros, busca itens filtrados
+      console.log('\n🔍 Aplicando filtros adicionais nos itens...');
+      console.log(
+        '📡 Chamando getFilteredItems com filters:',
+        JSON.stringify(filters, null, 2),
+      );
+
+      const filteredItems = await this.getFilteredItems(filters);
+      console.log(`✅ getFilteredItems retornou ${filteredItems.length} itens`);
+
+      if (filteredItems.length > 0) {
+        console.log(
+          '📋 IDs dos itens filtrados:',
+          filteredItems.map((i) => i.id).join(', '),
+        );
+      } else {
+        console.log('⚠️ Nenhum item encontrado nos filtros adicionais');
+      }
+
+      const filteredItemIds = new Set(filteredItems.map((item) => item.id));
+      console.log(`📊 Set de IDs criado com ${filteredItemIds.size} itens`);
+
+      // Aplica filtros nos itens das stages encontradas
+      console.log('\n🔍 Aplicando filtros nos itens de cada stage:');
+      const finalStages = matchingStages.map((stage) => {
+        console.log(`\n📌 Processando stage: "${stage.name}"`);
+        console.log(`   Total de itens na stage: ${stage.items.length}`);
+
+        const stageFilteredItems = stage.items.filter((item) => {
+          const has = filteredItemIds.has(item.id);
+          console.log(
+            `   Item "${item.title}" (${item.id}) -> ${has ? '✅ MANTIDO' : '❌ REMOVIDO'}`,
+          );
+          return has;
+        });
+
+        console.log(
+          `   ✅ ${stageFilteredItems.length} itens mantidos após filtros`,
+        );
+
+        return {
+          ...stage,
+          items: stageFilteredItems,
+        };
+      });
+
+      // 🔥 IMPORTANTE: NÃO REMOVER STAGES VAZIAS QUANDO TEM FILTRO POR NOME
+      console.log(
+        '\n🔍 Mantendo stages mesmo sem itens (filtro por nome ativo)',
+      );
+      console.log(
+        `📤 Stages retornadas:`,
+        finalStages.map((s) => `"${s.name}"`).join(', '),
+      );
+      console.log(
+        '📊 Total de itens:',
+        finalStages.reduce((acc, s) => acc + s.items.length, 0),
+      );
+
+      return {
+        ...board,
+        stages: finalStages, // 🔥 Retorna TODAS as stages encontradas, mesmo sem itens
+      };
+    }
+
+    // ====================================================
+    // SE NÃO TIVER FILTRO POR NOME DA COLUNA - COMPORTAMENTO NORMAL
+    // ====================================================
     console.log('\n' + '-'.repeat(40));
-    console.log('🎯 FILTRO POR NOME DA COLUNA ATIVADO');
+    console.log('🌐 FILTRO GLOBAL (SEM COLUNA ESPECÍFICA)');
     console.log('-'.repeat(40));
-    console.log('🔍 stageName original:', filters.stageName);
-    console.log('🔍 stageName lowerCase:', stageNameLower);
-    
-    // 🔥 FILTRA APENAS A COLUNA QUE CORRESPONDE AO NOME BUSCADO
-    console.log('\n🔍 Filtrando stages que contém:', stageNameLower);
-    
-    const matchingStages = board.stages.filter(stage => {
-      const stageName = stage.name.toLowerCase();
-      const matches = stageName.includes(stageNameLower);
-      console.log(`   Stage "${stage.name}" (${stageName}) -> ${matches ? '✅ MATCH' : '❌'}`);
-      return matches;
-    });
 
-    console.log(`\n✅ Encontradas ${matchingStages.length} stage(s) com o nome "${filters.stageName}"`);
-    
-    if (matchingStages.length > 0) {
-      console.log('📋 Stages encontradas:', matchingStages.map(s => `"${s.name}"`).join(', '));
+    if (!this.hasFilters(filters)) {
+      console.log('✅ Sem filtros, retornando board completo');
+      console.log('📊 Total de stages:', board.stages.length);
+      console.log(
+        '📊 Total de itens:',
+        board.stages.reduce((acc, s) => acc + s.items.length, 0),
+      );
+      return board;
     }
 
-    // Se não encontrar nenhuma stage, retorna board com stages vazio
-    if (matchingStages.length === 0) {
-      console.warn(`⚠️ Nenhuma stage encontrada com o nome: "${filters.stageName}"`);
-      console.log('📤 Retornando board com stages vazio');
-      return {
-        ...board,
-        stages: []
-      };
-    }
-
-    // ====================================================
-    // PASSO 2: APLICAR OUTROS FILTROS NOS ITENS DA COLUNA ENCONTRADA
-    // ====================================================
-    const hasOtherFilters = this.hasFilters(filters);
-    console.log('\n🔍 Verificando outros filtros:', hasOtherFilters);
-    console.log('📊 Outros filtros presentes:', {
-      startDate: !!filters.startDate,
-      endDate: !!filters.endDate,
-      isOverdue: filters.isOverdue === 'true',
-      isUpcoming: filters.isUpcoming === 'true',
-      assignedToId: !!filters.assignedToId,
-      supplierId: !!filters.supplierId,
-      status: !!filters.status,
-      productRef: !!filters.productRef,
-      dateType: !!filters.dateType
-    });
-    
-    if (!hasOtherFilters) {
-      console.log('\n✅ Sem outros filtros, retornando APENAS as stages encontradas');
-      console.log('📤 Stages sendo retornadas:', matchingStages.map(s => `"${s.name}"`).join(', '));
-      console.log('📊 Total de itens:', matchingStages.reduce((acc, s) => acc + s.items.length, 0));
-      
-      return {
-        ...board,
-        stages: matchingStages // 🔥 Retorna as stages encontradas, mesmo sem itens
-      };
-    }
-
-    // Se tem outros filtros, busca itens filtrados
     console.log('\n🔍 Aplicando filtros adicionais nos itens...');
-    console.log('📡 Chamando getFilteredItems com filters:', JSON.stringify(filters, null, 2));
-    
+    console.log(
+      '📡 Chamando getFilteredItems com filters:',
+      JSON.stringify(filters, null, 2),
+    );
+
     const filteredItems = await this.getFilteredItems(filters);
     console.log(`✅ getFilteredItems retornou ${filteredItems.length} itens`);
-    
-    if (filteredItems.length > 0) {
-      console.log('📋 IDs dos itens filtrados:', filteredItems.map(i => i.id).join(', '));
-    } else {
-      console.log('⚠️ Nenhum item encontrado nos filtros adicionais');
-    }
-    
-    const filteredItemIds = new Set(filteredItems.map(item => item.id));
+
+    const filteredItemIds = new Set(filteredItems.map((item) => item.id));
     console.log(`📊 Set de IDs criado com ${filteredItemIds.size} itens`);
 
-    // Aplica filtros nos itens das stages encontradas
-    console.log('\n🔍 Aplicando filtros nos itens de cada stage:');
-    const finalStages = matchingStages.map((stage) => {
-      console.log(`\n📌 Processando stage: "${stage.name}"`);
-      console.log(`   Total de itens na stage: ${stage.items.length}`);
-      
+    console.log('\n🔍 Filtrando itens em cada stage:');
+    const filteredStages = board.stages.map((stage) => {
+      console.log(`\n📌 Stage "${stage.name}":`);
+      console.log(`   Total original: ${stage.items.length}`);
+
       const stageFilteredItems = stage.items.filter((item) => {
         const has = filteredItemIds.has(item.id);
-        console.log(`   Item "${item.title}" (${item.id}) -> ${has ? '✅ MANTIDO' : '❌ REMOVIDO'}`);
+        console.log(
+          `   Item "${item.title}" -> ${has ? '✅ MANTIDO' : '❌ REMOVIDO'}`,
+        );
         return has;
       });
 
-      console.log(`   ✅ ${stageFilteredItems.length} itens mantidos após filtros`);
+      console.log(`   ✅ ${stageFilteredItems.length} itens mantidos`);
 
       return {
         ...stage,
-        items: stageFilteredItems
+        items: stageFilteredItems,
       };
     });
 
-    // 🔥 IMPORTANTE: NÃO REMOVER STAGES VAZIAS QUANDO TEM FILTRO POR NOME
-    console.log('\n🔍 Mantendo stages mesmo sem itens (filtro por nome ativo)');
-    console.log(`📤 Stages retornadas:`, finalStages.map(s => `"${s.name}"`).join(', '));
-    console.log('📊 Total de itens:', finalStages.reduce((acc, s) => acc + s.items.length, 0));
+    // 🔥 Remove stages vazias APENAS no filtro global
+    console.log('\n🔍 Removendo stages sem itens...');
+    const stagesWithItems = filteredStages.filter((stage) => {
+      const hasItems = stage.items.length > 0;
+      console.log(
+        `   Stage "${stage.name}": ${stage.items.length} itens -> ${hasItems ? '✅ MANTIDA' : '❌ REMOVIDA'}`,
+      );
+      return hasItems;
+    });
+
+    console.log(
+      `\n✅ Board final com ${stagesWithItems.length} stage(s) contendo itens`,
+    );
+    console.log(
+      '📊 Total de itens:',
+      stagesWithItems.reduce((acc, s) => acc + s.items.length, 0),
+    );
+    console.log('='.repeat(80));
+    console.log('\n');
 
     return {
       ...board,
-      stages: finalStages // 🔥 Retorna TODAS as stages encontradas, mesmo sem itens
+      stages: stagesWithItems,
     };
   }
-
-  // ====================================================
-  // SE NÃO TIVER FILTRO POR NOME DA COLUNA - COMPORTAMENTO NORMAL
-  // ====================================================
-  console.log('\n' + '-'.repeat(40));
-  console.log('🌐 FILTRO GLOBAL (SEM COLUNA ESPECÍFICA)');
-  console.log('-'.repeat(40));
-  
-  if (!this.hasFilters(filters)) {
-    console.log('✅ Sem filtros, retornando board completo');
-    console.log('📊 Total de stages:', board.stages.length);
-    console.log('📊 Total de itens:', board.stages.reduce((acc, s) => acc + s.items.length, 0));
-    return board;
-  }
-
-  console.log('\n🔍 Aplicando filtros adicionais nos itens...');
-  console.log('📡 Chamando getFilteredItems com filters:', JSON.stringify(filters, null, 2));
-  
-  const filteredItems = await this.getFilteredItems(filters);
-  console.log(`✅ getFilteredItems retornou ${filteredItems.length} itens`);
-  
-  const filteredItemIds = new Set(filteredItems.map(item => item.id));
-  console.log(`📊 Set de IDs criado com ${filteredItemIds.size} itens`);
-
-  console.log('\n🔍 Filtrando itens em cada stage:');
-  const filteredStages = board.stages.map((stage) => {
-    console.log(`\n📌 Stage "${stage.name}":`);
-    console.log(`   Total original: ${stage.items.length}`);
-    
-    const stageFilteredItems = stage.items.filter((item) => {
-      const has = filteredItemIds.has(item.id);
-      console.log(`   Item "${item.title}" -> ${has ? '✅ MANTIDO' : '❌ REMOVIDO'}`);
-      return has;
-    });
-
-    console.log(`   ✅ ${stageFilteredItems.length} itens mantidos`);
-
-    return {
-      ...stage,
-      items: stageFilteredItems
-    };
-  });
-
-  // 🔥 Remove stages vazias APENAS no filtro global
-  console.log('\n🔍 Removendo stages sem itens...');
-  const stagesWithItems = filteredStages.filter(stage => {
-    const hasItems = stage.items.length > 0;
-    console.log(`   Stage "${stage.name}": ${stage.items.length} itens -> ${hasItems ? '✅ MANTIDA' : '❌ REMOVIDA'}`);
-    return hasItems;
-  });
-  
-  console.log(`\n✅ Board final com ${stagesWithItems.length} stage(s) contendo itens`);
-  console.log('📊 Total de itens:', stagesWithItems.reduce((acc, s) => acc + s.items.length, 0));
-  console.log('='.repeat(80));
-  console.log('\n');
-
-  return {
-    ...board,
-    stages: stagesWithItems
-  };
-}
 
   private async findResponsibleByRole(
     companyId: string,
