@@ -470,14 +470,13 @@ export class FlowController {
       throw error;
     }
   }
-  @Post(':flowId/items')
-  async createItem(
-    @Req() req: any,
-    @Param('flowId', ParseUUIDPipe) flowId: string,
-    @Body() body: CreateFlowItemDto,
-  ) {
-    // 🔥 REMOVIDO: req.user.companyId
-    return this.flowService.createFlowItem(flowId, req.user.id, body);
+  @Post('items') // 🔥 MUDOU DE ':flowId/items' para 'items'
+  async createItem(@Req() req: any, @Body() body: CreateFlowItemDto) {
+    // 🔥 VALIDAÇÃO EXTRA
+    if (!body.flowId) {
+      throw new BadRequestException('flowId é obrigatório');
+    }
+    return this.flowService.createFlowItem(body.flowId, req.user.id, body);
   }
 
   @Post(':flowId/items/upload')

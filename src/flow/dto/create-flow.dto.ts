@@ -135,8 +135,7 @@ export class CreateFlowItemDto {
 
   @ApiProperty({ description: 'ID do fluxo relacionado', required: false })
   @IsUUID() // Se for um UUID, use IsUUID, caso contrário use IsString
-  @IsOptional()
-  flowId?: string;
+  flowId: string;
 }
 
 // Adicione isso no mesmo arquivo, após o CreateFlowItemDto
