@@ -97,24 +97,24 @@ export class FlowService {
   // ===========================================================================
   // 🔥 MÉTODO PARA VERIFICAR SE USUÁRIO É ADMIN
   // ===========================================================================
-  private async isUserAdmin(
-    userId: string,
-    companyId: string,
-  ): Promise<boolean> {
-    const user = await this.prisma.user.findFirst({
-      where: {
-        id: userId,
-        companyId,
-        status: 'ACTIVE',
-      },
-      select: { role: true },
-    });
+  // private async isUserAdmin(
+  //   userId: string,
+  //   companyId: string,
+  // ): Promise<boolean> {
+  //   const user = await this.prisma.user.findFirst({
+  //     where: {
+  //       id: userId,
+  //       companyId,
+  //       status: 'ACTIVE',
+  //     },
+  //     select: { role: true },
+  //   });
 
-    if (!user) return false;
+  //   if (!user) return false;
 
-    const adminRoles = ['MASTER', 'ADMIN', 'MANAGER'];
-    return adminRoles.includes(user.role);
-  }
+  //   const adminRoles = ['MASTER', 'ADMIN', 'MANAGER'];
+  //   return adminRoles.includes(user.role);
+  // }
 
   // ===========================================================================
   // 🔥 MÉTODO PARA VALIDAR QUANTIDADE ANTES DE MOVER - BLOQUEIA TODOS COM QTD ZERO
@@ -1995,49 +1995,227 @@ export class FlowService {
     }
   }
 
-  async getFilteredKanbanBoard(flowId: string, filters: FlowFilterDto) {
-    const companyId = this.getCompanyIdFromContext();
 
-    const board = await this.prisma.productFlow.findFirst({
-      where: { id: flowId, companyId },
-      include: {
-        stages: {
-          orderBy: { order: 'asc' },
-          include: {
-            items: {
-              include: {
-                images: { take: 1, select: { url: true, id: true } },
-                assignedTo: { select: { name: true, id: true } },
-                supplier: { select: { name: true, id: true } },
-              },
+  // ===========================================================================
+// 🔥 MÉTODO CORRIGIDO - Mantém stages vazias quando filtradas por nome
+// ===========================================================================
+async getFilteredKanbanBoard(flowId: string, filters: FlowFilterDto) {
+  const companyId = this.getCompanyIdFromContext();
+  
+  console.log('\n');
+  console.log('='.repeat(80));
+  console.log('🔍 [getFilteredKanbanBoard] INICIANDO FILTRAGEM');
+  console.log('='.repeat(80));
+  console.log('📌 flowId:', flowId);
+  console.log('📌 companyId:', companyId);
+  console.log('📌 filters recebidos:', JSON.stringify(filters, null, 2));
+  console.log('📌 stageName:', filters.stageName);
+  console.log('📌 stageName.trim():', filters.stageName?.trim());
+  console.log('📌 stageName existe?', !!filters.stageName);
+  console.log('📌 stageName length:', filters.stageName?.length);
+
+  // Busca o fluxo com as stages
+  console.log('\n🔍 Buscando fluxo no banco...');
+  const board = await this.prisma.productFlow.findFirst({
+    where: { id: flowId, companyId },
+    include: {
+      stages: {
+        orderBy: { order: 'asc' },
+        include: {
+          items: {
+            include: {
+              images: { take: 1, select: { url: true, id: true } },
+              assignedTo: { select: { name: true, id: true } },
+              supplier: { select: { name: true, id: true } },
             },
           },
         },
       },
+    },
+  });
+
+  if (!board) {
+    console.error('❌ Fluxo não encontrado!');
+    throw new BadRequestException('Fluxo não encontrado');
+  }
+
+  console.log('✅ Fluxo encontrado:', board.name);
+  console.log('📊 Total de stages no fluxo:', board.stages.length);
+  console.log('📋 Nomes das stages:', board.stages.map(s => `"${s.name}"`).join(', '));
+
+  // ====================================================
+  // PASSO 1: SE TIVER FILTRO POR NOME DA COLUNA
+  // ====================================================
+  if (filters.stageName && filters.stageName.trim() !== '') {
+    const stageNameLower = filters.stageName.trim().toLowerCase();
+    
+    console.log('\n' + '-'.repeat(40));
+    console.log('🎯 FILTRO POR NOME DA COLUNA ATIVADO');
+    console.log('-'.repeat(40));
+    console.log('🔍 stageName original:', filters.stageName);
+    console.log('🔍 stageName lowerCase:', stageNameLower);
+    
+    // 🔥 FILTRA APENAS A COLUNA QUE CORRESPONDE AO NOME BUSCADO
+    console.log('\n🔍 Filtrando stages que contém:', stageNameLower);
+    
+    const matchingStages = board.stages.filter(stage => {
+      const stageName = stage.name.toLowerCase();
+      const matches = stageName.includes(stageNameLower);
+      console.log(`   Stage "${stage.name}" (${stageName}) -> ${matches ? '✅ MATCH' : '❌'}`);
+      return matches;
     });
 
-    if (!board) {
-      throw new BadRequestException('Fluxo não encontrado');
+    console.log(`\n✅ Encontradas ${matchingStages.length} stage(s) com o nome "${filters.stageName}"`);
+    
+    if (matchingStages.length > 0) {
+      console.log('📋 Stages encontradas:', matchingStages.map(s => `"${s.name}"`).join(', '));
     }
 
-    if (!this.hasFilters(filters)) {
-      return board;
+    // Se não encontrar nenhuma stage, retorna board com stages vazio
+    if (matchingStages.length === 0) {
+      console.warn(`⚠️ Nenhuma stage encontrada com o nome: "${filters.stageName}"`);
+      console.log('📤 Retornando board com stages vazio');
+      return {
+        ...board,
+        stages: []
+      };
     }
 
+    // ====================================================
+    // PASSO 2: APLICAR OUTROS FILTROS NOS ITENS DA COLUNA ENCONTRADA
+    // ====================================================
+    const hasOtherFilters = this.hasFilters(filters);
+    console.log('\n🔍 Verificando outros filtros:', hasOtherFilters);
+    console.log('📊 Outros filtros presentes:', {
+      startDate: !!filters.startDate,
+      endDate: !!filters.endDate,
+      isOverdue: filters.isOverdue === 'true',
+      isUpcoming: filters.isUpcoming === 'true',
+      assignedToId: !!filters.assignedToId,
+      supplierId: !!filters.supplierId,
+      status: !!filters.status,
+      productRef: !!filters.productRef,
+      dateType: !!filters.dateType
+    });
+    
+    if (!hasOtherFilters) {
+      console.log('\n✅ Sem outros filtros, retornando APENAS as stages encontradas');
+      console.log('📤 Stages sendo retornadas:', matchingStages.map(s => `"${s.name}"`).join(', '));
+      console.log('📊 Total de itens:', matchingStages.reduce((acc, s) => acc + s.items.length, 0));
+      
+      return {
+        ...board,
+        stages: matchingStages // 🔥 Retorna as stages encontradas, mesmo sem itens
+      };
+    }
+
+    // Se tem outros filtros, busca itens filtrados
+    console.log('\n🔍 Aplicando filtros adicionais nos itens...');
+    console.log('📡 Chamando getFilteredItems com filters:', JSON.stringify(filters, null, 2));
+    
     const filteredItems = await this.getFilteredItems(filters);
+    console.log(`✅ getFilteredItems retornou ${filteredItems.length} itens`);
+    
+    if (filteredItems.length > 0) {
+      console.log('📋 IDs dos itens filtrados:', filteredItems.map(i => i.id).join(', '));
+    } else {
+      console.log('⚠️ Nenhum item encontrado nos filtros adicionais');
+    }
+    
+    const filteredItemIds = new Set(filteredItems.map(item => item.id));
+    console.log(`📊 Set de IDs criado com ${filteredItemIds.size} itens`);
 
-    const filteredStages = board.stages.map((stage) => ({
-      ...stage,
-      items: stage.items.filter((item) =>
-        filteredItems.some((filteredItem) => filteredItem.id === item.id),
-      ),
-    }));
+    // Aplica filtros nos itens das stages encontradas
+    console.log('\n🔍 Aplicando filtros nos itens de cada stage:');
+    const finalStages = matchingStages.map((stage) => {
+      console.log(`\n📌 Processando stage: "${stage.name}"`);
+      console.log(`   Total de itens na stage: ${stage.items.length}`);
+      
+      const stageFilteredItems = stage.items.filter((item) => {
+        const has = filteredItemIds.has(item.id);
+        console.log(`   Item "${item.title}" (${item.id}) -> ${has ? '✅ MANTIDO' : '❌ REMOVIDO'}`);
+        return has;
+      });
+
+      console.log(`   ✅ ${stageFilteredItems.length} itens mantidos após filtros`);
+
+      return {
+        ...stage,
+        items: stageFilteredItems
+      };
+    });
+
+    // 🔥 IMPORTANTE: NÃO REMOVER STAGES VAZIAS QUANDO TEM FILTRO POR NOME
+    console.log('\n🔍 Mantendo stages mesmo sem itens (filtro por nome ativo)');
+    console.log(`📤 Stages retornadas:`, finalStages.map(s => `"${s.name}"`).join(', '));
+    console.log('📊 Total de itens:', finalStages.reduce((acc, s) => acc + s.items.length, 0));
 
     return {
       ...board,
-      stages: filteredStages,
+      stages: finalStages // 🔥 Retorna TODAS as stages encontradas, mesmo sem itens
     };
   }
+
+  // ====================================================
+  // SE NÃO TIVER FILTRO POR NOME DA COLUNA - COMPORTAMENTO NORMAL
+  // ====================================================
+  console.log('\n' + '-'.repeat(40));
+  console.log('🌐 FILTRO GLOBAL (SEM COLUNA ESPECÍFICA)');
+  console.log('-'.repeat(40));
+  
+  if (!this.hasFilters(filters)) {
+    console.log('✅ Sem filtros, retornando board completo');
+    console.log('📊 Total de stages:', board.stages.length);
+    console.log('📊 Total de itens:', board.stages.reduce((acc, s) => acc + s.items.length, 0));
+    return board;
+  }
+
+  console.log('\n🔍 Aplicando filtros adicionais nos itens...');
+  console.log('📡 Chamando getFilteredItems com filters:', JSON.stringify(filters, null, 2));
+  
+  const filteredItems = await this.getFilteredItems(filters);
+  console.log(`✅ getFilteredItems retornou ${filteredItems.length} itens`);
+  
+  const filteredItemIds = new Set(filteredItems.map(item => item.id));
+  console.log(`📊 Set de IDs criado com ${filteredItemIds.size} itens`);
+
+  console.log('\n🔍 Filtrando itens em cada stage:');
+  const filteredStages = board.stages.map((stage) => {
+    console.log(`\n📌 Stage "${stage.name}":`);
+    console.log(`   Total original: ${stage.items.length}`);
+    
+    const stageFilteredItems = stage.items.filter((item) => {
+      const has = filteredItemIds.has(item.id);
+      console.log(`   Item "${item.title}" -> ${has ? '✅ MANTIDO' : '❌ REMOVIDO'}`);
+      return has;
+    });
+
+    console.log(`   ✅ ${stageFilteredItems.length} itens mantidos`);
+
+    return {
+      ...stage,
+      items: stageFilteredItems
+    };
+  });
+
+  // 🔥 Remove stages vazias APENAS no filtro global
+  console.log('\n🔍 Removendo stages sem itens...');
+  const stagesWithItems = filteredStages.filter(stage => {
+    const hasItems = stage.items.length > 0;
+    console.log(`   Stage "${stage.name}": ${stage.items.length} itens -> ${hasItems ? '✅ MANTIDA' : '❌ REMOVIDA'}`);
+    return hasItems;
+  });
+  
+  console.log(`\n✅ Board final com ${stagesWithItems.length} stage(s) contendo itens`);
+  console.log('📊 Total de itens:', stagesWithItems.reduce((acc, s) => acc + s.items.length, 0));
+  console.log('='.repeat(80));
+  console.log('\n');
+
+  return {
+    ...board,
+    stages: stagesWithItems
+  };
+}
 
   private async findResponsibleByRole(
     companyId: string,
@@ -2070,6 +2248,9 @@ export class FlowService {
     return users.length > 0 ? users[0].id : null;
   }
 
+  // ===========================================================================
+  // 🔥 MÉTODO AUXILIAR ATUALIZADO - VERIFICA SE EXISTEM FILTROS
+  // ===========================================================================
   private hasFilters(filters: FlowFilterDto): boolean {
     return !!(
       filters.startDate ||
@@ -2078,8 +2259,11 @@ export class FlowService {
       filters.isUpcoming === 'true' ||
       filters.assignedToId ||
       filters.supplierId ||
-      filters.status
+      filters.status ||
+      filters.productRef ||
+      filters.dateType // Inclui dateType na verificação
     );
+    // NOTA: stageName NÃO está incluído aqui porque já foi tratado separadamente
   }
 
   private validateStageAccess(
@@ -2148,5 +2332,108 @@ export class FlowService {
       await this.cacheManager.del(`flow_board_${flowId}`);
       await this.cacheManager.del(`flow_stats_${flowId}`);
     }
+  }
+
+  // ===========================================================================
+  // 🔥 NOVO MÉTODO: FILTRAR KANBAN POR NOME DA COLUNA
+  // ===========================================================================
+  async getKanbanBoardByStageName(flowId: string, stageName: string) {
+    const companyId = this.getCompanyIdFromContext();
+
+    this.logger.log(
+      `🔍 Filtrando kanban por stage name: "${stageName}" para flow ${flowId}`,
+    );
+
+    // Busca o fluxo com as stages
+    const flow = await this.prisma.productFlow.findFirst({
+      where: {
+        id: flowId,
+        companyId,
+      },
+      include: {
+        stages: {
+          orderBy: { order: 'asc' },
+          include: {
+            items: {
+              orderBy: { orderInStage: 'asc' },
+              include: {
+                images: { take: 1, select: { url: true, id: true } },
+                assignedTo: { select: { name: true, id: true } },
+                supplier: { select: { name: true } },
+                _count: {
+                  select: { images: true, audios: true, videos: true },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!flow) {
+      throw new NotFoundException('Fluxo não encontrado');
+    }
+
+    // Se não tiver stageName, retorna o board completo
+    if (!stageName || stageName.trim() === '') {
+      return flow;
+    }
+
+    // Filtra para trazer APENAS a stage com o nome especificado
+    const stageNameLower = stageName.trim().toLowerCase();
+
+    const filteredStages = flow.stages
+      .filter((stage) => stage.name.toLowerCase().includes(stageNameLower))
+      .map((stage) => ({
+        ...stage,
+        items: stage.items, // Mantém todos os itens da stage filtrada
+      }));
+
+    // Se não encontrar nenhuma stage com esse nome
+    if (filteredStages.length === 0) {
+      this.logger.warn(
+        `⚠️ Nenhuma stage encontrada com o nome: "${stageName}"`,
+      );
+      // Retorna um board vazio (sem stages)
+      return {
+        ...flow,
+        stages: [],
+      };
+    }
+
+    this.logger.log(
+      `✅ Encontradas ${filteredStages.length} stage(s) com o nome "${stageName}"`,
+    );
+
+    return {
+      ...flow,
+      stages: filteredStages,
+    };
+  }
+
+  // ===========================================================================
+  // 🔥 MÉTODO PARA BUSCAR TODAS AS COLUNAS (para dropdown de filtro)
+  // ===========================================================================
+  async getFlowStages(flowId: string) {
+    const companyId = this.getCompanyIdFromContext();
+
+    const stages = await this.prisma.flowStage.findMany({
+      where: {
+        flowId,
+        companyId,
+      },
+      orderBy: { order: 'asc' },
+      select: {
+        id: true,
+        name: true,
+        color: true,
+        order: true,
+        _count: {
+          select: { items: true },
+        },
+      },
+    });
+
+    return stages;
   }
 }

@@ -27,6 +27,7 @@ import {
   ApiConsumes,
   ApiOperation,
   ApiQuery,
+  ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
 
@@ -44,6 +45,7 @@ import {
   CreateFlowDto,
   CreateFlowItemDto,
   CreateStageDto,
+  DateFilterType,
   FlowFilterDto,
   UpdateFlowItemDto,
 } from './dto/create-flow.dto';
@@ -266,17 +268,208 @@ export class FlowController {
   }
 
   @Get(':flowId/filtered-board')
-  @ApiOperation({ summary: 'Retorna o Kanban board com filtros aplicados' })
+  @ApiOperation({
+    summary: 'Retorna o Kanban board com filtros aplicados',
+    description:
+      'Filtra o kanban por nome da coluna, datas, responsável, fornecedor, status e referência do produto',
+  })
+  @ApiQuery({
+    name: 'stageName',
+    required: false,
+    type: String,
+    description:
+      'Filtrar por nome da coluna (ex: "Corte", "Costura", "Pintura")',
+    example: 'Corte',
+  })
+  @ApiQuery({
+    name: 'startDate',
+    required: false,
+    type: String,
+    description: 'Data inicial para filtro (formato: YYYY-MM-DD)',
+    example: '2024-01-01',
+  })
+  @ApiQuery({
+    name: 'endDate',
+    required: false,
+    type: String,
+    description: 'Data final para filtro (formato: YYYY-MM-DD)',
+    example: '2024-12-31',
+  })
+  @ApiQuery({
+    name: 'dateType',
+    required: false,
+    enum: DateFilterType,
+    description:
+      'Tipo de data para filtro: productionStartedAt (início) ou dueDate (prazo)',
+    example: DateFilterType.DUE_DATE,
+  })
+  @ApiQuery({
+    name: 'isOverdue',
+    required: false,
+    type: Boolean,
+    description: 'Filtrar itens atrasados (true/false)',
+    example: true,
+  })
+  @ApiQuery({
+    name: 'isUpcoming',
+    required: false,
+    type: Boolean,
+    description: 'Filtrar itens com produção programada para hoje (true/false)',
+    example: false,
+  })
+  @ApiQuery({
+    name: 'assignedToId',
+    required: false,
+    type: String,
+    description: 'Filtrar por ID do responsável (funcionário)',
+    example: '123e4567-e89b-12d3-a456-426614174000',
+  })
+  @ApiQuery({
+    name: 'supplierId',
+    required: false,
+    type: String,
+    description:
+      'Filtrar por ID do fornecedor/oficina (use "internal" para itens internos)',
+    example: '123e4567-e89b-12d3-a456-426614174001',
+  })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    type: String,
+    description: 'Filtrar por status do item',
+    enum: ['PENDENTE', 'EM_ANDAMENTO', 'CONCLUIDO', 'CANCELADO'],
+    example: 'PENDENTE',
+  })
+  @ApiQuery({
+    name: 'productRef',
+    required: false,
+    type: String,
+    description: 'Filtrar por referência do produto (busca parcial)',
+    example: 'MESA-123',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Board filtrado retornado com sucesso',
+    schema: {
+      example: {
+        id: 'flow-id',
+        name: 'Produção de Móveis',
+        stages: [
+          {
+            id: 'stage-id',
+            name: 'Corte',
+            color: '#FF0000',
+            items: [
+              {
+                id: 'item-id',
+                title: 'Mesa de Jantar',
+                status: 'PENDENTE',
+                quantity: 10,
+                assignedTo: { id: 'user-id', name: 'João Silva' },
+              },
+            ],
+          },
+        ],
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Fluxo não encontrado ou parâmetros inválidos',
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Não autorizado',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Acesso negado',
+  })
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
   async getFilteredBoard(
     @Req() req: any,
-    @Param('flowId', ParseUUIDPipe) flowId: string,
+    @Param(
+      'flowId',
+      new ParseUUIDPipe({
+        version: '4',
+        errorHttpStatusCode: 400,
+        exceptionFactory: (error) => {
+          return new BadRequestException(
+            'ID do fluxo inválido. Formato UUID esperado.',
+          );
+        },
+      }),
+    )
+    flowId: string,
     @Query() query: FlowFilterDto,
   ) {
-    this.logger.log(`Buscando board filtrado para flow ${flowId}`);
-    // 🔥 REMOVIDO: req.user.companyId
-    return this.flowService.getFilteredKanbanBoard(flowId, query);
-  }
+    console.log('🔍 QUERY RECEBIDA:', JSON.stringify(query));
+    console.log('🔍 STAGE NAME:', query.stageName);
+    console.log('🔍 RAW QUERY:', req.query);
 
+    this.logger.log(`🎯 Buscando board filtrado para flow ${flowId}`);
+    this.logger.debug(`📊 Filtros aplicados: ${JSON.stringify(query)}`);
+
+    // Validação adicional para datas se vierem preenchidas
+    if (query.startDate) {
+      const isValidDate = !isNaN(Date.parse(query.startDate));
+      if (!isValidDate) {
+        throw new BadRequestException(
+          'Data inicial inválida. Use o formato YYYY-MM-DD',
+        );
+      }
+    }
+
+    if (query.endDate) {
+      const isValidDate = !isNaN(Date.parse(query.endDate));
+      if (!isValidDate) {
+        throw new BadRequestException(
+          'Data final inválida. Use o formato YYYY-MM-DD',
+        );
+      }
+    }
+
+    // Validação de intervalo de datas
+    if (query.startDate && query.endDate) {
+      const start = new Date(query.startDate);
+      const end = new Date(query.endDate);
+      if (start > end) {
+        throw new BadRequestException(
+          'Data inicial não pode ser maior que a data final',
+        );
+      }
+    }
+
+    // Log específico quando filtrar por stageName
+    if (query.stageName) {
+      this.logger.log(
+        `🔍 Aplicando filtro por nome da coluna: "${query.stageName}"`,
+      );
+    }
+
+    try {
+      const result = await this.flowService.getFilteredKanbanBoard(
+        flowId,
+        query,
+      );
+
+      this.logger.log(
+        `✅ Board filtrado retornado com sucesso para flow ${flowId}`,
+      );
+      if (query.stageName) {
+        const stagesCount = result.stages?.length || 0;
+        this.logger.log(
+          `📌 Encontradas ${stagesCount} coluna(s) com o nome "${query.stageName}"`,
+        );
+      }
+
+      return result;
+    } catch (error) {
+      this.logger.error(`❌ Erro ao filtrar board: ${error.message}`);
+      throw error;
+    }
+  }
   @Post(':flowId/items')
   async createItem(
     @Req() req: any,
@@ -392,5 +585,42 @@ export class FlowController {
       mediaId,
       req.user.id,
     );
+  }
+
+  @Get(':flowId/stages')
+  @ApiOperation({ summary: 'Lista todas as colunas/stages de um fluxo' })
+  async getFlowStages(
+    @Req() req: any,
+    @Param('flowId', ParseUUIDPipe) flowId: string,
+  ) {
+    this.logger.log(`Buscando stages do flow ${flowId}`);
+    return this.flowService.getFlowStages(flowId);
+  }
+
+  @Get(':flowId/board/by-stage')
+  @ApiOperation({
+    summary: 'Retorna o Kanban board filtrado por nome da coluna',
+  })
+  @ApiQuery({
+    name: 'stageName',
+    required: true,
+    description: 'Nome da coluna para filtrar (ex: "Corte", "Costura")',
+  })
+  async getKanbanBoardByStageName(
+    @Req() req: any,
+    @Param('flowId', ParseUUIDPipe) flowId: string,
+    @Query('stageName') stageName: string,
+  ) {
+    this.logger.log(
+      `Buscando board filtrado por stage: "${stageName}" para flow ${flowId}`,
+    );
+
+    if (!stageName || stageName.trim() === '') {
+      throw new BadRequestException(
+        'O nome da coluna (stageName) é obrigatório',
+      );
+    }
+
+    return this.flowService.getKanbanBoardByStageName(flowId, stageName);
   }
 }
