@@ -1,4 +1,5 @@
 /* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/require-await */
 /* eslint-disable prefer-const */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
@@ -399,6 +400,12 @@ export class FlowService {
     if (!template) throw new NotFoundException('Template não encontrado');
 
     const structure = template.structure as any[];
+
+    // 🔥 VALIDAR SE O TEMPLATE TEM MODELAGEM E CORTE
+    await this.validateModelagemAndCorte(
+      structure.map((s) => ({ name: s.name })),
+    );
+
     const lastStage = await this.prisma.flowStage.findFirst({
       where: { flowId },
       orderBy: { order: 'desc' },
@@ -441,15 +448,94 @@ export class FlowService {
     return result;
   }
 
+  // No arquivo flow.service.ts, dentro da classe FlowService
+
+  /**
+   * 🔥 VALIDA SE O FLUXO POSSUI MODELAGEM E CORTE
+   * @param stages Lista de etapas do fluxo
+   * @throws BadRequestException se não encontrar modelagem OU corte
+   */
+  private async validateModelagemAndCorte(stages: any[]): Promise<void> {
+    this.logger.log('🔍 Validando se fluxo possui Modelagem e Corte...');
+
+    // Palavras-chave para identificar modelagem
+    const MODELAGEM_KEYWORDS = [
+      'modelagem',
+      'modelista',
+      'modelo',
+      'pilotagem',
+    ];
+
+    // Palavras-chave para identificar corte (já existe a constante CORTE_KEYWORDS)
+    // CORTE_KEYWORDS = ['corte', 'cortador', 'cortar', 'cut'];
+
+    let hasModelagem = false;
+    let hasCorte = false;
+
+    // Verifica cada stage
+    for (const stage of stages) {
+      const stageName = stage.name?.toLowerCase().trim() || '';
+
+      // Verifica se é MODELAGEM
+      if (!hasModelagem) {
+        hasModelagem = MODELAGEM_KEYWORDS.some((keyword) =>
+          stageName.includes(keyword),
+        );
+        if (hasModelagem) {
+          this.logger.debug(`✅ Modelagem encontrada: "${stage.name}"`);
+        }
+      }
+
+      // Verifica se é CORTE (usa o método existente)
+      if (!hasCorte) {
+        hasCorte = this.isCorteStage(stage.name);
+        if (hasCorte) {
+          this.logger.debug(`✅ Corte encontrado: "${stage.name}"`);
+        }
+      }
+
+      // Se já encontrou ambos, pode parar
+      if (hasModelagem && hasCorte) {
+        break;
+      }
+    }
+
+    // 🔥 LOG DETALHADO
+    this.logger.log('📊 Resultado da validação:', {
+      hasModelagem,
+      hasCorte,
+      totalStages: stages.length,
+      stageNames: stages.map((s) => s.name),
+    });
+
+    // 🔥 BLOQUEIA SE FALTAR ALGUMA
+    if (!hasModelagem || !hasCorte) {
+      const missing = [] as any;
+      if (!hasModelagem) missing.push('Modelagem');
+      if (!hasCorte) missing.push('Corte');
+
+      const errorMessage = `❌ Não é possível salvar o template. Etapas obrigatórias não encontradas: ${missing.join(' e ')}.`;
+
+      this.logger.error(errorMessage);
+      throw new BadRequestException(errorMessage);
+    }
+
+    this.logger.log('✅ Validação passou: Fluxo possui Modelagem e Corte');
+  }
+
   async saveTemplate(flowId: string, name: string, userId: string) {
     const companyId = this.getCompanyIdFromContext();
 
+    // 🔥 PASSO 1: Buscar as stages do fluxo
     const stages = await this.prisma.flowStage.findMany({
       where: { flowId, flow: { companyId } },
       orderBy: { order: 'asc' },
     });
 
     if (stages.length === 0) throw new BadRequestException('Fluxo sem etapas.');
+
+    // 🔥 PASSO 2: VERIFICAR SE EXISTEM MODELAGEM E CORTE
+    await this.validateModelagemAndCorte(stages);
 
     const structure = stages.map((s) => ({
       name: s.name,
