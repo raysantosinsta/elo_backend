@@ -934,337 +934,239 @@ export class FlowService {
   }
 
   async createFlowItem(flowId: string, userId: string, dto: CreateFlowItemDto) {
-    const companyId = this.getCompanyIdFromContext();
+  const companyId = this.getCompanyIdFromContext();
 
-    // ===========================================================================
-    // 🔥 LOG 1: DADOS RECEBIDOS
-    // ===========================================================================
-    console.log('\n');
-    console.log('='.repeat(80));
-    console.log('🎯 [createFlowItem] INICIANDO CRIAÇÃO DE ITEM');
-    console.log('='.repeat(80));
-    console.log('📦 Dados recebidos:', {
-      flowId,
-      userId,
+  console.log('\n' + '='.repeat(80));
+  console.log('🎯 [createFlowItem] INICIANDO CRIAÇÃO DE ITEM');
+  console.log('='.repeat(80));
+  console.log('📦 Dados recebidos:', {
+    flowId,
+    userId,
+    companyId,
+    dto: {
+      title: dto.title,
+      description: dto.description,
+      productRef: dto.productRef,
+      quantity: dto.quantity,
+      status: dto.status,
+      stageId: dto.stageId,
+      assignedToId: dto.assignedToId,
+      supplierId: dto.supplierId,
+      dueDate: dto.dueDate,
+      productionStartedAt: dto.productionStartedAt,
+      deliveryAt: dto.deliveryAt,
+      orderNumber: dto.orderNumber,
+      priority: dto.priority,
+    },
+  });
+
+  const user = await this.prisma.user.findFirst({
+    where: { id: userId, companyId },
+  });
+
+  if (!user) {
+    console.error('❌ Usuário não encontrado:', { userId, companyId });
+    throw new ForbiddenException('Usuário não encontrado ou não pertence à empresa');
+  }
+
+  console.log('✅ Usuário encontrado:', {
+    id: user.id,
+    name: user.name,
+    role: user.role,
+    professionalRole: user.professionalRole,
+  });
+
+  return this.prisma.$transaction(async (tx) => {
+    // ──────────────────────────────────────────────────────────────
+    // VALIDAÇÃO DE DUPLICIDADE - VERSÃO CORRIGIDA
+    // ──────────────────────────────────────────────────────────────
+    console.log('\n🔍 Verificando duplicidade para título e referência:', {
+      title: dto.title,
+      productRef: dto.productRef,
       companyId,
-      dto: {
-        title: dto.title,
-        description: dto.description,
-        productRef: dto.productRef,
-        quantity: dto.quantity,
-        status: dto.status,
-        stageId: dto.stageId,
-        assignedToId: dto.assignedToId,
-        supplierId: dto.supplierId,
-        dueDate: dto.dueDate,
-        productionStartedAt: dto.productionStartedAt,
-        deliveryAt: dto.deliveryAt,
-        orderNumber: dto.orderNumber,
-        priority: dto.priority,
-      },
     });
 
-    // ===========================================================================
-    // 🔥 LOG 2: BUSCANDO USUÁRIO
-    // ===========================================================================
-    console.log('\n👤 Buscando usuário:', { userId, companyId });
+    // 🔥 PASSO 1: Criar array para as condições
+    const orConditions: Array<{ title?: string; productRef?: string }> = [];
 
-    const user = await this.prisma.user.findFirst({
-      where: { id: userId, companyId },
-    });
-
-    if (!user) {
-      console.error('❌ Usuário não encontrado:', { userId, companyId });
-      throw new ForbiddenException(
-        'Usuário não encontrado ou não pertence à empresa',
-      );
+    // 🔥 PASSO 2: Só adicionar título se tiver valor
+    if (dto.title && typeof dto.title === 'string' && (dto.title as string).trim() !== '') {
+      orConditions.push({ title: dto.title.trim() });
     }
 
-    console.log('✅ Usuário encontrado:', {
-      id: user.id,
-      name: user.name,
-      role: user.role,
-      professionalRole: user.professionalRole,
-    });
+    // 🔥 PASSO 3: Só adicionar referência se tiver valor
+    if (dto.productRef && typeof dto.productRef === 'string' && dto.productRef.trim() !== '') {
+      orConditions.push({ productRef: dto.productRef.trim() });
+    }
 
-    return this.prisma.$transaction(async (tx) => {
-      // ===========================================================================
-      // 🔥 LOG 3: VALIDAÇÃO DE DUPLICIDADE
-      // ===========================================================================
-      console.log('\n🔍 Verificando duplicidade para título e referência:', {
-        title: dto.title,
-        productRef: dto.productRef,
-        companyId,
-      });
+    // 🔥 PASSO 4: Declarar existingItem SEM tipagem explícita (deixa o TS inferir)
+    let existingItem: any = null;
 
-      const existingItem = await tx.flowItem.findFirst({
+    // 🔥 PASSO 5: Só buscar se houver condições
+    if (orConditions.length > 0) {
+      console.log('🔎 Condições de busca:', JSON.stringify(orConditions, null, 2));
+
+      existingItem = await tx.flowItem.findFirst({
         where: {
           companyId,
-          OR: [{ title: dto.title }, { productRef: dto.productRef }],
+          OR: orConditions,
         },
       });
 
+      // 🔥 PASSO 6: Verificar duplicidade (TypeScript já sabe que existingItem pode ser objeto)
       if (existingItem) {
-        if (existingItem.title === dto.title) {
-          console.error('❌ Já existe item com o mesmo título:', {
-            tituloExistente: existingItem.title,
-            tituloNovo: dto.title,
+        console.log('⚠️ Item existente encontrado:', {
+          id: existingItem.id,
+          title: existingItem.title,
+          productRef: existingItem.productRef,
+        });
+
+        // Título duplicado
+        if (dto.title && existingItem.title === dto.title.trim()) {
+          console.error('❌ Título duplicado:', {
+            existente: existingItem.title,
+            tentado: dto.title,
           });
           throw new BadRequestException(
             `Já existe um item cadastrado com o título "${dto.title}". Por favor, utilize um título diferente.`,
           );
-        } else if (existingItem.productRef === dto.productRef) {
-          console.error('❌ Já existe item com a mesma referência:', {
-            refExistente: existingItem.productRef,
-            refNova: dto.productRef,
+        }
+
+        // Referência duplicada
+        if (dto.productRef && existingItem.productRef === dto.productRef.trim()) {
+          console.error('❌ Referência duplicada:', {
+            existente: existingItem.productRef,
+            tentada: dto.productRef,
           });
           throw new BadRequestException(
             `Já existe um item cadastrado com a referência "${dto.productRef}". Por favor, utilize uma referência diferente.`,
           );
         }
+      } else {
+        console.log('✅ Nenhum item duplicado encontrado');
       }
+    } else {
+      console.log('ℹ️ Nenhum critério de duplicidade informado - pulando verificação');
+    }
 
-      console.log('✅ Validação de duplicidade passou');
-
-      // ===========================================================================
-      // 🔥 LOG 4: BUSCANDO STAGE
-      // ===========================================================================
-      console.log('\n🔍 Buscando stage:', {
-        stageId: dto.stageId,
-        flowId: flowId,
-        companyId,
-      });
-
-      // Verificar se o flow existe
-      const flowExists = await tx.productFlow.findFirst({
-        where: { id: flowId, companyId },
-      });
-
-      console.log('📊 Flow existe?', {
-        flowId,
-        existe: !!flowExists,
-        nomeFlow: flowExists?.name,
-      });
-
-      if (!flowExists) {
-        console.error('❌ Flow não encontrado:', { flowId, companyId });
-        throw new BadRequestException('Fluxo não encontrado');
-      }
-
-      // Buscar todas as stages do flow para debug
-      const allStagesFromFlow = await tx.flowStage.findMany({
-        where: { flowId, companyId },
-        select: { id: true, name: true, order: true },
-      });
-
-      console.log(
-        '📋 Todas as stages do flow:',
-        allStagesFromFlow.map((s) => ({
-          id: s.id,
-          nome: s.name,
-          order: s.order,
-        })),
-      );
-
-      const targetStage = dto.stageId
-        ? await tx.flowStage.findFirst({
-            where: {
-              id: dto.stageId,
-              flowId: flowId, // 🔥 IMPORTANTE: verifica se a stage pertence a este flow
-              companyId,
-            },
-          })
-        : await tx.flowStage.findFirst({
-            where: { flowId, companyId },
-            orderBy: { order: 'asc' },
-          });
-
-      if (!targetStage) {
-        // 🔥 LOG MAIS DETALHADO
-        console.error('❌ Stage não encontrada. Verificando:', {
-          stageId: dto.stageId,
-          flowIdRecebido: flowId,
-          companyId,
-          existeStage: dto.stageId
-            ? await tx.flowStage.count({
-                where: { id: dto.stageId, companyId },
-              })
-            : 0,
-          stagesDoFlow: await tx.flowStage.count({
-            where: { flowId, companyId },
-          }),
-        });
-
-        throw new BadRequestException(
-          `Etapa inválida para o fluxo selecionado. Verifique se a etapa pertence a este fluxo.`,
-        );
-      }
-
-      console.log('✅ Stage encontrada:', {
-        id: targetStage.id,
-        nome: targetStage.name,
-        order: targetStage.order,
-        flowId: targetStage.flowId,
-      });
-
-      // ===========================================================================
-      // 🔥 LOG 5: VALIDAÇÃO DE ACESSO
-      // ===========================================================================
-      console.log('\n🔒 Validando acesso do usuário à stage:');
-      try {
-        this.validateStageAccess(user, targetStage);
-        console.log('✅ Acesso permitido à stage');
-      } catch (error) {
-        console.error('❌ Acesso negado à stage:', error.message);
-        throw error;
-      }
-
-      // ===========================================================================
-      // 🔥 LOG 6: BUSCANDO ÚLTIMO ITEM DA STAGE
-      // ===========================================================================
-      console.log('\n🔍 Buscando último item da stage para definir ordem:');
-
-      const lastItem = await tx.flowItem.findFirst({
-        where: { stageId: targetStage.id },
-        orderBy: { orderInStage: 'desc' },
-        select: { orderInStage: true },
-      });
-
-      console.log('📊 Último item da stage:', {
-        ultimaOrdem: lastItem?.orderInStage ?? 'nenhum',
-        novaOrdem: (lastItem?.orderInStage ?? -1) + 1,
-      });
-
-      // ===========================================================================
-      // 🔥 LOG 7: PREPARANDO DADOS PARA CRIAÇÃO
-      // ===========================================================================
-      const dataToCreate: any = {
-        title: dto.title,
-        flowId: flowId,
-        companyId: companyId,
-        stageId: targetStage.id,
-        orderInStage: (lastItem?.orderInStage ?? -1) + 1,
-        enteredAt: new Date(),
-        orderNumber: dto.orderNumber || '',
-        productRef: dto.productRef || '',
-        quantity: dto.quantity || 1,
-        priority: dto.priority || 3,
-        status: dto.status || 'PENDENTE',
-        description: dto.description || null,
-        assignedToId: dto.assignedToId || null,
-        supplierId: dto.supplierId || null,
-      };
-
-      if (dto.dueDate) {
-        dataToCreate.dueDate = new Date(dto.dueDate);
-        console.log('📅 dueDate convertido:', dataToCreate.dueDate);
-      }
-      if (dto.productionStartedAt) {
-        dataToCreate.productionStartedAt = new Date(dto.productionStartedAt);
-        console.log(
-          '📅 productionStartedAt convertido:',
-          dataToCreate.productionStartedAt,
-        );
-      }
-      if (dto.deliveryAt) {
-        dataToCreate.deliveryAt = new Date(dto.deliveryAt);
-        console.log('📅 deliveryAt convertido:', dataToCreate.deliveryAt);
-      }
-
-      console.log('\n📦 Dados para criação:', {
-        ...dataToCreate,
-        // Não logar objetos completos para não poluir
-        assignedToId: dataToCreate.assignedToId,
-        supplierId: dataToCreate.supplierId,
-      });
-
-      // ===========================================================================
-      // 🔥 LOG 8: CRIANDO ITEM
-      // ===========================================================================
-      console.log('\n💾 Criando item no banco...');
-
-      const item = await tx.flowItem.create({
-        data: dataToCreate,
-      });
-
-      console.log('✅ Item criado com sucesso:', {
-        id: item.id,
-        title: item.title,
-        stageId: item.stageId,
-        flowId: item.flowId,
-        createdAt: item.createdAt,
-      });
-
-      // ===========================================================================
-      // 🔥 LOG 9: AUDITORIA
-      // ===========================================================================
-      try {
-        console.log('\n📝 Preparando dados para auditoria...');
-
-        const newDataForAudit = {
-          title: item.title,
-          description: item.description,
-          productRef: item.productRef,
-          quantity: item.quantity,
-          status: item.status,
-          stageId: item.stageId,
-          assignedToId: item.assignedToId,
-          supplierId: item.supplierId,
-          dueDate: item.dueDate,
-          productionStartedAt: item.productionStartedAt,
-          deliveryAt: item.deliveryAt,
-          orderNumber: item.orderNumber,
-          priority: item.priority,
-        };
-
-        const flowInfo = await tx.productFlow.findUnique({
-          where: { id: item.flowId },
-          select: { name: true },
-        });
-
-        const metadataForAudit = {
-          flowId: item.flowId,
-          createdAt: item.createdAt,
-          flowName: flowInfo?.name,
-          stageName: targetStage.name,
-        };
-
-        console.log('📤 Enviando para auditoria:', {
-          newDataKeys: Object.keys(newDataForAudit),
-          metadataKeys: Object.keys(metadataForAudit),
-        });
-
-        await this.auditService.log({
-          action: 'CREATE_ITEM',
-          entity: 'FLOW_ITEM',
-          entityId: item.id,
-          userId,
-          companyId,
-          oldData: null,
-          newData: newDataForAudit,
-          metadata: metadataForAudit,
-        });
-
-        console.log('✅ Auditoria registrada com sucesso');
-      } catch (auditError) {
-        console.error(
-          '❌ Erro ao registrar auditoria (não crítico):',
-          auditError,
-        );
-      }
-
-      // ===========================================================================
-      // 🔥 LOG 10: FINALIZANDO
-      // ===========================================================================
-      console.log('\n🎯 [createFlowItem] FINALIZADO COM SUCESSO');
-      console.log('='.repeat(80));
-      console.log('\n');
-
-      await this.invalidateFlowCache(companyId, flowId);
-      return item;
+    // ──────────────────────────────────────────────────────────────
+    // RESTO DO CÓDIGO (igual ao seu, mas usando tx)
+    // ──────────────────────────────────────────────────────────────
+    
+    // Busca do fluxo
+    const flow = await tx.productFlow.findFirst({
+      where: { id: flowId, companyId },
     });
-  }
 
+    if (!flow) {
+      throw new BadRequestException('Fluxo não encontrado');
+    }
+
+    // Busca da stage
+    const targetStage = dto.stageId
+      ? await tx.flowStage.findFirst({
+          where: {
+            id: dto.stageId,
+            flowId,
+            companyId,
+          },
+        })
+      : await tx.flowStage.findFirst({
+          where: { flowId, companyId },
+          orderBy: { order: 'asc' },
+        });
+
+    if (!targetStage) {
+      throw new BadRequestException(
+        'Etapa inválida ou não pertence ao fluxo informado',
+      );
+    }
+
+    console.log('✅ Etapa selecionada:', {
+      id: targetStage.id,
+      nome: targetStage.name,
+      order: targetStage.order,
+    });
+
+    this.validateStageAccess(user, targetStage);
+
+    // Ordem dentro da etapa
+    const lastItem = await tx.flowItem.findFirst({
+      where: { stageId: targetStage.id },
+      orderBy: { orderInStage: 'desc' },
+      select: { orderInStage: true },
+    });
+
+    const orderInStage = (lastItem?.orderInStage ?? -1) + 1;
+
+    // Preparar dados para criação
+    const dataToCreate: any = {
+      title: dto.title?.trim() ?? 'Sem título',
+      flowId,
+      companyId,
+      stageId: targetStage.id,
+      orderInStage,
+      enteredAt: new Date(),
+      orderNumber: dto.orderNumber?.trim() ?? '',
+      productRef: dto.productRef?.trim() ?? '',
+      quantity: dto.quantity ?? 1,
+      priority: dto.priority ?? 3,
+      status: dto.status ?? 'PENDENTE',
+      description: dto.description?.trim() ?? null,
+      assignedToId: dto.assignedToId ?? null,
+      supplierId: dto.supplierId ?? null,
+    };
+
+    if (dto.dueDate) dataToCreate.dueDate = new Date(dto.dueDate);
+    if (dto.productionStartedAt) dataToCreate.productionStartedAt = new Date(dto.productionStartedAt);
+    if (dto.deliveryAt) dataToCreate.deliveryAt = new Date(dto.deliveryAt);
+
+    // Criar item
+    const item = await tx.flowItem.create({
+      data: dataToCreate,
+    });
+
+    console.log('✅ Item criado com sucesso:', {
+      id: item.id,
+      title: item.title,
+      stageId: item.stageId,
+    });
+
+    // Auditoria
+    await this.auditService.log({
+      action: 'CREATE_ITEM',
+      entity: 'FLOW_ITEM',
+      entityId: item.id,
+      userId,
+      companyId,
+      oldData: null,
+      newData: {
+        title: item.title,
+        productRef: item.productRef,
+        quantity: item.quantity,
+        status: item.status,
+        stageId: item.stageId,
+        assignedToId: item.assignedToId,
+        supplierId: item.supplierId,
+      },
+      metadata: {
+        flowId: item.flowId,
+        stageName: targetStage.name,
+      },
+    });
+
+    await this.invalidateFlowCache(companyId, flowId);
+
+    console.log('🎯 [createFlowItem] FINALIZADO COM SUCESSO');
+    console.log('='.repeat(80));
+
+    return item;
+  });
+}
+
+  // ===========================================================================
+  // 🔥 ATUALIZAR ITEM DO FLUXO - COM DETECÇÃO CORRETA DE CAMPOS ALTERADOS
+  // ===========================================================================
   // ===========================================================================
   // 🔥 ATUALIZAR ITEM DO FLUXO - COM DETECÇÃO CORRETA DE CAMPOS ALTERADOS
   // ===========================================================================
@@ -1298,29 +1200,31 @@ export class FlowService {
       throw new NotFoundException('Usuário não encontrado');
     }
 
-    // 🔍 VALIDAÇÃO DE DUPLICIDADE AO ATUALIZAR
+    // ===========================================================================
+    // 🔥 VALIDAÇÃO DE DUPLICIDADE AO ATUALIZAR - VERSÃO CORRIGIDA
+    // ===========================================================================
     if (data.title || data.productRef) {
       this.logger.log(
         `🔍 Verificando duplicidade para atualização do item ${itemId}`,
       );
 
-      const whereClause: any = {
-        companyId,
-        NOT: { id: itemId },
-        OR: [],
-      };
+      const orConditions: any[] = [];
 
       if (data.title && data.title !== item.title) {
-        whereClause.OR.push({ title: data.title });
+        orConditions.push({ title: data.title });
       }
 
       if (data.productRef && data.productRef !== item.productRef) {
-        whereClause.OR.push({ productRef: data.productRef });
+        orConditions.push({ productRef: data.productRef });
       }
 
-      if (whereClause.OR.length > 0) {
+      if (orConditions.length > 0) {
         const existingItem = await this.prisma.flowItem.findFirst({
-          where: whereClause,
+          where: {
+            companyId,
+            NOT: { id: itemId },
+            OR: orConditions,
+          },
         });
 
         if (existingItem) {
@@ -1328,7 +1232,10 @@ export class FlowService {
             throw new BadRequestException(
               `Já existe outro item com o título "${data.title}". Por favor, utilize um título diferente.`,
             );
-          } else if (existingItem.productRef === data.productRef) {
+          } else if (
+            data.productRef &&
+            existingItem.productRef === data.productRef
+          ) {
             throw new BadRequestException(
               `Já existe outro item com a referência "${data.productRef}". Por favor, utilize uma referência diferente.`,
             );

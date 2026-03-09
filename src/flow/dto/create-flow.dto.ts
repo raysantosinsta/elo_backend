@@ -77,8 +77,9 @@ export class CreateFlowItemDto {
   orderNumber?: string;
 
   @ApiProperty({ required: false })
-  @IsOptional()
   @IsString()
+  @IsOptional()
+  @IsNotEmpty({ message: 'Se productRef for informado, não pode ser vazio' })
   productRef?: string;
 
   @ApiProperty({ required: false })
