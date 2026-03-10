@@ -96,28 +96,6 @@ export class FlowService {
   }
 
   // ===========================================================================
-  // 🔥 MÉTODO PARA VERIFICAR SE USUÁRIO É ADMIN
-  // ===========================================================================
-  // private async isUserAdmin(
-  //   userId: string,
-  //   companyId: string,
-  // ): Promise<boolean> {
-  //   const user = await this.prisma.user.findFirst({
-  //     where: {
-  //       id: userId,
-  //       companyId,
-  //       status: 'ACTIVE',
-  //     },
-  //     select: { role: true },
-  //   });
-
-  //   if (!user) return false;
-
-  //   const adminRoles = ['MASTER', 'ADMIN', 'MANAGER'];
-  //   return adminRoles.includes(user.role);
-  // }
-
-  // ===========================================================================
   // 🔥 MÉTODO PARA VALIDAR QUANTIDADE ANTES DE MOVER - BLOQUEIA TODOS COM QTD ZERO
   // ===========================================================================
   private async validateQuantityBeforeMove(
@@ -227,7 +205,7 @@ export class FlowService {
       if (quantityNum < 1) {
         const message = isAdmin
           ? `⚠️ Quantidade zero (${quantityNum})! Você está tentando mover um item para depois da coluna Corte com quantidade zero. Como ADMIN, defina uma quantidade maior que zero antes de prosseguir.`
-          : 'Quantidade deve ser maior que zero para mover para depois da coluna Corte.';
+          : 'Quantidade deve ser maior que zero.';
 
         this.logger.error(
           `❌ BLOQUEADO: ${isAdmin ? 'Admin' : 'Usuário'} ${user?.name} tentou mover item com quantidade ${quantityNum}`,
@@ -1186,9 +1164,6 @@ export class FlowService {
   // ===========================================================================
   // 🔥 ATUALIZAR ITEM DO FLUXO - COM DETECÇÃO CORRETA DE CAMPOS ALTERADOS
   // ===========================================================================
-  // ===========================================================================
-  // 🔥 ATUALIZAR ITEM DO FLUXO - COM DETECÇÃO CORRETA DE CAMPOS ALTERADOS
-  // ===========================================================================
   async updateFlowItem(itemId: string, userId: string, data: any) {
     const companyId = this.getCompanyIdFromContext();
 
@@ -1484,9 +1459,6 @@ export class FlowService {
     return updated;
   }
 
-  // ===========================================================================
-  // 🔥 MOVER ITEM ENTRE COLUNAS - COM VALIDAÇÃO PARA TODOS (INCLUSIVE ADMIN)
-  // ===========================================================================
   async moveItem(
     itemId: string,
     newStageId: string,
@@ -1494,6 +1466,7 @@ export class FlowService {
     newOrder?: number,
     selectedResponsibleId?: string,
     selectedSupplierId?: string,
+    newQuantity?: number,
   ) {
     const startTime = Date.now();
 
@@ -1505,6 +1478,7 @@ export class FlowService {
       newOrder,
       selectedResponsibleId,
       selectedSupplierId,
+      newQuantity, // 🔥 LOG DA NOVA QUANTIDADE
     });
 
     return this.executeWithResilience('move_item', async () => {
@@ -1517,7 +1491,22 @@ export class FlowService {
             throw new ForbiddenException('Empresa não identificada');
           }
 
-          // Buscar usuário para verificar role
+          // ===========================================================================
+          // 🔥 PASSO 1: ATUALIZAR QUANTIDADE SE FORNECIDA (ANTES DA VALIDAÇÃO)
+          // ===========================================================================
+          if (newQuantity !== undefined) {
+            this.logger.log(
+              `📝 [MOVE_ITEM] Atualizando quantidade para: ${newQuantity}`,
+            );
+            await tx.flowItem.update({
+              where: { id: itemId },
+              data: { quantity: newQuantity },
+            });
+          }
+
+          // ===========================================================================
+          // 🔥 PASSO 2: BUSCAR USUÁRIO
+          // ===========================================================================
           const user = await tx.user.findFirst({
             where: {
               id: userId,
@@ -1546,7 +1535,9 @@ export class FlowService {
             `👤 [MOVE_ITEM] Usuário: ${user.name} (${user.role}) - Admin: ${isAdmin}`,
           );
 
-          // 🔥 VALIDAÇÃO DE QUANTIDADE - APLICADA PARA TODOS, INCLUSIVE ADMIN
+          // ===========================================================================
+          // 🔥 PASSO 3: VALIDAR QUANTIDADE (AGORA COM O VALOR ATUALIZADO)
+          // ===========================================================================
           this.logger.log(
             `🔍 [MOVE_ITEM] Validando quantidade para ${isAdmin ? 'ADMIN' : 'usuário comum'}`,
           );
@@ -1555,10 +1546,12 @@ export class FlowService {
             itemId,
             newStageId,
             companyId,
-            userId, // Passamos o userId para a validação saber se é admin e dar mensagem personalizada
+            userId,
           );
 
-          // Buscar item e stage destino
+          // ===========================================================================
+          // 🔥 PASSO 4: BUSCAR ITEM E STAGE DESTINO
+          // ===========================================================================
           const [item, nextStage] = await Promise.all([
             tx.flowItem.findFirst({
               where: { id: itemId, companyId },
@@ -1598,7 +1591,9 @@ export class FlowService {
             `📍 [MOVE_ITEM] De: "${item.stage?.name}" -> Para: "${nextStage.name}"`,
           );
 
-          // Validar acesso à stage (pula se for admin)
+          // ===========================================================================
+          // 🔥 PASSO 5: VALIDAR ACESSO À STAGE
+          // ===========================================================================
           if (!isAdmin) {
             this.logger.log(
               `👤 [MOVE_ITEM] Validando acesso do usuário à stage origem`,
@@ -1614,11 +1609,15 @@ export class FlowService {
           const oldAssignedToId = item.assignedToId;
           const oldSupplierId = item.supplierId;
 
-          // Verificar se é coluna OFICINA
+          // ===========================================================================
+          // 🔥 PASSO 6: VERIFICAR SE É COLUNA OFICINA
+          // ===========================================================================
           const isOficina = nextStage.name.trim().toLowerCase() === 'oficina';
           this.logger.log(`🏭 [MOVE_ITEM] É coluna OFICINA? ${isOficina}`);
 
-          // Validações específicas por tipo de coluna (NÃO se aplicam a admin)
+          // ===========================================================================
+          // 🔥 PASSO 7: VALIDAÇÕES ESPECÍFICAS POR TIPO DE COLUNA
+          // ===========================================================================
           if (!isAdmin) {
             if (isOficina) {
               if (!selectedSupplierId) {
@@ -1651,7 +1650,9 @@ export class FlowService {
             );
           }
 
-          // Calcular nova ordem
+          // ===========================================================================
+          // 🔥 PASSO 8: CALCULAR NOVA ORDEM
+          // ===========================================================================
           let finalOrder: number;
 
           if (newOrder !== undefined && newOrder >= 0) {
@@ -1678,7 +1679,9 @@ export class FlowService {
             this.logger.log(`📊 [MOVE_ITEM] Ordem automática: ${finalOrder}`);
           }
 
-          // Preparar dados de atualização
+          // ===========================================================================
+          // 🔥 PASSO 9: PREPARAR DADOS DE ATUALIZAÇÃO
+          // ===========================================================================
           const updateData: any = {
             stageId: newStageId,
             orderInStage: finalOrder,
@@ -1725,7 +1728,9 @@ export class FlowService {
             }
           }
 
-          // Executar update
+          // ===========================================================================
+          // 🔥 PASSO 10: EXECUTAR UPDATE
+          // ===========================================================================
           const updated = await tx.flowItem.update({
             where: { id: itemId },
             data: updateData,
@@ -1737,7 +1742,9 @@ export class FlowService {
 
           this.logger.log(`✅ [MOVE_ITEM] Item movido com sucesso!`);
 
-          // Preparar metadata para auditoria
+          // ===========================================================================
+          // 🔥 PASSO 11: PREPARAR METADATA PARA AUDITORIA
+          // ===========================================================================
           const metadata: any = {
             fromStageId: oldStageId,
             fromStageName: item.stage?.name,
@@ -1760,7 +1767,9 @@ export class FlowService {
             metadata.newResponsibleName = updated.assignedTo?.name;
           }
 
-          // Log de auditoria
+          // ===========================================================================
+          // 🔥 PASSO 12: LOG DE AUDITORIA
+          // ===========================================================================
           await this.auditService.log({
             action: 'MOVE_ITEM',
             entity: 'FLOW_ITEM',
@@ -1770,10 +1779,14 @@ export class FlowService {
             metadata,
           });
 
-          // Invalidar cache
+          // ===========================================================================
+          // 🔥 PASSO 13: INVALIDAR CACHE
+          // ===========================================================================
           await this.invalidateFlowCache(companyId, item.flowId);
 
-          // Incrementar métrica - COM TRY/CATCH PARA EVITAR ERRO 500
+          // ===========================================================================
+          // 🔥 PASSO 14: INCREMENTAR MÉTRICA
+          // ===========================================================================
           try {
             this.moveCounter.inc({
               operation: 'move',
@@ -1786,7 +1799,6 @@ export class FlowService {
             this.logger.error(
               `Erro ao incrementar métrica: ${metricError.message}`,
             );
-            // Não estoura o erro - apenas loga
           }
 
           this.logger.log(
@@ -2566,11 +2578,19 @@ export class FlowService {
     );
     // NOTA: stageName NÃO está incluído aqui porque já foi tratado separadamente
   }
-
+  // TODO: REVISAR
   private validateStageAccess(
     user: { role: string; professionalRole: string | null },
     stage: { name: string; allowedRole: string | null },
   ) {
+    console.log('🔍 [BACKEND] Comparação de cargo:', {
+      userProfessionalRole: user.professionalRole,
+      stageAllowedRole: stage.allowedRole,
+      match:
+        user.professionalRole?.trim().toLowerCase() ===
+        stage.allowedRole?.trim().toLowerCase(),
+    });
+
     if (['MASTER', 'ADMIN'].includes(user.role)) {
       return true;
     }
