@@ -513,7 +513,12 @@ export class FlowController {
   async moveItem(
     @Param('itemId', ParseUUIDPipe) itemId: string,
     @Body()
-    body: { newStageId: string; assignedToId?: string; supplierId?: string },
+    body: {
+      newStageId: string;
+      assignedToId?: string;
+      supplierId?: string;
+      quantity?: number;
+    },
     @Req() req: any,
   ) {
     return this.flowService.moveItem(
@@ -523,6 +528,7 @@ export class FlowController {
       undefined, // newOrder
       body.assignedToId, // responsável funcionário
       body.supplierId, // responsável oficina
+      body.quantity,
     );
   }
 
