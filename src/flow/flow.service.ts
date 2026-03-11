@@ -296,19 +296,60 @@ export class FlowService {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
 
-      const endOfDay = new Date(today);
-      endOfDay.setHours(23, 59, 59, 999);
+      const sevenDaysFromNow = new Date(today);
+      sevenDaysFromNow.setDate(sevenDaysFromNow.getDate() + 7);
+      sevenDaysFromNow.setHours(23, 59, 59, 999);
 
+      // 🔥 LOG DETALHADO COM TRATAMENTO PARA NULL
+      console.log('\n' + '='.repeat(50));
+      console.log('🔍 FILTRO UPCOMING - BACKEND');
+      console.log('='.repeat(50));
+      console.log('today (UTC):', today.toISOString());
+      console.log('sevenDaysFromNow (UTC):', sevenDaysFromNow.toISOString());
+
+      // Buscar TODOS os itens com dueDate para debug
+      const allItemsWithDueDate = await this.prisma.flowItem.findMany({
+        where: {
+          companyId,
+          dueDate: { not: null },
+        },
+        select: {
+          id: true,
+          title: true,
+          dueDate: true,
+          status: true,
+        },
+      });
+
+      console.log('\n📋 TODOS os itens com dueDate:');
+      allItemsWithDueDate.forEach((item) => {
+        // 🔥 CORREÇÃO: Verificar se dueDate não é null antes de usar
+        if (item.dueDate) {
+          const dueDate = new Date(item.dueDate);
+          const isInRange = dueDate >= today && dueDate <= sevenDaysFromNow;
+          console.log(
+            `   "${item.title}": dueDate=${item.dueDate.toISOString()}, status=${item.status}, inRange=${isInRange}`,
+          );
+        } else {
+          console.log(
+            `   "${item.title}": dueDate=null, status=${item.status}, inRange=false`,
+          );
+        }
+      });
+
+      console.log('='.repeat(50) + '\n');
+
+      // 🔥 CORREÇÃO: Usar a sintaxe correta para o where clause
       whereClause.AND = [
         {
-          productionStartedAt: {
+          dueDate: {
             not: null,
           },
         },
         {
-          productionStartedAt: {
+          dueDate: {
             gte: today,
-            lte: endOfDay,
+            lte: sevenDaysFromNow,
           },
         },
         {
@@ -2077,7 +2118,6 @@ export class FlowService {
     }
   }
 
-  // 🔥 MÉTODO PARA BUSCAR ITENS FILTRADOS
   async getFilteredItems(filters: FlowFilterDto) {
     const companyId = this.getCompanyIdFromContext();
 
@@ -2099,6 +2139,7 @@ export class FlowService {
       companyId,
     };
 
+    // Filtros básicos
     if (assignedToId) {
       whereClause.assignedToId = assignedToId;
     }
@@ -2118,75 +2159,58 @@ export class FlowService {
       };
     }
 
-    if (startDate || endDate) {
+    // 🔥 CORREÇÃO: Processar isUpcoming PRIMEIRO (tem prioridade)
+    if (isUpcoming === 'true') {
+      const today = new Date();
+      today.setUTCHours(0, 0, 0, 0);
+
+      const sevenDaysFromNow = new Date(today);
+      sevenDaysFromNow.setUTCDate(sevenDaysFromNow.getUTCDate() + 7);
+      sevenDaysFromNow.setUTCHours(23, 59, 59, 999);
+
+      console.log('🔍 UPCOMING - Período:', {
+        start: today.toISOString(),
+        end: sevenDaysFromNow.toISOString(),
+      });
+
+      whereClause.dueDate = {
+        gte: today,
+        lte: sevenDaysFromNow,
+      };
+
+      whereClause.status = {
+        not: 'CONCLUIDO',
+      };
+    }
+    // 🔥 Processar isOverdue
+    else if (isOverdue === 'true') {
+      const today = new Date();
+      today.setUTCHours(0, 0, 0, 0);
+
+      whereClause.dueDate = {
+        lt: today,
+      };
+
+      whereClause.status = {
+        not: 'CONCLUIDO',
+      };
+    }
+    // 🔥 Processar filtro por data personalizado (só se não for upcoming/overdue)
+    else if (startDate || endDate) {
       const dateField =
         dateType === DateFilterType.DUE_DATE
           ? 'dueDate'
           : 'productionStartedAt';
-
       const dateFilter: any = {};
 
       if (startDate) {
         dateFilter.gte = new Date(startDate);
       }
       if (endDate) {
-        const endDateTime = new Date(endDate);
-        endDateTime.setHours(23, 59, 59, 999);
-        dateFilter.lte = endDateTime;
+        dateFilter.lte = new Date(endDate);
       }
 
       whereClause[dateField] = dateFilter;
-    }
-
-    if (isOverdue === 'true') {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-
-      whereClause.AND = [
-        {
-          dueDate: {
-            not: null,
-          },
-        },
-        {
-          dueDate: {
-            lt: today,
-          },
-        },
-        {
-          status: {
-            not: 'CONCLUIDO',
-          },
-        },
-      ];
-    }
-
-    if (isUpcoming === 'true') {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-
-      const sevenDaysFromNow = new Date(today);
-      sevenDaysFromNow.setDate(sevenDaysFromNow.getDate() + 7);
-      sevenDaysFromNow.setHours(23, 59, 59, 999);
-
-      whereClause.AND = [
-        {
-          dueDate: {
-            not: null,
-          },
-        },
-        {
-          dueDate: {
-            gte: today,
-            lte: sevenDaysFromNow,
-          },
-        },
-        {
-          status: {
-            not: 'CONCLUIDO',
-          },
-        },
-      ];
     }
 
     try {
@@ -2245,10 +2269,24 @@ export class FlowService {
           },
         },
         orderBy: {
-          [dateType === DateFilterType.DUE_DATE
-            ? 'dueDate'
-            : 'productionStartedAt']: 'asc',
+          dueDate: 'asc',
         },
+      });
+
+      // 🔥 LOG DO RESULTADO
+      console.log('\n' + '='.repeat(60));
+      console.log('📊 RESULTADO DO FILTRO:');
+      console.log('='.repeat(60));
+      console.log(`Total de itens encontrados: ${items.length}`);
+
+      items.forEach((item) => {
+        console.log(`\n📦 Item: "${item.title}"`);
+        console.log(`   ID: ${item.id}`);
+        console.log(
+          `   dueDate: ${item.dueDate ? new Date(item.dueDate).toISOString() : 'NULL'}`,
+        );
+        console.log(`   status: ${item.status}`);
+        console.log(`   flow: ${item.flow?.name}`);
       });
 
       return items;
