@@ -140,7 +140,7 @@ export class FlowService {
       },
     });
 
-    const adminRoles = ['MASTER', 'ADMIN', 'MANAGER'];
+    const adminRoles = ['MASTER', 'ADMIN'];
     const isAdmin = user && adminRoles.includes(user.role);
 
     // Busca a etapa de destino
@@ -179,7 +179,7 @@ export class FlowService {
     const isMovingToAfterCorte = targetStageIndex > corteIndex;
 
     // Se o item já passou do Corte OU está tentando mover para depois do Corte
-    if (hasPassedCorte || isMovingToAfterCorte) {
+    if (!isAdmin && (hasPassedCorte || isMovingToAfterCorte)) {
       // Validar se quantidade existe
       if (item.quantity === null || item.quantity === undefined) {
         const message = isAdmin
