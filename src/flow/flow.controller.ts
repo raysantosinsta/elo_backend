@@ -11,6 +11,7 @@ import {
   Delete,
   Get,
   Logger,
+  NotFoundException,
   Param,
   ParseUUIDPipe,
   Post,
@@ -628,4 +629,98 @@ export class FlowController {
 
     return this.flowService.getKanbanBoardByStageName(flowId, stageName);
   }
+
+  // ===========================================================================
+// 🔥 ENDPOINTS PARA DASHBOARD DE ITENS CONCLUÍDOS
+// ===========================================================================
+
+@Get('completed-items')
+@ApiOperation({ 
+  summary: 'Lista itens concluídos para dashboard',
+  description: 'Retorna itens com status CONCLUIDO, ordenados por data de conclusão'
+})
+@ApiQuery({ name: 'limit', required: false, type: Number, description: 'Limite de itens (padrão: 100)' })
+@ApiQuery({ name: 'flowId', required: false, type: String, description: 'Filtrar por ID do fluxo' })
+@ApiQuery({ name: 'startDate', required: false, type: String, description: 'Data inicial (YYYY-MM-DD)' })
+@ApiQuery({ name: 'endDate', required: false, type: String, description: 'Data final (YYYY-MM-DD)' })
+@ApiQuery({ name: 'productRef', required: false, type: String, description: 'Filtrar por referência do produto' })
+@ApiQuery({ name: 'assignedToId', required: false, type: String, description: 'Filtrar por responsável' })
+@ApiQuery({ name: 'supplierId', required: false, type: String, description: 'Filtrar por fornecedor' })
+async getCompletedItems(
+  @Req() req: any,
+  @Query('limit') limit?: string,
+  @Query('flowId') flowId?: string,
+  @Query('startDate') startDate?: string,
+  @Query('endDate') endDate?: string,
+  @Query('productRef') productRef?: string,
+  @Query('assignedToId') assignedToId?: string,
+  @Query('supplierId') supplierId?: string,
+) {
+  this.logger.log(`📊 [CONTROLLER] Buscando itens concluídos`);
+  
+  // Converter parâmetros
+  const options: any = {};
+  
+  if (limit) options.limit = parseInt(limit);
+  if (flowId) options.flowId = flowId;
+  if (productRef) options.productRef = productRef;
+  if (assignedToId) options.assignedToId = assignedToId;
+  if (supplierId) options.supplierId = supplierId;
+  
+  // Converter datas se fornecidas
+  if (startDate) {
+    const date = new Date(startDate);
+    date.setUTCHours(0, 0, 0, 0);
+    options.startDate = date;
+  }
+  
+  if (endDate) {
+    const date = new Date(endDate);
+    date.setUTCHours(23, 59, 59, 999);
+    options.endDate = date;
+  }
+  
+  return this.flowService.getCompletedItems(options);
+}
+
+@Get('completed-items/stats')
+@ApiOperation({ 
+  summary: 'Estatísticas de itens concluídos',
+  description: 'Retorna estatísticas agregadas para o dashboard'
+})
+@ApiQuery({ 
+  name: 'period', 
+  required: false, 
+  enum: ['today', 'week', 'month', 'year'],
+  description: 'Período para análise (padrão: week)' 
+})
+async getCompletionStats(
+  @Req() req: any,
+  @Query('period') period?: 'today' | 'week' | 'month' | 'year',
+) {
+  this.logger.log(`📊 [CONTROLLER] Buscando estatísticas de conclusão`);
+  return this.flowService.getCompletionStats(period || 'week');
+}
+
+@Get('completed-items/:itemId')
+@ApiOperation({ summary: 'Busca um item concluído específico' })
+async getCompletedItemById(
+  @Req() req: any,
+  @Param('itemId', ParseUUIDPipe) itemId: string,
+) {
+  this.logger.log(`📊 [CONTROLLER] Buscando item concluído ${itemId}`);
+  
+  const items = await this.flowService.getCompletedItems({
+    limit: 1,
+  });
+  
+  // Filtrar manualmente porque o service já tem companyId
+  const item = items.find(i => i.id === itemId);
+  
+  if (!item) {
+    throw new NotFoundException('Item não encontrado');
+  }
+  
+  return item;
+}
 }

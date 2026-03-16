@@ -1,4 +1,5 @@
 /* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-misused-promises */
 /* eslint-disable @typescript-eslint/require-await */
 /* eslint-disable prefer-const */
 /* eslint-disable @typescript-eslint/no-unused-vars */
@@ -95,126 +96,125 @@ export class FlowService {
     return result;
   }
 
+  // ===========================================================================
+  // 🔥 MÉTODO PARA VALIDAR QUANTIDADE ANTES DE MOVER - CORRIGIDO (BLOQUEIA ZERO)
+  // ===========================================================================
+  // ===========================================================================
+  // 🔥 MÉTODO PARA VALIDAR QUANTIDADE ANTES DE MOVER - CORRIGIDO (VALIDA TODOS)
+  // ===========================================================================
+  private async validateQuantityBeforeMove(
+    itemId: string,
+    targetStageId: string,
+    companyId: string,
+    userId: string,
+  ): Promise<void> {
+    this.logger.log(
+      `🔍 Validando quantidade para movimentação do item ${itemId} para stage ${targetStageId}`,
+    );
 
-// ===========================================================================
-// 🔥 MÉTODO PARA VALIDAR QUANTIDADE ANTES DE MOVER - CORRIGIDO (BLOQUEIA ZERO)
-// ===========================================================================
-// ===========================================================================
-// 🔥 MÉTODO PARA VALIDAR QUANTIDADE ANTES DE MOVER - CORRIGIDO (VALIDA TODOS)
-// ===========================================================================
-private async validateQuantityBeforeMove(
-  itemId: string,
-  targetStageId: string,
-  companyId: string,
-  userId: string,
-): Promise<void> {
-  this.logger.log(
-    `🔍 Validando quantidade para movimentação do item ${itemId} para stage ${targetStageId}`,
-  );
-
-  // Busca o item com sua etapa atual
-  const item = await this.prisma.flowItem.findFirst({
-    where: { id: itemId, companyId },
-    include: {
-      stage: true,
-      flow: {
-        include: {
-          stages: {
-            orderBy: { order: 'asc' },
+    // Busca o item com sua etapa atual
+    const item = await this.prisma.flowItem.findFirst({
+      where: { id: itemId, companyId },
+      include: {
+        stage: true,
+        flow: {
+          include: {
+            stages: {
+              orderBy: { order: 'asc' },
+            },
           },
         },
       },
-    },
-  });
+    });
 
-  if (!item) {
-    throw new NotFoundException('Item não encontrado');
-  }
-
-  // Busca o usuário (para mensagem personalizada)
-  const user = await this.prisma.user.findFirst({
-    where: {
-      id: userId,
-      companyId,
-      status: 'ACTIVE',
-    },
-    select: {
-      role: true,
-      name: true,
-    },
-  });
-
-  const adminRoles = ['MASTER', 'ADMIN'];
-  const isAdmin = user && adminRoles.includes(user.role);
-
-  // Busca a etapa de destino
-  const targetStage = await this.prisma.flowStage.findFirst({
-    where: { id: targetStageId, companyId },
-  });
-
-  if (!targetStage) {
-    throw new NotFoundException('Etapa destino não encontrada');
-  }
-
-  // Ordena todas as etapas do fluxo
-  const sortedStages = [...item.flow.stages].sort(
-    (a, b) => a.order - b.order,
-  );
-
-  // Encontra o índice da etapa de Corte
-  const corteIndex = sortedStages.findIndex((s) => this.isCorteStage(s.name));
-
-  // Se não tem coluna Corte, não aplica a regra
-  if (corteIndex === -1) {
-    return;
-  }
-
-  // Encontra o índice da etapa de destino
-  const targetStageIndex = sortedStages.findIndex(
-    (s) => s.id === targetStageId,
-  );
-
-  // 🔥 REGRA: Verifica se a etapa de destino é após o Corte
-  const isMovingToAfterCorte = targetStageIndex > corteIndex;
-
-  // 🔥 CORREÇÃO: VALIDA PARA TODOS (inclusive admin)
-  if (isMovingToAfterCorte) {
-    // Validar se quantidade existe
-    if (item.quantity === null || item.quantity === undefined) {
-      const message = isAdmin
-        ? '⚠️ Quantidade não definida! Como ADMIN, você precisa definir uma quantidade para mover itens para depois da coluna Corte.'
-        : 'Quantidade não definida.';
-
-      throw new BadRequestException(message);
+    if (!item) {
+      throw new NotFoundException('Item não encontrado');
     }
 
-    // Converter para número
-    const quantityNum = Number(item.quantity);
+    // Busca o usuário (para mensagem personalizada)
+    const user = await this.prisma.user.findFirst({
+      where: {
+        id: userId,
+        companyId,
+        status: 'ACTIVE',
+      },
+      select: {
+        role: true,
+        name: true,
+      },
+    });
 
-    // Verificar se é NaN
-    if (isNaN(quantityNum)) {
-      const message = isAdmin
-        ? `⚠️ Quantidade inválida ("${item.quantity}")! Como ADMIN, você precisa definir uma quantidade numérica válida.`
-        : 'Quantidade inválida.';
+    const adminRoles = ['MASTER', 'ADMIN'];
+    const isAdmin = user && adminRoles.includes(user.role);
 
-      throw new BadRequestException(message);
+    // Busca a etapa de destino
+    const targetStage = await this.prisma.flowStage.findFirst({
+      where: { id: targetStageId, companyId },
+    });
+
+    if (!targetStage) {
+      throw new NotFoundException('Etapa destino não encontrada');
     }
 
-    // 🔥 BLOQUEIA ZERO E NEGATIVOS PARA TODOS (inclusive admin)
-    if (quantityNum <= 0) {
-      const message = isAdmin
-        ? `⚠️ Quantidade inválida (${quantityNum})! Quantidade deve ser maior que zero..`
-        : 'Quantidade deve ser maior que zero.';
+    // Ordena todas as etapas do fluxo
+    const sortedStages = [...item.flow.stages].sort(
+      (a, b) => a.order - b.order,
+    );
 
-      this.logger.error(
-        `❌ BLOQUEADO: ${isAdmin ? 'Admin' : 'Usuário'} ${user?.name} tentou mover item com quantidade ${quantityNum}`,
-      );
-      throw new BadRequestException(message);
+    // Encontra o índice da etapa de Corte
+    const corteIndex = sortedStages.findIndex((s) => this.isCorteStage(s.name));
+
+    // Se não tem coluna Corte, não aplica a regra
+    if (corteIndex === -1) {
+      return;
     }
 
-    this.logger.debug(`✅ Quantidade válida: ${quantityNum}`);
+    // Encontra o índice da etapa de destino
+    const targetStageIndex = sortedStages.findIndex(
+      (s) => s.id === targetStageId,
+    );
+
+    // 🔥 REGRA: Verifica se a etapa de destino é após o Corte
+    const isMovingToAfterCorte = targetStageIndex > corteIndex;
+
+    // 🔥 CORREÇÃO: VALIDA PARA TODOS (inclusive admin)
+    if (isMovingToAfterCorte) {
+      // Validar se quantidade existe
+      if (item.quantity === null || item.quantity === undefined) {
+        const message = isAdmin
+          ? '⚠️ Quantidade não definida! Como ADMIN, você precisa definir uma quantidade para mover itens para depois da coluna Corte.'
+          : 'Quantidade não definida.';
+
+        throw new BadRequestException(message);
+      }
+
+      // Converter para número
+      const quantityNum = Number(item.quantity);
+
+      // Verificar se é NaN
+      if (isNaN(quantityNum)) {
+        const message = isAdmin
+          ? `⚠️ Quantidade inválida ("${item.quantity}")! Como ADMIN, você precisa definir uma quantidade numérica válida.`
+          : 'Quantidade inválida.';
+
+        throw new BadRequestException(message);
+      }
+
+      // 🔥 BLOQUEIA ZERO E NEGATIVOS PARA TODOS (inclusive admin)
+      if (quantityNum <= 0) {
+        const message = isAdmin
+          ? `⚠️ Quantidade deve ser maior que zero..`
+          :  `⚠️ Quantidade inválida (${quantityNum})! Quantidade deve ser maior que zero..`;
+
+        this.logger.error(
+          `❌ BLOQUEADO: ${isAdmin ? 'Admin' : 'Usuário'} ${user?.name} tentou mover item com quantidade ${quantityNum}`,
+        );
+        throw new BadRequestException(message);
+      }
+
+      this.logger.debug(`✅ Quantidade válida: ${quantityNum}`);
+    }
   }
-}
 
   // ===========================================================================
   // MÉTODOS REFATORADOS - SEM companyId NOS PARÂMETROS
@@ -1500,369 +1500,774 @@ private async validateQuantityBeforeMove(
   }
 
   async moveItem(
-    itemId: string,
-    newStageId: string,
-    userId: string,
-    newOrder?: number,
-    selectedResponsibleId?: string,
-    selectedSupplierId?: string,
-    newQuantity?: number,
-  ) {
-    const startTime = Date.now();
+  itemId: string,
+  newStageId: string,
+  userId: string,
+  newOrder?: number,
+  selectedResponsibleId?: string,
+  selectedSupplierId?: string,
+  newQuantity?: number,
+) {
+  const startTime = Date.now();
 
-    this.logger.log('🎯 [MOVE_ITEM] ========================================');
-    this.logger.log('🎯 [MOVE_ITEM] Início da movimentação', {
-      itemId,
-      newStageId,
-      userId,
-      newOrder,
-      selectedResponsibleId,
-      selectedSupplierId,
-      newQuantity, // 🔥 LOG DA NOVA QUANTIDADE
-    });
+  this.logger.log('🎯 [MOVE_ITEM] ========================================');
+  this.logger.log('🎯 [MOVE_ITEM] Início da movimentação', {
+    itemId,
+    newStageId,
+    userId,
+    newOrder,
+    selectedResponsibleId,
+    selectedSupplierId,
+    newQuantity,
+  });
 
-    return this.executeWithResilience('move_item', async () => {
-      return this.prisma.$transaction(
-        async (tx) => {
-          const companyId = this.cls.get<string>('tenantId');
+  // 🔥 INICIALIZAR AS VARIÁVEIS COM VALORES PADRÃO
+  let flowId: string | undefined;
+  let isLastStage = false;
 
-          if (!companyId) {
-            this.logger.error('❌ [MOVE_ITEM] companyId não encontrado no CLS');
-            throw new ForbiddenException('Empresa não identificada');
-          }
+  const result = await this.executeWithResilience('move_item', async () => {
+    return this.prisma.$transaction(
+      async (tx) => {
+        const companyId = this.cls.get<string>('tenantId');
 
-          // ===========================================================================
-          // 🔥 PASSO 1: ATUALIZAR QUANTIDADE SE FORNECIDA (ANTES DA VALIDAÇÃO)
-          // ===========================================================================
-          if (newQuantity !== undefined) {
-            this.logger.log(
-              `📝 [MOVE_ITEM] Atualizando quantidade para: ${newQuantity}`,
-            );
-            await tx.flowItem.update({
-              where: { id: itemId },
-              data: { quantity: newQuantity },
-            });
-          }
+        if (!companyId) {
+          this.logger.error('❌ [MOVE_ITEM] companyId não encontrado no CLS');
+          throw new ForbiddenException('Empresa não identificada');
+        }
 
-          // ===========================================================================
-          // 🔥 PASSO 2: BUSCAR USUÁRIO
-          // ===========================================================================
-          const user = await tx.user.findFirst({
-            where: {
-              id: userId,
-              companyId,
-              status: 'ACTIVE',
-            },
-            select: {
-              id: true,
-              role: true,
-              name: true,
-              professionalRole: true,
-            },
+        // ===========================================================================
+        // 🔥 PASSO 1: ATUALIZAR QUANTIDADE SE FORNECIDA
+        // ===========================================================================
+        if (newQuantity !== undefined) {
+          this.logger.log(
+            `📝 [MOVE_ITEM] Atualizando quantidade para: ${newQuantity}`,
+          );
+          await tx.flowItem.update({
+            where: { id: itemId },
+            data: { quantity: newQuantity },
           });
+        }
 
-          if (!user) {
-            this.logger.error(
-              `❌ [MOVE_ITEM] Usuário ${userId} não encontrado`,
-            );
-            throw new NotFoundException('Usuário não encontrado');
-          }
-
-          const adminRoles = ['MASTER', 'ADMIN', 'MANAGER'];
-          const isAdmin = adminRoles.includes(user.role);
-
-          this.logger.log(
-            `👤 [MOVE_ITEM] Usuário: ${user.name} (${user.role}) - Admin: ${isAdmin}`,
-          );
-
-          // ===========================================================================
-          // 🔥 PASSO 3: VALIDAR QUANTIDADE (AGORA COM O VALOR ATUALIZADO)
-          // ===========================================================================
-          this.logger.log(
-            `🔍 [MOVE_ITEM] Validando quantidade para ${isAdmin ? 'ADMIN' : 'usuário comum'}`,
-          );
-
-          await this.validateQuantityBeforeMove(
-            itemId,
-            newStageId,
+        // ===========================================================================
+        // 🔥 PASSO 2: BUSCAR USUÁRIO
+        // ===========================================================================
+        const user = await tx.user.findFirst({
+          where: {
+            id: userId,
             companyId,
-            userId,
-          );
+            status: 'ACTIVE',
+          },
+          select: {
+            id: true,
+            role: true,
+            name: true,
+            professionalRole: true,
+          },
+        });
 
-          // ===========================================================================
-          // 🔥 PASSO 4: BUSCAR ITEM E STAGE DESTINO
-          // ===========================================================================
-          const [item, nextStage] = await Promise.all([
-            tx.flowItem.findFirst({
-              where: { id: itemId, companyId },
-              include: {
-                stage: true,
-                assignedTo: true,
-                supplier: true,
-                flow: {
-                  select: {
-                    id: true,
-                    name: true,
-                  },
+        if (!user) {
+          this.logger.error(
+            `❌ [MOVE_ITEM] Usuário ${userId} não encontrado`,
+          );
+          throw new NotFoundException('Usuário não encontrado');
+        }
+
+        const adminRoles = ['MASTER', 'ADMIN', 'MANAGER'];
+        const isAdmin = adminRoles.includes(user.role);
+
+        this.logger.log(
+          `👤 [MOVE_ITEM] Usuário: ${user.name} (${user.role}) - Admin: ${isAdmin}`,
+        );
+
+        // ===========================================================================
+        // 🔥 PASSO 3: VALIDAR QUANTIDADE
+        // ===========================================================================
+        await this.validateQuantityBeforeMove(
+          itemId,
+          newStageId,
+          companyId,
+          userId,
+        );
+
+        // ===========================================================================
+        // 🔥 PASSO 4: BUSCAR ITEM, STAGE DESTINO E ÚLTIMA STAGE
+        // ===========================================================================
+        const [item, nextStage, allStages] = await Promise.all([
+          tx.flowItem.findFirst({
+            where: { id: itemId, companyId },
+            include: {
+              stage: true,
+              assignedTo: true,
+              supplier: true,
+              flow: {
+                select: {
+                  id: true,
+                  name: true,
+                  color: true,
                 },
               },
-            }),
-            tx.flowStage.findFirst({
-              where: { id: newStageId, companyId },
-            }),
-          ]);
+            },
+          }),
+          tx.flowStage.findFirst({
+            where: { id: newStageId, companyId },
+          }),
+          tx.flowStage.findMany({
+            where: {
+              flowId: (
+                await tx.flowItem.findUnique({ where: { id: itemId } })
+              )?.flowId,
+            },
+            orderBy: { order: 'desc' },
+          }),
+        ]);
 
-          if (!item) {
-            this.logger.error(`❌ [MOVE_ITEM] Item ${itemId} não encontrado`);
-            throw new NotFoundException('Item não encontrado');
-          }
+        if (!item) {
+          this.logger.error(`❌ [MOVE_ITEM] Item ${itemId} não encontrado`);
+          throw new NotFoundException('Item não encontrado');
+        }
 
-          if (!nextStage) {
-            this.logger.error(
-              `❌ [MOVE_ITEM] Stage ${newStageId} não encontrado`,
-            );
-            throw new NotFoundException('Etapa destino não encontrada');
-          }
-
-          this.logger.log(
-            `📦 [MOVE_ITEM] Item: "${item.title}" (Qtd: ${item.quantity})`,
+        if (!nextStage) {
+          this.logger.error(
+            `❌ [MOVE_ITEM] Stage ${newStageId} não encontrado`,
           );
-          this.logger.log(
-            `📍 [MOVE_ITEM] De: "${item.stage?.name}" -> Para: "${nextStage.name}"`,
-          );
+          throw new NotFoundException('Etapa destino não encontrada');
+        }
 
-          // ===========================================================================
-          // 🔥 PASSO 5: VALIDAR ACESSO À STAGE
-          // ===========================================================================
-          if (!isAdmin) {
-            this.logger.log(
-              `👤 [MOVE_ITEM] Validando acesso do usuário à stage origem`,
-            );
-            this.validateStageAccess(user, item.stage!);
-          } else {
-            this.logger.log(
-              `👑 [MOVE_ITEM] ADMIN - Pulando validação de acesso`,
-            );
-          }
+        // 🔥 GUARDAR FLOW ID PARA USAR FORA DA TRANSAÇÃO (agora com valor)
+        flowId = item.flowId;
 
-          const oldStageId = item.stageId;
-          const oldAssignedToId = item.assignedToId;
-          const oldSupplierId = item.supplierId;
+        // 🔥 VERIFICAR SE É A ÚLTIMA ETAPA
+        const lastStage = allStages[0];
+        isLastStage = newStageId === lastStage?.id; // Usar optional chaining
 
-          // ===========================================================================
-          // 🔥 PASSO 6: VERIFICAR SE É COLUNA OFICINA
-          // ===========================================================================
-          const isOficina = nextStage.name.trim().toLowerCase() === 'oficina';
-          this.logger.log(`🏭 [MOVE_ITEM] É coluna OFICINA? ${isOficina}`);
+        this.logger.log(
+          `📦 [MOVE_ITEM] Item: "${item.title}" (Qtd: ${item.quantity})`,
+        );
+        this.logger.log(
+          `📍 [MOVE_ITEM] De: "${item.stage?.name}" -> Para: "${nextStage.name}"`,
+        );
+        this.logger.log(`🎯 [MOVE_ITEM] É última etapa? ${isLastStage}`);
 
-          // ===========================================================================
-          // 🔥 PASSO 7: VALIDAÇÕES ESPECÍFICAS POR TIPO DE COLUNA
-          // ===========================================================================
-          if (!isAdmin) {
-            if (isOficina) {
-              if (!selectedSupplierId) {
-                this.logger.error(
-                  `❌ [MOVE_ITEM] Oficina selecionada mas sem supplierId`,
-                );
-                throw new BadRequestException(
-                  'É obrigatório selecionar uma oficina para a coluna "Oficina"',
-                );
-              }
-              if (selectedResponsibleId) {
-                this.logger.error(`❌ [MOVE_ITEM] Oficina com responsibleId`);
-                throw new BadRequestException(
-                  'Não é permitido atribuir funcionário para a coluna "Oficina"',
-                );
-              }
-            } else {
-              if (selectedSupplierId) {
-                this.logger.error(
-                  `❌ [MOVE_ITEM] Coluna não-oficina com supplierId`,
-                );
-                throw new BadRequestException(
-                  'Não é permitido atribuir oficina para colunas que não sejam "Oficina"',
-                );
-              }
+        // ===========================================================================
+        // 🔥 PASSO 5: VALIDAR ACESSO À STAGE
+        // ===========================================================================
+        if (!isAdmin) {
+          this.validateStageAccess(user, item.stage!);
+        }
+
+        const oldStageId = item.stageId;
+        const oldAssignedToId = item.assignedToId;
+        const oldSupplierId = item.supplierId;
+
+        // ===========================================================================
+        // 🔥 PASSO 6: VERIFICAR SE É COLUNA OFICINA
+        // ===========================================================================
+        const isOficina = nextStage.name.trim().toLowerCase() === 'oficina';
+
+        // ===========================================================================
+        // 🔥 PASSO 7: VALIDAÇÕES ESPECÍFICAS POR TIPO DE COLUNA
+        // ===========================================================================
+        if (!isAdmin) {
+          if (isOficina) {
+            if (!selectedSupplierId) {
+              throw new BadRequestException(
+                'É obrigatório selecionar uma oficina para a coluna "Oficina"',
+              );
+            }
+            if (selectedResponsibleId) {
+              throw new BadRequestException(
+                'Não é permitido atribuir funcionário para a coluna "Oficina"',
+              );
             }
           } else {
-            this.logger.log(
-              `👑 [MOVE_ITEM] ADMIN - Pulando validações de responsável/oficina`,
-            );
+            if (selectedSupplierId) {
+              throw new BadRequestException(
+                'Não é permitido atribuir oficina para colunas que não sejam "Oficina"',
+              );
+            }
           }
+        }
 
-          // ===========================================================================
-          // 🔥 PASSO 8: CALCULAR NOVA ORDEM
-          // ===========================================================================
-          let finalOrder: number;
+        // ===========================================================================
+        // 🔥 PASSO 8: CALCULAR NOVA ORDEM
+        // ===========================================================================
+        let finalOrder: number;
 
-          if (newOrder !== undefined && newOrder >= 0) {
-            this.logger.log(
-              `📊 [MOVE_ITEM] Usando ordem específica: ${newOrder}`,
-            );
+        if (newOrder !== undefined && newOrder >= 0) {
+          await tx.flowItem.updateMany({
+            where: {
+              stageId: newStageId,
+              orderInStage: { gte: newOrder },
+              id: { not: itemId },
+            },
+            data: { orderInStage: { increment: 1 } },
+          });
+          finalOrder = newOrder;
+        } else {
+          const last = await tx.flowItem.findFirst({
+            where: { stageId: newStageId },
+            orderBy: { orderInStage: 'desc' },
+            select: { orderInStage: true },
+          });
+          finalOrder = (last?.orderInStage ?? -1) + 1;
+        }
 
-            await tx.flowItem.updateMany({
-              where: {
-                stageId: newStageId,
-                orderInStage: { gte: newOrder },
-                id: { not: itemId },
-              },
-              data: { orderInStage: { increment: 1 } },
-            });
-            finalOrder = newOrder;
+        // ===========================================================================
+        // 🔥 PASSO 9: PREPARAR DADOS DE ATUALIZAÇÃO
+        // ===========================================================================
+        const updateData: any = {
+          stageId: newStageId,
+          orderInStage: finalOrder,
+          updatedAt: new Date(),
+        };
+
+        if (isAdmin) {
+          if (selectedResponsibleId) {
+            updateData.assignedToId = selectedResponsibleId;
+            updateData.supplierId = null;
+          }
+          if (selectedSupplierId) {
+            updateData.supplierId = selectedSupplierId;
+            updateData.assignedToId = null;
+          }
+        } else {
+          if (isOficina) {
+            updateData.assignedToId = null;
+            updateData.supplierId = selectedSupplierId;
           } else {
-            const last = await tx.flowItem.findFirst({
-              where: { stageId: newStageId },
-              orderBy: { orderInStage: 'desc' },
-              select: { orderInStage: true },
-            });
-            finalOrder = (last?.orderInStage ?? -1) + 1;
-            this.logger.log(`📊 [MOVE_ITEM] Ordem automática: ${finalOrder}`);
-          }
-
-          // ===========================================================================
-          // 🔥 PASSO 9: PREPARAR DADOS DE ATUALIZAÇÃO
-          // ===========================================================================
-          const updateData: any = {
-            stageId: newStageId,
-            orderInStage: finalOrder,
-            updatedAt: new Date(),
-          };
-
-          // Admin pode escolher qualquer combinação
-          if (isAdmin) {
-            this.logger.log(
-              `👑 [MOVE_ITEM] ADMIN - Processando responsáveis livremente`,
-            );
-
+            updateData.supplierId = null;
             if (selectedResponsibleId) {
               updateData.assignedToId = selectedResponsibleId;
-              updateData.supplierId = null;
-              this.logger.log(
-                `👑 [MOVE_ITEM] ADMIN atribuindo funcionário: ${selectedResponsibleId}`,
-              );
-            }
-
-            if (selectedSupplierId) {
-              updateData.supplierId = selectedSupplierId;
-              updateData.assignedToId = null;
-              this.logger.log(
-                `👑 [MOVE_ITEM] ADMIN atribuindo oficina: ${selectedSupplierId}`,
-              );
-            }
-          } else {
-            // Lógica normal para não-admin
-            if (isOficina) {
-              updateData.assignedToId = null;
-              updateData.supplierId = selectedSupplierId;
-              this.logger.log(
-                `🏭 [MOVE_ITEM] Atribuindo oficina: ${selectedSupplierId}`,
-              );
-            } else {
-              updateData.supplierId = null;
-              if (selectedResponsibleId) {
-                updateData.assignedToId = selectedResponsibleId;
-                this.logger.log(
-                  `👤 [MOVE_ITEM] Atribuindo responsável: ${selectedResponsibleId}`,
-                );
-              }
             }
           }
+        }
 
-          // ===========================================================================
-          // 🔥 PASSO 10: EXECUTAR UPDATE
-          // ===========================================================================
-          const updated = await tx.flowItem.update({
-            where: { id: itemId },
-            data: updateData,
-            include: {
-              assignedTo: { select: { id: true, name: true } },
-              supplier: { select: { id: true, name: true } },
-            },
+        // ===========================================================================
+        // 🔥 PASSO 10: EXECUTAR UPDATE
+        // ===========================================================================
+        const updated = await tx.flowItem.update({
+          where: { id: itemId },
+          data: updateData,
+          include: {
+            assignedTo: { select: { id: true, name: true } },
+            supplier: { select: { id: true, name: true } },
+          },
+        });
+
+        this.logger.log(`✅ [MOVE_ITEM] Item movido com sucesso!`);
+
+        // ===========================================================================
+        // 🔥 PASSO 11: PREPARAR METADATA PARA AUDITORIA
+        // ===========================================================================
+        const metadata: any = {
+          fromStageId: oldStageId,
+          fromStageName: item.stage?.name,
+          toStageId: newStageId,
+          toStageName: nextStage.name,
+          newOrder: finalOrder,
+          isOficina,
+          isAdmin,
+          adminRole: isAdmin ? user.role : undefined,
+          executionTimeMs: Date.now() - startTime,
+        };
+
+        if (isOficina) {
+          metadata.oldSupplierId = oldSupplierId;
+          metadata.newSupplierId = selectedSupplierId;
+          metadata.newSupplierName = updated.supplier?.name;
+        } else {
+          metadata.oldResponsibleId = oldAssignedToId;
+          metadata.newResponsibleId = selectedResponsibleId;
+          metadata.newResponsibleName = updated.assignedTo?.name;
+        }
+
+        // ===========================================================================
+        // 🔥 PASSO 12: LOG DE AUDITORIA
+        // ===========================================================================
+        await this.auditService.log({
+          action: 'MOVE_ITEM',
+          entity: 'FLOW_ITEM',
+          entityId: itemId,
+          userId,
+          companyId,
+          metadata,
+        });
+
+        // ===========================================================================
+        // 🔥 PASSO 13: INVALIDAR CACHE
+        // ===========================================================================
+        await this.invalidateFlowCache(companyId, item.flowId);
+
+        // ===========================================================================
+        // 🔥 PASSO 14: INCREMENTAR MÉTRICA
+        // ===========================================================================
+        try {
+          this.moveCounter.inc({
+            operation: 'move',
+            status: 'success',
+            from_stage: oldStageId || 'unknown',
+            to_stage: newStageId,
+            is_admin: String(isAdmin),
           });
+        } catch (metricError) {
+          this.logger.error(
+            `Erro ao incrementar métrica: ${metricError.message}`,
+          );
+        }
 
-          this.logger.log(`✅ [MOVE_ITEM] Item movido com sucesso!`);
+        this.logger.log(
+          `🎯 [MOVE_ITEM] Movimentação concluída em ${Date.now() - startTime}ms`,
+        );
 
-          // ===========================================================================
-          // 🔥 PASSO 11: PREPARAR METADATA PARA AUDITORIA
-          // ===========================================================================
-          const metadata: any = {
-            fromStageId: oldStageId,
-            fromStageName: item.stage?.name,
-            toStageId: newStageId,
-            toStageName: nextStage.name,
-            newOrder: finalOrder,
-            isOficina,
-            isAdmin,
-            adminRole: isAdmin ? user.role : undefined,
-            executionTimeMs: Date.now() - startTime,
-          };
+        return updated;
+      },
+      {
+        timeout: 30000,
+        maxWait: 30000,
+        isolationLevel: 'ReadCommitted',
+      },
+    );
+  });
 
-          if (isOficina) {
-            metadata.oldSupplierId = oldSupplierId;
-            metadata.newSupplierId = selectedSupplierId;
-            metadata.newSupplierName = updated.supplier?.name;
-          } else {
-            metadata.oldResponsibleId = oldAssignedToId;
-            metadata.newResponsibleId = selectedResponsibleId;
-            metadata.newResponsibleName = updated.assignedTo?.name;
-          }
+  // ===========================================================================
+  // 🔥 PASSO 15: SE FOR ÚLTIMA ETAPA, AGENDAR CONCLUSÃO FORA DA TRANSAÇÃO
+  // ===========================================================================
+  // 🔥 VERIFICAR SE flowId FOI ATRIBUÍDO E SE É ÚLTIMA ETAPA
+  if (isLastStage && flowId) {
+    const companyId = this.cls.get<string>('tenantId');
+    
+    this.logger.log(
+      `⏰ [MOVE_ITEM] Agendando conclusão para item ${itemId} em 3 segundos`,
+    );
 
-          // ===========================================================================
-          // 🔥 PASSO 12: LOG DE AUDITORIA
-          // ===========================================================================
-          await this.auditService.log({
-            action: 'MOVE_ITEM',
-            entity: 'FLOW_ITEM',
-            entityId: itemId,
-            userId,
+    // setTimeout FORA da transação
+    setTimeout(async () => {
+      try {
+        if (companyId) {
+          await this.completeItemAfterDelay(itemId, userId, companyId);
+        } else {
+          this.logger.error(`❌ companyId não encontrado para conclusão do item ${itemId}`);
+        }
+      } catch (error) {
+        this.logger.error(
+          `❌ Erro ao concluir item agendado ${itemId}:`,
+          error,
+        );
+      }
+    }, 3000);
+  } else {
+    if (!flowId) {
+      this.logger.warn(`⚠️ [MOVE_ITEM] flowId não foi atribuído para item ${itemId}`);
+    }
+  }
+
+  this.logger.log('🎯 [MOVE_ITEM] ========================================');
+  
+  return result;
+}
+
+  // ===========================================================================
+  // 🔥 MÉTODO AUXILIAR PARA CONCLUIR ITEM APÓS DELAY
+  // ===========================================================================
+  private async completeItemAfterDelay(
+    itemId: string,
+    userId: string,
+    companyId: string,
+  ) {
+    this.logger.log(
+      `⏰ [COMPLETE_ITEM] Executando conclusão agendada para item ${itemId}`,
+    );
+
+    return this.executeWithResilience('complete_item', async () => {
+      return this.prisma.$transaction(async (tx) => {
+        // 1. Buscar item atual
+        const item = await tx.flowItem.findFirst({
+          where: {
+            id: itemId,
             companyId,
-            metadata,
-          });
-
-          // ===========================================================================
-          // 🔥 PASSO 13: INVALIDAR CACHE
-          // ===========================================================================
-          await this.invalidateFlowCache(companyId, item.flowId);
-
-          // ===========================================================================
-          // 🔥 PASSO 14: INCREMENTAR MÉTRICA
-          // ===========================================================================
-          try {
-            this.moveCounter.inc({
-              operation: 'move',
-              status: 'success',
-              from_stage: oldStageId || 'unknown',
-              to_stage: newStageId,
-              is_admin: String(isAdmin),
-            });
-          } catch (metricError) {
-            this.logger.error(
-              `Erro ao incrementar métrica: ${metricError.message}`,
-            );
-          }
-
-          this.logger.log(
-            '🎯 [MOVE_ITEM] ========================================',
-          );
-          this.logger.log(
-            `🎯 [MOVE_ITEM] Movimentação concluída em ${Date.now() - startTime}ms`,
-            {
-              newStage: nextStage.name,
-              newResponsible: isOficina
-                ? updated.supplier?.name
-                : updated.assignedTo?.name,
+          },
+          include: {
+            flow: {
+              select: {
+                id: true,
+                name: true,
+                color: true,
+              },
             },
-          );
+            stage: {
+              select: {
+                id: true,
+                name: true,
+                order: true,
+              },
+            },
+          },
+        });
 
-          return updated;
-        },
-        {
-          timeout: 30000,
-          maxWait: 30000,
-          isolationLevel: 'ReadCommitted',
-        },
-      );
+        if (!item) {
+          this.logger.warn(`⚠️ [COMPLETE_ITEM] Item ${itemId} não encontrado`);
+          return;
+        }
+
+        // 2. Verificar se ainda está na última etapa
+        const lastStage = await tx.flowStage.findFirst({
+          where: { flowId: item.flowId },
+          orderBy: { order: 'desc' },
+        });
+
+        if (!lastStage) {
+          this.logger.warn(
+            `⚠️ [COMPLETE_ITEM] Fluxo sem etapas para item ${itemId}`,
+          );
+          return;
+        }
+
+        if (item.stageId !== lastStage.id) {
+          this.logger.log(
+            `ℹ️ [COMPLETE_ITEM] Item ${itemId} não está mais na última etapa - ignorando conclusão`,
+          );
+          return;
+        }
+
+        // 3. Verificar se já está concluído
+        if (item.status === 'CONCLUIDO') {
+          this.logger.log(
+            `ℹ️ [COMPLETE_ITEM] Item ${itemId} já está concluído`,
+          );
+          return;
+        }
+
+        // 4. 🔥 ATUALIZAR STATUS PARA CONCLUIDO
+        const updatedItem = await tx.flowItem.update({
+          where: { id: itemId },
+          data: {
+            status: 'CONCLUIDO',
+            updatedAt: new Date(),
+          },
+        });
+
+        this.logger.log(
+          `✅ [COMPLETE_ITEM] Item ${itemId} concluído com sucesso!`,
+        );
+        this.logger.log(
+          `📊 [COMPLETE_ITEM] Status atualizado: ${item.status} -> CONCLUIDO`,
+        );
+
+        // 5. Log de auditoria
+        await this.auditService.log({
+          action: 'COMPLETE_ITEM',
+          entity: 'FLOW_ITEM',
+          entityId: itemId,
+          userId,
+          companyId,
+          metadata: {
+            flowId: item.flowId,
+            flowName: item.flow?.name,
+            productRef: item.productRef,
+            stageId: item.stageId,
+            stageName: item.stage?.name,
+            completedAfter: '3s delay',
+          },
+        });
+
+        // 6. Invalidar cache
+        await this.invalidateFlowCache(companyId, item.flowId);
+
+        return updatedItem;
+      });
     });
+  }
+
+  // ===========================================================================
+  // 🔥 MÉTODO PARA BUSCAR ITENS CONCLUÍDOS (DASHBOARD)
+  // ===========================================================================
+  async getCompletedItems(options?: {
+    limit?: number;
+    flowId?: string;
+    startDate?: Date;
+    endDate?: Date;
+    productRef?: string;
+    assignedToId?: string;
+    supplierId?: string;
+  }) {
+    const companyId = this.getCompanyIdFromContext();
+
+    this.logger.log(
+      `📊 [GET_COMPLETED_ITEMS] Buscando itens concluídos para dashboard`,
+    );
+
+    const where: any = {
+      companyId,
+      status: 'CONCLUIDO',
+    };
+
+    // Filtros opcionais
+    if (options?.flowId) {
+      where.flowId = options.flowId;
+    }
+
+    if (options?.productRef) {
+      where.productRef = {
+        contains: options.productRef,
+        mode: 'insensitive',
+      };
+    }
+
+    if (options?.assignedToId) {
+      where.assignedToId = options.assignedToId;
+    }
+
+    if (options?.supplierId) {
+      where.supplierId = options.supplierId;
+    }
+
+    // Filtro por data de conclusão (usa updatedAt)
+    if (options?.startDate || options?.endDate) {
+      where.updatedAt = {};
+      if (options.startDate) {
+        where.updatedAt.gte = options.startDate;
+      }
+      if (options.endDate) {
+        where.updatedAt.lte = options.endDate;
+      }
+    }
+
+    const items = await this.prisma.flowItem.findMany({
+      where,
+      include: {
+        flow: {
+          select: {
+            id: true,
+            name: true,
+            color: true,
+          },
+        },
+        assignedTo: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+        supplier: {
+          select: {
+            id: true,
+            name: true,
+            category: true,
+          },
+        },
+        stage: {
+          select: {
+            id: true,
+            name: true,
+            order: true,
+          },
+        },
+        images: {
+          take: 1,
+          select: {
+            id: true,
+            url: true,
+          },
+        },
+      },
+      orderBy: {
+        updatedAt: 'desc', // Mais recentes primeiro
+      },
+      take: options?.limit || 100,
+    });
+
+    this.logger.log(
+      `📊 [GET_COMPLETED_ITEMS] Encontrados ${items.length} itens concluídos`,
+    );
+
+    // Formatar para o dashboard com campos calculados
+    return items.map((item) => ({
+      id: item.id,
+      title: item.title,
+      productRef: item.productRef,
+      quantity: item.quantity,
+      orderNumber: item.orderNumber,
+      description: item.description,
+
+      // Dados do fluxo
+      flowId: item.flowId,
+      flowName: item.flow?.name,
+      flowColor: item.flow?.color || '#D35400',
+
+      // Dados de responsabilidade
+      assignedToId: item.assignedToId,
+      assignedToName: item.assignedTo?.name,
+      supplierId: item.supplierId,
+      supplierName: item.supplier?.name,
+
+      // Datas importantes
+      completedAt: item.updatedAt, // Data de conclusão
+      dueDate: item.dueDate,
+      productionStartedAt: item.productionStartedAt,
+      enteredAt: item.enteredAt,
+
+      // Estágio final
+      stageId: item.stageId,
+      stageName: item.stage?.name,
+
+      // 🔥 Campos calculados para o dashboard
+      productionTime: item.productionStartedAt
+        ? this.calculateProductionDays(item.productionStartedAt, item.updatedAt)
+        : null,
+
+      wasOverdue: item.dueDate
+        ? new Date(item.dueDate) < item.updatedAt
+        : false,
+
+      delayDays:
+        item.dueDate && new Date(item.dueDate) < item.updatedAt
+          ? Math.ceil(
+              (item.updatedAt.getTime() - new Date(item.dueDate).getTime()) /
+                (1000 * 60 * 60 * 24),
+            )
+          : 0,
+
+      // Primeira imagem (se houver)
+      imageUrl: item.images[0]?.url,
+    }));
+  }
+
+  // ===========================================================================
+  // 🔥 MÉTODO AUXILIAR PARA CALCULAR DIAS DE PRODUÇÃO
+  // ===========================================================================
+  private calculateProductionDays(startDate: Date, endDate: Date): number {
+    const start = new Date(startDate).getTime();
+    const end = new Date(endDate).getTime();
+    return Math.ceil((end - start) / (1000 * 60 * 60 * 24));
+  }
+
+  // ===========================================================================
+  // 🔥 MÉTODO PARA ESTATÍSTICAS DE CONCLUSÃO
+  // ===========================================================================
+  async getCompletionStats(
+    period: 'today' | 'week' | 'month' | 'year' = 'week',
+  ) {
+    const companyId = this.getCompanyIdFromContext();
+
+    this.logger.log(
+      `📊 [GET_COMPLETION_STATS] Calculando estatísticas para período: ${period}`,
+    );
+
+    const now = new Date();
+    let startDate: Date;
+
+    switch (period) {
+      case 'today':
+        startDate = new Date(now.setHours(0, 0, 0, 0));
+        break;
+      case 'week':
+        startDate = new Date(now.setDate(now.getDate() - 7));
+        break;
+      case 'month':
+        startDate = new Date(now.setMonth(now.getMonth() - 1));
+        break;
+      case 'year':
+        startDate = new Date(now.setFullYear(now.getFullYear() - 1));
+        break;
+      default:
+        startDate = new Date(now.setDate(now.getDate() - 7));
+    }
+
+    // Buscar todos os itens concluídos no período
+    const completedItems = await this.prisma.flowItem.findMany({
+      where: {
+        companyId,
+        status: 'CONCLUIDO',
+        updatedAt: {
+          gte: startDate,
+        },
+      },
+      include: {
+        flow: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        assignedTo: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+    });
+
+    // Estatísticas gerais
+    const totalCompleted = completedItems.length;
+
+    // Agrupar por fluxo
+    const byFlow = completedItems.reduce(
+      (acc, item) => {
+        const flowName = item.flow?.name || 'Sem fluxo';
+        if (!acc[flowName]) {
+          acc[flowName] = 0;
+        }
+        acc[flowName]++;
+        return acc;
+      },
+      {} as Record<string, number>,
+    );
+
+    // Agrupar por responsável
+    const byResponsible = completedItems.reduce(
+      (acc, item) => {
+        const name = item.assignedTo?.name || 'Não atribuído';
+        if (!acc[name]) {
+          acc[name] = 0;
+        }
+        acc[name]++;
+        return acc;
+      },
+      {} as Record<string, number>,
+    );
+
+    // Calcular médias
+    const itemsWithProductionTime = completedItems.filter(
+      (item) => item.productionStartedAt,
+    );
+
+    const avgProductionTime =
+      itemsWithProductionTime.length > 0
+        ? itemsWithProductionTime.reduce((sum, item) => {
+            const days = this.calculateProductionDays(
+              item.productionStartedAt!,
+              item.updatedAt,
+            );
+            return sum + days;
+          }, 0) / itemsWithProductionTime.length
+        : 0;
+
+    // Itens atrasados
+    const overdueCount = completedItems.filter(
+      (item) => item.dueDate && new Date(item.dueDate) < item.updatedAt,
+    ).length;
+
+    return {
+      period,
+      startDate,
+      endDate: new Date(),
+      total: totalCompleted,
+      byFlow,
+      byResponsible,
+      averages: {
+        productionTime: Math.round(avgProductionTime * 10) / 10, // 1 casa decimal
+        perDay: Math.round((totalCompleted / 7) * 10) / 10, // média nos últimos 7 dias
+      },
+      overdue: {
+        count: overdueCount,
+        percentage:
+          totalCompleted > 0
+            ? Math.round((overdueCount / totalCompleted) * 100)
+            : 0,
+      },
+    };
   }
 
   async advanceItemToNextStage(itemId: string, userId: string) {
