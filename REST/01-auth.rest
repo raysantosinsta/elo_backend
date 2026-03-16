@@ -2,13 +2,13 @@
 @contentType = application/json
 
 # --- VARIÁVEIS DE AMBIENTE (Preencha aqui para facilitar) ---
-@email = santosray62@gmail.com
-@password = Blessedhr10@
+@email = highadm@gmail.com
+@password = senha123
 
 # Cole os tokens aqui após fazer o login para usar nas rotas protegidas
-@accessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkMmRjM2M5Zi04N2JkLTQ3M2QtYjVhYy0zNzNhZjAyY2ZlZjkiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiIzMjhmNWYwOC1kOGEzLTQ2MzctYmJjYy1hOWQ1NmI2Zjg0NTYiLCJpYXQiOjE3Njc3MTc5ODUsImV4cCI6MTc2NzcxODg4NX0.EBPfMzBUhrn0UcEjG_WRtsZM2-_EIzRlWKbFwE8vnFM
+@accessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIwOTgyNDQ5OS0yNDFmLTQ3ZTgtYjlkMS05NDBkNjY3ZWQxMWYiLCJlbWFpbCI6ImhpZ2hhZG1AZ21haWwuY29tIiwicm9sZSI6IkFETUlOIiwiY29tcGFueUlkIjoiMzI4ZjVmMDgtZDhhMy00NjM3LWJiY2MtYTlkNTZiNmY4NDU2IiwiaWF0IjoxNzczNjc4NzI4LCJleHAiOjE3NzM2Nzk2Mjh9.jwRKR8TDcxH_KsM6L-pcO-20KXACu6lYNssE6B7Zqlc
 
-@refreshToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkMmRjM2M5Zi04N2JkLTQ3M2QtYjVhYy0zNzNhZjAyY2ZlZjkiLCJlbWFpbCI6InNhbnRvc3JheTYyQGdtYWlsLmNvbSIsInJvbGUiOiJNQVNURVIiLCJjb21wYW55SWQiOiIzMjhmNWYwOC1kOGEzLTQ2MzctYmJjYy1hOWQ1NmI2Zjg0NTYiLCJpYXQiOjE3Njc3MTc5ODUsImV4cCI6MTc2ODMyMjc4NX0.MTE6EV5rb90wlf80yJ2JND0qddp-hnbuZ0MN9EEExR8
+@refreshToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIwOTgyNDQ5OS0yNDFmLTQ3ZTgtYjlkMS05NDBkNjY3ZWQxMWYiLCJlbWFpbCI6ImhpZ2hhZG1AZ21haWwuY29tIiwicm9sZSI6IkFETUlOIiwiY29tcGFueUlkIjoiMzI4ZjVmMDgtZDhhMy00NjM3LWJiY2MtYTlkNTZiNmY4NDU2IiwiaWF0IjoxNzczNjc4NzI4LCJleHAiOjE3NzQyODM1Mjh9.5YhrChYRIZCQKcWlzkaofq-_SkTmsDmqOyq6-BcO7Nc
 
 
 # ==============================================================================

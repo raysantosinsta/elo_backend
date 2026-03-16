@@ -1,12 +1,12 @@
 ### VARIÁVEIS GLOBAIS (Preencha conforme você cria os recursos)
 @baseUrl = http://localhost:3000
-@token = SEU_TOKEN_JWT_AQUI_EYJHB...
+@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIwOTgyNDQ5OS0yNDFmLTQ3ZTgtYjlkMS05NDBkNjY3ZWQxMWYiLCJlbWFpbCI6ImhpZ2hhZG1AZ21haWwuY29tIiwicm9sZSI6IkFETUlOIiwiY29tcGFueUlkIjoiMzI4ZjVmMDgtZDhhMy00NjM3LWJiY2MtYTlkNTZiNmY4NDU2IiwiaWF0IjoxNzczNjc4NzI4LCJleHAiOjE3NzM2Nzk2Mjh9.jwRKR8TDcxH_KsM6L-pcO-20KXACu6lYNssE6B7Zqlc
 @companyId = ID_DA_EMPRESA_DO_TOKEN (Opcional, o backend pega do token)
 
 # --- IDs PARA TESTE (Atualize após criar os recursos) ---
-@flowId = cole_o_id_do_fluxo_aqui
-@stageId = cole_o_id_da_etapa_aqui
-@itemId = cole_o_id_do_item_aqui
+@flowId = c0c774c1-c759-4c16-8da6-1f180bb73489
+@stageId = 6a58ca42-2095-47d3-abfe-750e1ed35a35
+@itemId = be027ee7-395e-4cfd-bb49-ad2f5d55f6d2
 @templateId = cole_o_id_do_template_aqui
 @mediaId = cole_o_id_da_midia_aqui
 
@@ -183,4 +183,116 @@ Content-Type: image/png
 
 ### 6.2 Deletar Mídia
 DELETE {{baseUrl}}/flow/items/{{itemId}}/media/image/{{mediaId}}
+Authorization: Bearer {{token}}
+
+# ==============================================================================
+# 4️⃣ MOVIMENTAÇÃO (AÇÃO)
+# ==============================================================================
+
+### 4.1 Mover Item (Drag & Drop)
+# Simula o arrastar do card. O usuário logado deve ter o cargo da etapa de ORIGEM.
+# newStageId: ID da etapa de DESTINO.
+PUT {{baseUrl}}/flow/items/{{itemId}}/move
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "newStageId": "ID_DA_ETAPA_DE_DESTINO_AQUI"
+}
+
+### ============================================================================
+### 🔥 TESTES DE VALIDAÇÃO DE QUANTIDADE (ADICIONAR ABAIXO)
+### ============================================================================
+
+### 8.1 Buscar TODOS os fluxos da empresa
+GET {{baseUrl}}/flow
+Authorization: Bearer {{token}}
+
+### 7.1 Buscar todas as colunas de um fluxo específico
+GET {{baseUrl}}/flow/{{flowId}}/stages
+Authorization: Bearer {{token}}
+
+
+### 9.1 Buscar TODOS os itens da empresa (sem filtros)
+GET {{baseUrl}}/flow/filter/items
+Authorization: Bearer {{token}}
+
+### 4.2 🔥 TESTE 1: Mover item com QUANTIDADE ZERO - DEVE BLOQUEAR
+PUT {{baseUrl}}/flow/items/{{itemId}}/move
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "newStageId": "6a58ca42-2095-47d3-abfe-750e1ed35a35",
+  "newQuantity": 0
+}
+
+### 4.3 🔥 TESTE 2: Mover item com QUANTIDADE NEGATIVA - DEVE BLOQUEAR
+PUT {{baseUrl}}/flow/items/{{itemId}}/move
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "newStageId": "ID_DA_ETAPA_DE_DESTINO_AQUI",
+  "newQuantity": -5
+}
+
+### 4.4 🔥 TESTE 3: Mover item com QUANTIDADE VÁLIDA (>0) - DEVE PERMITIR
+PUT {{baseUrl}}/flow/items/{{itemId}}/move
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "newStageId": "ID_DA_ETAPA_DE_DESTINO_AQUI",
+  "newQuantity": 10,
+  "selectedResponsibleId": "ID_DO_RESPONSAVEL_AQUI"
+}
+
+### 4.5 🔥 TESTE 4: Mover item SEM ALTERAR QUANTIDADE - DEVE PERMITIR
+PUT {{baseUrl}}/flow/items/{{itemId}}/move
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "newStageId": "ID_DA_ETAPA_DE_DESTINO_AQUI",
+  "selectedResponsibleId": "ID_DO_RESPONSAVEL_AQUI"
+}
+
+### 4.6 🔥 TESTE 5: Mover item para OFICINA com quantidade ZERO - DEVE BLOQUEAR
+PUT {{baseUrl}}/flow/items/{{itemId}}/move
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "newStageId": "ID_DA_ETAPA_OFICINA_AQUI",
+  "newQuantity": 0,
+  "selectedSupplierId": "ID_DA_OFICINA_AQUI"
+}
+
+### 4.7 🔥 TESTE 6: Mover item com ADMIN e quantidade ZERO - DEVE BLOQUEAR TAMBÉM
+PUT {{baseUrl}}/flow/items/{{itemId}}/move
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "newStageId": "ID_DA_ETAPA_DE_DESTINO_AQUI",
+  "newQuantity": 0,
+  "selectedResponsibleId": "ID_DO_RESPONSAVEL_AQUI"
+}
+
+### 4.8 🔥 TESTE 7: Mover item com quantidade MUITO ALTA - DEVE PERMITIR
+PUT {{baseUrl}}/flow/items/{{itemId}}/move
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "newStageId": "ID_DA_ETAPA_DE_DESTINO_AQUI",
+  "newQuantity": 999999,
+  "selectedResponsibleId": "ID_DO_RESPONSAVEL_AQUI"
+}
+
+### 4.9 Avançar Item (Botão Automático "Concluir")
+# Move para a próxima etapa na sequência numérica.
+# Requer permissão MANAGE_FLOW_ITEMS (Todos logados) + Cargo da Etapa.
+POST {{baseUrl}}/flow/items/{{itemId}}/advance
 Authorization: Bearer {{token}}
