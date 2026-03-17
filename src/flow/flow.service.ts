@@ -203,8 +203,8 @@ export class FlowService {
       // 🔥 BLOQUEIA ZERO E NEGATIVOS PARA TODOS (inclusive admin)
       if (quantityNum <= 0) {
         const message = isAdmin
-          ? `⚠️ Quantidade deve ser maior que zero..`
-          :  `⚠️ Quantidade inválida (${quantityNum})! Quantidade deve ser maior que zero..`;
+          ? `⚠️ Adm: Quantidade deve ser maior que zero..`
+          : `⚠️ Quantidade deve ser maior que zero..`;
 
         this.logger.error(
           `❌ BLOQUEADO: ${isAdmin ? 'Admin' : 'Usuário'} ${user?.name} tentou mover item com quantidade ${quantityNum}`,
@@ -978,6 +978,20 @@ export class FlowService {
       },
     });
 
+    // ===========================================================================
+    // 🔥 VALIDAÇÃO DE PERMISSÃO PARA productRef
+    // ===========================================================================
+    if (dto.productRef) {
+      const canManage = await this.canManageProductRef(userId, companyId);
+      if (!canManage) {
+        console.error('❌ Usuário sem permissão para gerenciar productRef');
+        throw new ForbiddenException(
+          'Você não tem permissão para gerenciar a referência do produto. ' +
+            'Apenas usuários com cargo de modelagem e adm podem preencher este campo.',
+        );
+      }
+    }
+
     const user = await this.prisma.user.findFirst({
       where: { id: userId, companyId },
     });
@@ -988,6 +1002,8 @@ export class FlowService {
         'Usuário não encontrado ou não pertence à empresa',
       );
     }
+
+    
 
     console.log('✅ Usuário encontrado:', {
       id: user.id,
@@ -1235,6 +1251,21 @@ export class FlowService {
     }
 
     // ===========================================================================
+    // 🔥 VALIDAÇÃO DE PERMISSÃO PARA productRef NA ATUALIZAÇÃO
+    // ===========================================================================
+    if (data.productRef !== undefined && data.productRef !== item.productRef) {
+      const canManage = await this.canManageProductRef(userId, companyId);
+      if (!canManage) {
+        this.logger.warn(
+          `🚫 Usuário ${userId} tentou alterar productRef sem permissão`,
+        );
+        throw new ForbiddenException(
+          'Você não tem permissão para alterar a referência do produto.',
+        );
+      }
+    }
+
+    // ===========================================================================
     // 🔥 VALIDAÇÃO DE DUPLICIDADE AO ATUALIZAR - VERSÃO CORRIGIDA
     // ===========================================================================
     if (data.title || data.productRef) {
@@ -1279,7 +1310,7 @@ export class FlowService {
     }
 
     // 🔥 VERIFICAR SE É ADMIN
-    const adminRoles = ['MASTER', 'ADMIN', 'MANAGER'];
+    const adminRoles = ['MASTER', 'ADMIN'];
     const isAdmin = adminRoles.includes(user.role);
 
     if (isAdmin) {
@@ -1500,371 +1531,375 @@ export class FlowService {
   }
 
   async moveItem(
-  itemId: string,
-  newStageId: string,
-  userId: string,
-  newOrder?: number,
-  selectedResponsibleId?: string,
-  selectedSupplierId?: string,
-  newQuantity?: number,
-) {
-  const startTime = Date.now();
+    itemId: string,
+    newStageId: string,
+    userId: string,
+    newOrder?: number,
+    selectedResponsibleId?: string,
+    selectedSupplierId?: string,
+    newQuantity?: number,
+  ) {
+    const startTime = Date.now();
 
-  this.logger.log('🎯 [MOVE_ITEM] ========================================');
-  this.logger.log('🎯 [MOVE_ITEM] Início da movimentação', {
-    itemId,
-    newStageId,
-    userId,
-    newOrder,
-    selectedResponsibleId,
-    selectedSupplierId,
-    newQuantity,
-  });
+    this.logger.log('🎯 [MOVE_ITEM] ========================================');
+    this.logger.log('🎯 [MOVE_ITEM] Início da movimentação', {
+      itemId,
+      newStageId,
+      userId,
+      newOrder,
+      selectedResponsibleId,
+      selectedSupplierId,
+      newQuantity,
+    });
 
-  // 🔥 INICIALIZAR AS VARIÁVEIS COM VALORES PADRÃO
-  let flowId: string | undefined;
-  let isLastStage = false;
+    // 🔥 INICIALIZAR AS VARIÁVEIS COM VALORES PADRÃO
+    let flowId: string | undefined;
+    let isLastStage = false;
 
-  const result = await this.executeWithResilience('move_item', async () => {
-    return this.prisma.$transaction(
-      async (tx) => {
-        const companyId = this.cls.get<string>('tenantId');
+    const result = await this.executeWithResilience('move_item', async () => {
+      return this.prisma.$transaction(
+        async (tx) => {
+          const companyId = this.cls.get<string>('tenantId');
 
-        if (!companyId) {
-          this.logger.error('❌ [MOVE_ITEM] companyId não encontrado no CLS');
-          throw new ForbiddenException('Empresa não identificada');
-        }
+          if (!companyId) {
+            this.logger.error('❌ [MOVE_ITEM] companyId não encontrado no CLS');
+            throw new ForbiddenException('Empresa não identificada');
+          }
 
-        // ===========================================================================
-        // 🔥 PASSO 1: ATUALIZAR QUANTIDADE SE FORNECIDA
-        // ===========================================================================
-        if (newQuantity !== undefined) {
-          this.logger.log(
-            `📝 [MOVE_ITEM] Atualizando quantidade para: ${newQuantity}`,
-          );
-          await tx.flowItem.update({
-            where: { id: itemId },
-            data: { quantity: newQuantity },
+          // ===========================================================================
+          // 🔥 PASSO 1: ATUALIZAR QUANTIDADE SE FORNECIDA
+          // ===========================================================================
+          if (newQuantity !== undefined) {
+            this.logger.log(
+              `📝 [MOVE_ITEM] Atualizando quantidade para: ${newQuantity}`,
+            );
+            await tx.flowItem.update({
+              where: { id: itemId },
+              data: { quantity: newQuantity },
+            });
+          }
+
+          // ===========================================================================
+          // 🔥 PASSO 2: BUSCAR USUÁRIO
+          // ===========================================================================
+          const user = await tx.user.findFirst({
+            where: {
+              id: userId,
+              companyId,
+              status: 'ACTIVE',
+            },
+            select: {
+              id: true,
+              role: true,
+              name: true,
+              professionalRole: true,
+            },
           });
-        }
 
-        // ===========================================================================
-        // 🔥 PASSO 2: BUSCAR USUÁRIO
-        // ===========================================================================
-        const user = await tx.user.findFirst({
-          where: {
-            id: userId,
-            companyId,
-            status: 'ACTIVE',
-          },
-          select: {
-            id: true,
-            role: true,
-            name: true,
-            professionalRole: true,
-          },
-        });
+          if (!user) {
+            this.logger.error(
+              `❌ [MOVE_ITEM] Usuário ${userId} não encontrado`,
+            );
+            throw new NotFoundException('Usuário não encontrado');
+          }
 
-        if (!user) {
-          this.logger.error(
-            `❌ [MOVE_ITEM] Usuário ${userId} não encontrado`,
+          const adminRoles = ['MASTER', 'ADMIN', 'MANAGER'];
+          const isAdmin = adminRoles.includes(user.role);
+
+          this.logger.log(
+            `👤 [MOVE_ITEM] Usuário: ${user.name} (${user.role}) - Admin: ${isAdmin}`,
           );
-          throw new NotFoundException('Usuário não encontrado');
-        }
 
-        const adminRoles = ['MASTER', 'ADMIN', 'MANAGER'];
-        const isAdmin = adminRoles.includes(user.role);
+          // ===========================================================================
+          // 🔥 PASSO 3: VALIDAR QUANTIDADE
+          // ===========================================================================
+          await this.validateQuantityBeforeMove(
+            itemId,
+            newStageId,
+            companyId,
+            userId,
+          );
 
-        this.logger.log(
-          `👤 [MOVE_ITEM] Usuário: ${user.name} (${user.role}) - Admin: ${isAdmin}`,
-        );
-
-        // ===========================================================================
-        // 🔥 PASSO 3: VALIDAR QUANTIDADE
-        // ===========================================================================
-        await this.validateQuantityBeforeMove(
-          itemId,
-          newStageId,
-          companyId,
-          userId,
-        );
-
-        // ===========================================================================
-        // 🔥 PASSO 4: BUSCAR ITEM, STAGE DESTINO E ÚLTIMA STAGE
-        // ===========================================================================
-        const [item, nextStage, allStages] = await Promise.all([
-          tx.flowItem.findFirst({
-            where: { id: itemId, companyId },
-            include: {
-              stage: true,
-              assignedTo: true,
-              supplier: true,
-              flow: {
-                select: {
-                  id: true,
-                  name: true,
-                  color: true,
+          // ===========================================================================
+          // 🔥 PASSO 4: BUSCAR ITEM, STAGE DESTINO E ÚLTIMA STAGE
+          // ===========================================================================
+          const [item, nextStage, allStages] = await Promise.all([
+            tx.flowItem.findFirst({
+              where: { id: itemId, companyId },
+              include: {
+                stage: true,
+                assignedTo: true,
+                supplier: true,
+                flow: {
+                  select: {
+                    id: true,
+                    name: true,
+                    color: true,
+                  },
                 },
               },
-            },
-          }),
-          tx.flowStage.findFirst({
-            where: { id: newStageId, companyId },
-          }),
-          tx.flowStage.findMany({
-            where: {
-              flowId: (
-                await tx.flowItem.findUnique({ where: { id: itemId } })
-              )?.flowId,
-            },
-            orderBy: { order: 'desc' },
-          }),
-        ]);
+            }),
+            tx.flowStage.findFirst({
+              where: { id: newStageId, companyId },
+            }),
+            tx.flowStage.findMany({
+              where: {
+                flowId: (
+                  await tx.flowItem.findUnique({ where: { id: itemId } })
+                )?.flowId,
+              },
+              orderBy: { order: 'desc' },
+            }),
+          ]);
 
-        if (!item) {
-          this.logger.error(`❌ [MOVE_ITEM] Item ${itemId} não encontrado`);
-          throw new NotFoundException('Item não encontrado');
-        }
+          if (!item) {
+            this.logger.error(`❌ [MOVE_ITEM] Item ${itemId} não encontrado`);
+            throw new NotFoundException('Item não encontrado');
+          }
 
-        if (!nextStage) {
-          this.logger.error(
-            `❌ [MOVE_ITEM] Stage ${newStageId} não encontrado`,
+          if (!nextStage) {
+            this.logger.error(
+              `❌ [MOVE_ITEM] Stage ${newStageId} não encontrado`,
+            );
+            throw new NotFoundException('Etapa destino não encontrada');
+          }
+
+          // 🔥 GUARDAR FLOW ID PARA USAR FORA DA TRANSAÇÃO (agora com valor)
+          flowId = item.flowId;
+
+          // 🔥 VERIFICAR SE É A ÚLTIMA ETAPA
+          const lastStage = allStages[0];
+          isLastStage = newStageId === lastStage?.id; // Usar optional chaining
+
+          this.logger.log(
+            `📦 [MOVE_ITEM] Item: "${item.title}" (Qtd: ${item.quantity})`,
           );
-          throw new NotFoundException('Etapa destino não encontrada');
-        }
+          this.logger.log(
+            `📍 [MOVE_ITEM] De: "${item.stage?.name}" -> Para: "${nextStage.name}"`,
+          );
+          this.logger.log(`🎯 [MOVE_ITEM] É última etapa? ${isLastStage}`);
 
-        // 🔥 GUARDAR FLOW ID PARA USAR FORA DA TRANSAÇÃO (agora com valor)
-        flowId = item.flowId;
+          // ===========================================================================
+          // 🔥 PASSO 5: VALIDAR ACESSO À STAGE
+          // ===========================================================================
+          if (!isAdmin) {
+            this.validateStageAccess(user, item.stage!);
+          }
 
-        // 🔥 VERIFICAR SE É A ÚLTIMA ETAPA
-        const lastStage = allStages[0];
-        isLastStage = newStageId === lastStage?.id; // Usar optional chaining
+          const oldStageId = item.stageId;
+          const oldAssignedToId = item.assignedToId;
+          const oldSupplierId = item.supplierId;
 
-        this.logger.log(
-          `📦 [MOVE_ITEM] Item: "${item.title}" (Qtd: ${item.quantity})`,
-        );
-        this.logger.log(
-          `📍 [MOVE_ITEM] De: "${item.stage?.name}" -> Para: "${nextStage.name}"`,
-        );
-        this.logger.log(`🎯 [MOVE_ITEM] É última etapa? ${isLastStage}`);
+          // ===========================================================================
+          // 🔥 PASSO 6: VERIFICAR SE É COLUNA OFICINA
+          // ===========================================================================
+          const isOficina = nextStage.name.trim().toLowerCase() === 'oficina';
 
-        // ===========================================================================
-        // 🔥 PASSO 5: VALIDAR ACESSO À STAGE
-        // ===========================================================================
-        if (!isAdmin) {
-          this.validateStageAccess(user, item.stage!);
-        }
-
-        const oldStageId = item.stageId;
-        const oldAssignedToId = item.assignedToId;
-        const oldSupplierId = item.supplierId;
-
-        // ===========================================================================
-        // 🔥 PASSO 6: VERIFICAR SE É COLUNA OFICINA
-        // ===========================================================================
-        const isOficina = nextStage.name.trim().toLowerCase() === 'oficina';
-
-        // ===========================================================================
-        // 🔥 PASSO 7: VALIDAÇÕES ESPECÍFICAS POR TIPO DE COLUNA
-        // ===========================================================================
-        if (!isAdmin) {
-          if (isOficina) {
-            if (!selectedSupplierId) {
-              throw new BadRequestException(
-                'É obrigatório selecionar uma oficina para a coluna "Oficina"',
-              );
+          // ===========================================================================
+          // 🔥 PASSO 7: VALIDAÇÕES ESPECÍFICAS POR TIPO DE COLUNA
+          // ===========================================================================
+          if (!isAdmin) {
+            if (isOficina) {
+              if (!selectedSupplierId) {
+                throw new BadRequestException(
+                  'É obrigatório selecionar uma oficina para a coluna "Oficina"',
+                );
+              }
+              if (selectedResponsibleId) {
+                throw new BadRequestException(
+                  'Não é permitido atribuir funcionário para a coluna "Oficina"',
+                );
+              }
+            } else {
+              if (selectedSupplierId) {
+                throw new BadRequestException(
+                  'Não é permitido atribuir oficina para colunas que não sejam "Oficina"',
+                );
+              }
             }
-            if (selectedResponsibleId) {
-              throw new BadRequestException(
-                'Não é permitido atribuir funcionário para a coluna "Oficina"',
-              );
-            }
+          }
+
+          // ===========================================================================
+          // 🔥 PASSO 8: CALCULAR NOVA ORDEM
+          // ===========================================================================
+          let finalOrder: number;
+
+          if (newOrder !== undefined && newOrder >= 0) {
+            await tx.flowItem.updateMany({
+              where: {
+                stageId: newStageId,
+                orderInStage: { gte: newOrder },
+                id: { not: itemId },
+              },
+              data: { orderInStage: { increment: 1 } },
+            });
+            finalOrder = newOrder;
           } else {
-            if (selectedSupplierId) {
-              throw new BadRequestException(
-                'Não é permitido atribuir oficina para colunas que não sejam "Oficina"',
-              );
-            }
+            const last = await tx.flowItem.findFirst({
+              where: { stageId: newStageId },
+              orderBy: { orderInStage: 'desc' },
+              select: { orderInStage: true },
+            });
+            finalOrder = (last?.orderInStage ?? -1) + 1;
           }
-        }
 
-        // ===========================================================================
-        // 🔥 PASSO 8: CALCULAR NOVA ORDEM
-        // ===========================================================================
-        let finalOrder: number;
+          // ===========================================================================
+          // 🔥 PASSO 9: PREPARAR DADOS DE ATUALIZAÇÃO
+          // ===========================================================================
+          const updateData: any = {
+            stageId: newStageId,
+            orderInStage: finalOrder,
+            updatedAt: new Date(),
+          };
 
-        if (newOrder !== undefined && newOrder >= 0) {
-          await tx.flowItem.updateMany({
-            where: {
-              stageId: newStageId,
-              orderInStage: { gte: newOrder },
-              id: { not: itemId },
-            },
-            data: { orderInStage: { increment: 1 } },
-          });
-          finalOrder = newOrder;
-        } else {
-          const last = await tx.flowItem.findFirst({
-            where: { stageId: newStageId },
-            orderBy: { orderInStage: 'desc' },
-            select: { orderInStage: true },
-          });
-          finalOrder = (last?.orderInStage ?? -1) + 1;
-        }
-
-        // ===========================================================================
-        // 🔥 PASSO 9: PREPARAR DADOS DE ATUALIZAÇÃO
-        // ===========================================================================
-        const updateData: any = {
-          stageId: newStageId,
-          orderInStage: finalOrder,
-          updatedAt: new Date(),
-        };
-
-        if (isAdmin) {
-          if (selectedResponsibleId) {
-            updateData.assignedToId = selectedResponsibleId;
-            updateData.supplierId = null;
-          }
-          if (selectedSupplierId) {
-            updateData.supplierId = selectedSupplierId;
-            updateData.assignedToId = null;
-          }
-        } else {
-          if (isOficina) {
-            updateData.assignedToId = null;
-            updateData.supplierId = selectedSupplierId;
-          } else {
-            updateData.supplierId = null;
+          if (isAdmin) {
             if (selectedResponsibleId) {
               updateData.assignedToId = selectedResponsibleId;
+              updateData.supplierId = null;
+            }
+            if (selectedSupplierId) {
+              updateData.supplierId = selectedSupplierId;
+              updateData.assignedToId = null;
+            }
+          } else {
+            if (isOficina) {
+              updateData.assignedToId = null;
+              updateData.supplierId = selectedSupplierId;
+            } else {
+              updateData.supplierId = null;
+              if (selectedResponsibleId) {
+                updateData.assignedToId = selectedResponsibleId;
+              }
             }
           }
-        }
 
-        // ===========================================================================
-        // 🔥 PASSO 10: EXECUTAR UPDATE
-        // ===========================================================================
-        const updated = await tx.flowItem.update({
-          where: { id: itemId },
-          data: updateData,
-          include: {
-            assignedTo: { select: { id: true, name: true } },
-            supplier: { select: { id: true, name: true } },
-          },
-        });
-
-        this.logger.log(`✅ [MOVE_ITEM] Item movido com sucesso!`);
-
-        // ===========================================================================
-        // 🔥 PASSO 11: PREPARAR METADATA PARA AUDITORIA
-        // ===========================================================================
-        const metadata: any = {
-          fromStageId: oldStageId,
-          fromStageName: item.stage?.name,
-          toStageId: newStageId,
-          toStageName: nextStage.name,
-          newOrder: finalOrder,
-          isOficina,
-          isAdmin,
-          adminRole: isAdmin ? user.role : undefined,
-          executionTimeMs: Date.now() - startTime,
-        };
-
-        if (isOficina) {
-          metadata.oldSupplierId = oldSupplierId;
-          metadata.newSupplierId = selectedSupplierId;
-          metadata.newSupplierName = updated.supplier?.name;
-        } else {
-          metadata.oldResponsibleId = oldAssignedToId;
-          metadata.newResponsibleId = selectedResponsibleId;
-          metadata.newResponsibleName = updated.assignedTo?.name;
-        }
-
-        // ===========================================================================
-        // 🔥 PASSO 12: LOG DE AUDITORIA
-        // ===========================================================================
-        await this.auditService.log({
-          action: 'MOVE_ITEM',
-          entity: 'FLOW_ITEM',
-          entityId: itemId,
-          userId,
-          companyId,
-          metadata,
-        });
-
-        // ===========================================================================
-        // 🔥 PASSO 13: INVALIDAR CACHE
-        // ===========================================================================
-        await this.invalidateFlowCache(companyId, item.flowId);
-
-        // ===========================================================================
-        // 🔥 PASSO 14: INCREMENTAR MÉTRICA
-        // ===========================================================================
-        try {
-          this.moveCounter.inc({
-            operation: 'move',
-            status: 'success',
-            from_stage: oldStageId || 'unknown',
-            to_stage: newStageId,
-            is_admin: String(isAdmin),
+          // ===========================================================================
+          // 🔥 PASSO 10: EXECUTAR UPDATE
+          // ===========================================================================
+          const updated = await tx.flowItem.update({
+            where: { id: itemId },
+            data: updateData,
+            include: {
+              assignedTo: { select: { id: true, name: true } },
+              supplier: { select: { id: true, name: true } },
+            },
           });
-        } catch (metricError) {
+
+          this.logger.log(`✅ [MOVE_ITEM] Item movido com sucesso!`);
+
+          // ===========================================================================
+          // 🔥 PASSO 11: PREPARAR METADATA PARA AUDITORIA
+          // ===========================================================================
+          const metadata: any = {
+            fromStageId: oldStageId,
+            fromStageName: item.stage?.name,
+            toStageId: newStageId,
+            toStageName: nextStage.name,
+            newOrder: finalOrder,
+            isOficina,
+            isAdmin,
+            adminRole: isAdmin ? user.role : undefined,
+            executionTimeMs: Date.now() - startTime,
+          };
+
+          if (isOficina) {
+            metadata.oldSupplierId = oldSupplierId;
+            metadata.newSupplierId = selectedSupplierId;
+            metadata.newSupplierName = updated.supplier?.name;
+          } else {
+            metadata.oldResponsibleId = oldAssignedToId;
+            metadata.newResponsibleId = selectedResponsibleId;
+            metadata.newResponsibleName = updated.assignedTo?.name;
+          }
+
+          // ===========================================================================
+          // 🔥 PASSO 12: LOG DE AUDITORIA
+          // ===========================================================================
+          await this.auditService.log({
+            action: 'MOVE_ITEM',
+            entity: 'FLOW_ITEM',
+            entityId: itemId,
+            userId,
+            companyId,
+            metadata,
+          });
+
+          // ===========================================================================
+          // 🔥 PASSO 13: INVALIDAR CACHE
+          // ===========================================================================
+          await this.invalidateFlowCache(companyId, item.flowId);
+
+          // ===========================================================================
+          // 🔥 PASSO 14: INCREMENTAR MÉTRICA
+          // ===========================================================================
+          try {
+            this.moveCounter.inc({
+              operation: 'move',
+              status: 'success',
+              from_stage: oldStageId || 'unknown',
+              to_stage: newStageId,
+              is_admin: String(isAdmin),
+            });
+          } catch (metricError) {
+            this.logger.error(
+              `Erro ao incrementar métrica: ${metricError.message}`,
+            );
+          }
+
+          this.logger.log(
+            `🎯 [MOVE_ITEM] Movimentação concluída em ${Date.now() - startTime}ms`,
+          );
+
+          return updated;
+        },
+        {
+          timeout: 30000,
+          maxWait: 30000,
+          isolationLevel: 'ReadCommitted',
+        },
+      );
+    });
+
+    // ===========================================================================
+    // 🔥 PASSO 15: SE FOR ÚLTIMA ETAPA, AGENDAR CONCLUSÃO FORA DA TRANSAÇÃO
+    // ===========================================================================
+    // 🔥 VERIFICAR SE flowId FOI ATRIBUÍDO E SE É ÚLTIMA ETAPA
+    if (isLastStage && flowId) {
+      const companyId = this.cls.get<string>('tenantId');
+
+      this.logger.log(
+        `⏰ [MOVE_ITEM] Agendando conclusão para item ${itemId} em 3 segundos`,
+      );
+
+      // setTimeout FORA da transação
+      setTimeout(async () => {
+        try {
+          if (companyId) {
+            await this.completeItemAfterDelay(itemId, userId, companyId);
+          } else {
+            this.logger.error(
+              `❌ companyId não encontrado para conclusão do item ${itemId}`,
+            );
+          }
+        } catch (error) {
           this.logger.error(
-            `Erro ao incrementar métrica: ${metricError.message}`,
+            `❌ Erro ao concluir item agendado ${itemId}:`,
+            error,
           );
         }
-
-        this.logger.log(
-          `🎯 [MOVE_ITEM] Movimentação concluída em ${Date.now() - startTime}ms`,
-        );
-
-        return updated;
-      },
-      {
-        timeout: 30000,
-        maxWait: 30000,
-        isolationLevel: 'ReadCommitted',
-      },
-    );
-  });
-
-  // ===========================================================================
-  // 🔥 PASSO 15: SE FOR ÚLTIMA ETAPA, AGENDAR CONCLUSÃO FORA DA TRANSAÇÃO
-  // ===========================================================================
-  // 🔥 VERIFICAR SE flowId FOI ATRIBUÍDO E SE É ÚLTIMA ETAPA
-  if (isLastStage && flowId) {
-    const companyId = this.cls.get<string>('tenantId');
-    
-    this.logger.log(
-      `⏰ [MOVE_ITEM] Agendando conclusão para item ${itemId} em 3 segundos`,
-    );
-
-    // setTimeout FORA da transação
-    setTimeout(async () => {
-      try {
-        if (companyId) {
-          await this.completeItemAfterDelay(itemId, userId, companyId);
-        } else {
-          this.logger.error(`❌ companyId não encontrado para conclusão do item ${itemId}`);
-        }
-      } catch (error) {
-        this.logger.error(
-          `❌ Erro ao concluir item agendado ${itemId}:`,
-          error,
+      }, 3000);
+    } else {
+      if (!flowId) {
+        this.logger.warn(
+          `⚠️ [MOVE_ITEM] flowId não foi atribuído para item ${itemId}`,
         );
       }
-    }, 3000);
-  } else {
-    if (!flowId) {
-      this.logger.warn(`⚠️ [MOVE_ITEM] flowId não foi atribuído para item ${itemId}`);
     }
-  }
 
-  this.logger.log('🎯 [MOVE_ITEM] ========================================');
-  
-  return result;
-}
+    this.logger.log('🎯 [MOVE_ITEM] ========================================');
+
+    return result;
+  }
 
   // ===========================================================================
   // 🔥 MÉTODO AUXILIAR PARA CONCLUIR ITEM APÓS DELAY
@@ -3198,5 +3233,48 @@ export class FlowService {
     });
 
     return stages;
+  }
+
+  // ===========================================================================
+  // 🔥 MÉTODO PARA VERIFICAR PERMISSÃO DO CAMPO productRef
+  // ===========================================================================
+  private async canManageProductRef(
+    userId: string,
+    companyId: string,
+  ): Promise<boolean> {
+    const user = await this.prisma.user.findFirst({
+      where: {
+        id: userId,
+        companyId,
+        status: 'ACTIVE',
+      },
+      select: {
+        role: true,
+        professionalRole: true,
+      },
+    });
+
+    if (!user) return false;
+
+    // Admin e Master sempre podem
+    if (['MASTER', 'ADMIN'].includes(user.role)) {
+      return true;
+    }
+
+    // Employee só pode se tiver cargo de modelagem
+    if (user.role === 'EMPLOYER') {
+      const professionalRole = user.professionalRole?.toLowerCase() || '';
+      const MODELAGEM_KEYWORDS = [
+        'modelagem',
+        'modelista',
+        'modelo',
+      ];
+
+      return MODELAGEM_KEYWORDS.some((keyword) =>
+        professionalRole.includes(keyword),
+      );
+    }
+
+    return false;
   }
 }
