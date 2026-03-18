@@ -97,124 +97,147 @@ export class FlowService {
   }
 
   // ===========================================================================
-  // 🔥 MÉTODO PARA VALIDAR QUANTIDADE ANTES DE MOVER - CORRIGIDO (BLOQUEIA ZERO)
-  // ===========================================================================
-  // ===========================================================================
-  // 🔥 MÉTODO PARA VALIDAR QUANTIDADE ANTES DE MOVER - CORRIGIDO (VALIDA TODOS)
-  // ===========================================================================
-  private async validateQuantityBeforeMove(
-    itemId: string,
-    targetStageId: string,
-    companyId: string,
-    userId: string,
-  ): Promise<void> {
-    this.logger.log(
-      `🔍 Validando quantidade para movimentação do item ${itemId} para stage ${targetStageId}`,
-    );
+// 🔥 MÉTODO PARA VALIDAR QUANTIDADE ANTES DE MOVER - CORRIGIDO
+// ===========================================================================
+private async validateQuantityBeforeMove(
+  itemId: string,
+  targetStageId: string,
+  companyId: string,
+  userId: string,
+): Promise<void> {
+  this.logger.log(
+    `🔍 Validando quantidade para movimentação do item ${itemId} para stage ${targetStageId}`,
+  );
 
-    // Busca o item com sua etapa atual
-    const item = await this.prisma.flowItem.findFirst({
-      where: { id: itemId, companyId },
-      include: {
-        stage: true,
-        flow: {
-          include: {
-            stages: {
-              orderBy: { order: 'asc' },
-            },
+  // Busca o item com sua etapa atual
+  const item = await this.prisma.flowItem.findFirst({
+    where: { id: itemId, companyId },
+    include: {
+      stage: true,
+      flow: {
+        include: {
+          stages: {
+            orderBy: { order: 'asc' },
           },
         },
       },
-    });
+    },
+  });
 
-    if (!item) {
-      throw new NotFoundException('Item não encontrado');
-    }
-
-    // Busca o usuário (para mensagem personalizada)
-    const user = await this.prisma.user.findFirst({
-      where: {
-        id: userId,
-        companyId,
-        status: 'ACTIVE',
-      },
-      select: {
-        role: true,
-        name: true,
-      },
-    });
-
-    const adminRoles = ['MASTER', 'ADMIN'];
-    const isAdmin = user && adminRoles.includes(user.role);
-
-    // Busca a etapa de destino
-    const targetStage = await this.prisma.flowStage.findFirst({
-      where: { id: targetStageId, companyId },
-    });
-
-    if (!targetStage) {
-      throw new NotFoundException('Etapa destino não encontrada');
-    }
-
-    // Ordena todas as etapas do fluxo
-    const sortedStages = [...item.flow.stages].sort(
-      (a, b) => a.order - b.order,
-    );
-
-    // Encontra o índice da etapa de Corte
-    const corteIndex = sortedStages.findIndex((s) => this.isCorteStage(s.name));
-
-    // Se não tem coluna Corte, não aplica a regra
-    if (corteIndex === -1) {
-      return;
-    }
-
-    // Encontra o índice da etapa de destino
-    const targetStageIndex = sortedStages.findIndex(
-      (s) => s.id === targetStageId,
-    );
-
-    // 🔥 REGRA: Verifica se a etapa de destino é após o Corte
-    const isMovingToAfterCorte = targetStageIndex > corteIndex;
-
-    // 🔥 CORREÇÃO: VALIDA PARA TODOS (inclusive admin)
-    if (isMovingToAfterCorte) {
-      // Validar se quantidade existe
-      if (item.quantity === null || item.quantity === undefined) {
-        const message = isAdmin
-          ? '⚠️ Quantidade não definida! Como ADMIN, você precisa definir uma quantidade para mover itens para depois da coluna Corte.'
-          : 'Quantidade não definida.';
-
-        throw new BadRequestException(message);
-      }
-
-      // Converter para número
-      const quantityNum = Number(item.quantity);
-
-      // Verificar se é NaN
-      if (isNaN(quantityNum)) {
-        const message = isAdmin
-          ? `⚠️ Quantidade inválida ("${item.quantity}")! Como ADMIN, você precisa definir uma quantidade numérica válida.`
-          : 'Quantidade inválida.';
-
-        throw new BadRequestException(message);
-      }
-
-      // 🔥 BLOQUEIA ZERO E NEGATIVOS PARA TODOS (inclusive admin)
-      if (quantityNum <= 0) {
-        const message = isAdmin
-          ? `⚠️ Adm: Quantidade deve ser maior que zero..`
-          : `⚠️ Quantidade deve ser maior que zero..`;
-
-        this.logger.error(
-          `❌ BLOQUEADO: ${isAdmin ? 'Admin' : 'Usuário'} ${user?.name} tentou mover item com quantidade ${quantityNum}`,
-        );
-        throw new BadRequestException(message);
-      }
-
-      this.logger.debug(`✅ Quantidade válida: ${quantityNum}`);
-    }
+  if (!item) {
+    throw new NotFoundException('Item não encontrado');
   }
+
+  // Busca o usuário (para mensagem personalizada)
+  const user = await this.prisma.user.findFirst({
+    where: {
+      id: userId,
+      companyId,
+      status: 'ACTIVE',
+    },
+    select: {
+      role: true,
+      name: true,
+    },
+  });
+
+  const adminRoles = ['MASTER', 'ADMIN'];
+  const isAdmin = user && adminRoles.includes(user.role);
+
+  // Busca a etapa de destino
+  const targetStage = await this.prisma.flowStage.findFirst({
+    where: { id: targetStageId, companyId },
+  });
+
+  if (!targetStage) {
+    throw new NotFoundException('Etapa destino não encontrada');
+  }
+
+  // Ordena todas as etapas do fluxo
+  const sortedStages = [...item.flow.stages].sort(
+    (a, b) => a.order - b.order,
+  );
+
+  // ===========================================================================
+  // 🔥 PASSO 1: Encontrar índice da etapa "Distribuição"
+  // ===========================================================================
+  const DISTRIBUICAO_KEYWORDS = [
+    'distribuição',
+    'distribuicao',
+    'expedição',
+    'expedicao',
+  ];
+
+  const distribuicaoIndex = sortedStages.findIndex((s) =>
+    DISTRIBUICAO_KEYWORDS.some((keyword) =>
+      s.name.toLowerCase().includes(keyword.toLowerCase()),
+    ),
+  );
+
+  // Se não tem coluna Distribuição, não aplica a regra
+  if (distribuicaoIndex === -1) {
+    this.logger.debug('ℹ️ Nenhuma etapa de Distribuição encontrada - pulando validação');
+    return;
+  }
+
+  // ===========================================================================
+  // 🔥 PASSO 2: Encontrar índice da etapa de destino
+  // ===========================================================================
+  const targetStageIndex = sortedStages.findIndex(
+    (s) => s.id === targetStageId,
+  );
+
+  // ===========================================================================
+  // 🔥 PASSO 3: Verificar se a etapa de destino é APÓS Distribuição
+  // ===========================================================================
+  const isMovingToAfterDistribuicao = targetStageIndex > distribuicaoIndex;
+
+  // ===========================================================================
+  // 🔥 PASSO 4: Aplicar validação APENAS se for após Distribuição
+  // ===========================================================================
+  if (isMovingToAfterDistribuicao) {
+    this.logger.log(
+      `📋 Item sendo movido para após DISTRIBUIÇÃO (${targetStage.name})`,
+    );
+
+    // Validar se quantidade existe
+    if (item.quantity === null || item.quantity === undefined) {
+      const message = isAdmin
+        ? '⚠️ Quantidade não definida! Como ADMIN, você precisa definir uma quantidade para mover itens para depois da coluna Distribuição.'
+        : 'Quantidade não definida.';
+
+      throw new BadRequestException(message);
+    }
+
+    // Converter para número
+    const quantityNum = Number(item.quantity);
+
+    // Verificar se é NaN
+    if (isNaN(quantityNum)) {
+      const message = isAdmin
+        ? `⚠️ Quantidade inválida ("${item.quantity}")! Como ADMIN, você precisa definir uma quantidade numérica válida.`
+        : 'Quantidade inválida.';
+
+      throw new BadRequestException(message);
+    }
+
+    // 🔥 BLOQUEIA ZERO E NEGATIVOS PARA TODOS (inclusive admin)
+    if (quantityNum <= 0) {
+      const message = isAdmin
+        ? `⚠️ Admin: Quantidade deve ser maior que zero para mover para após Distribuição.`
+        : `⚠️ Quantidade deve ser maior que zero para mover para após Distribuição.`;
+
+      this.logger.error(
+        `❌ BLOQUEADO: ${isAdmin ? 'Admin' : 'Usuário'} ${user?.name} tentou mover item com quantidade ${quantityNum} para após Distribuição`,
+      );
+      throw new BadRequestException(message);
+    }
+
+    this.logger.debug(`✅ Quantidade válida: ${quantityNum}`);
+  } else {
+    this.logger.debug(`ℹ️ Item NÃO está sendo movido para após Distribuição - pulando validação`);
+  }
+}
 
   // ===========================================================================
   // MÉTODOS REFATORADOS - SEM companyId NOS PARÂMETROS
