@@ -2013,160 +2013,218 @@ export class FlowService {
     });
   }
 
-  // ===========================================================================
-  // 🔥 MÉTODO PARA BUSCAR ITENS CONCLUÍDOS (DASHBOARD)
-  // ===========================================================================
-  async getCompletedItems(options?: {
-    limit?: number;
-    flowId?: string;
-    startDate?: Date;
-    endDate?: Date;
-    productRef?: string;
-    assignedToId?: string;
-    supplierId?: string;
-  }) {
-    const companyId = this.getCompanyIdFromContext();
+// ===========================================================================
+// 🔥 MÉTODO PARA BUSCAR ITENS CONCLUÍDOS (DASHBOARD) - COM PAGINAÇÃO E LOGS
+// ===========================================================================
+async getCompletedItems(options?: {
+  page?: number;
+  limit?: number;
+  flowId?: string;
+  startDate?: Date;
+  endDate?: Date;
+  productRef?: string;
+  assignedToId?: string;
+  supplierId?: string;
+}) {
+  const companyId = this.getCompanyIdFromContext();
 
-    this.logger.log(
-      `📊 [GET_COMPLETED_ITEMS] Buscando itens concluídos para dashboard`,
-    );
+  console.log('\n' + '='.repeat(80));
+  console.log('📊 [GET_COMPLETED_ITEMS] ========================');
+  console.log('='.repeat(80));
+  console.log('📍 companyId:', companyId);
+  console.log('📍 options recebidos:', JSON.stringify(options, null, 2));
+  
+  // 🔥 LOG DOS PARÂMETROS DE PAGINAÇÃO
+  console.log('📍 page:', options?.page);
+  console.log('📍 limit:', options?.limit);
+  console.log('📍 flowId:', options?.flowId);
+  console.log('📍 productRef:', options?.productRef);
+  console.log('📍 assignedToId:', options?.assignedToId);
+  console.log('📍 supplierId:', options?.supplierId);
+  console.log('📍 startDate:', options?.startDate);
+  console.log('📍 endDate:', options?.endDate);
 
-    const where: any = {
-      companyId,
-      status: 'CONCLUIDO',
-    };
+  const where: any = {
+    companyId,
+    status: 'CONCLUIDO',
+  };
 
-    // Filtros opcionais
-    if (options?.flowId) {
-      where.flowId = options.flowId;
-    }
+  // 🔥 LOG DA CONSTRUÇÃO DO WHERE
+  console.log('\n🔧 Construindo where clause...');
 
-    if (options?.productRef) {
-      where.productRef = {
-        contains: options.productRef,
-        mode: 'insensitive',
-      };
-    }
-
-    if (options?.assignedToId) {
-      where.assignedToId = options.assignedToId;
-    }
-
-    if (options?.supplierId) {
-      where.supplierId = options.supplierId;
-    }
-
-    // Filtro por data de conclusão (usa updatedAt)
-    if (options?.startDate || options?.endDate) {
-      where.updatedAt = {};
-      if (options.startDate) {
-        where.updatedAt.gte = options.startDate;
-      }
-      if (options.endDate) {
-        where.updatedAt.lte = options.endDate;
-      }
-    }
-
-    const items = await this.prisma.flowItem.findMany({
-      where,
-      include: {
-        flow: {
-          select: {
-            id: true,
-            name: true,
-            color: true,
-          },
-        },
-        assignedTo: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
-        supplier: {
-          select: {
-            id: true,
-            name: true,
-            category: true,
-          },
-        },
-        stage: {
-          select: {
-            id: true,
-            name: true,
-            order: true,
-          },
-        },
-        images: {
-          take: 1,
-          select: {
-            id: true,
-            url: true,
-          },
-        },
-      },
-      orderBy: {
-        updatedAt: 'desc', // Mais recentes primeiro
-      },
-      take: options?.limit || 100,
-    });
-
-    this.logger.log(
-      `📊 [GET_COMPLETED_ITEMS] Encontrados ${items.length} itens concluídos`,
-    );
-
-    // Formatar para o dashboard com campos calculados
-    return items.map((item) => ({
-      id: item.id,
-      title: item.title,
-      productRef: item.productRef,
-      quantity: item.quantity,
-      orderNumber: item.orderNumber,
-      description: item.description,
-
-      // Dados do fluxo
-      flowId: item.flowId,
-      flowName: item.flow?.name,
-      flowColor: item.flow?.color || '#D35400',
-
-      // Dados de responsabilidade
-      assignedToId: item.assignedToId,
-      assignedToName: item.assignedTo?.name,
-      supplierId: item.supplierId,
-      supplierName: item.supplier?.name,
-
-      // Datas importantes
-      completedAt: item.updatedAt, // Data de conclusão
-      dueDate: item.dueDate,
-      productionStartedAt: item.productionStartedAt,
-      enteredAt: item.enteredAt,
-
-      // Estágio final
-      stageId: item.stageId,
-      stageName: item.stage?.name,
-
-      // 🔥 Campos calculados para o dashboard
-      productionTime: item.productionStartedAt
-        ? this.calculateProductionDays(item.productionStartedAt, item.updatedAt)
-        : null,
-
-      wasOverdue: item.dueDate
-        ? new Date(item.dueDate) < item.updatedAt
-        : false,
-
-      delayDays:
-        item.dueDate && new Date(item.dueDate) < item.updatedAt
-          ? Math.ceil(
-              (item.updatedAt.getTime() - new Date(item.dueDate).getTime()) /
-                (1000 * 60 * 60 * 24),
-            )
-          : 0,
-
-      // Primeira imagem (se houver)
-      imageUrl: item.images[0]?.url,
-    }));
+  // Filtros opcionais
+  if (options?.flowId) {
+    where.flowId = options.flowId;
+    console.log('✅ Filtro flowId adicionado:', options.flowId);
   }
+
+  if (options?.productRef) {
+    where.productRef = {
+      contains: options.productRef,
+      mode: 'insensitive',
+    };
+    console.log('✅ Filtro productRef adicionado:', options.productRef);
+  }
+
+  if (options?.assignedToId) {
+    where.assignedToId = options.assignedToId;
+    console.log('✅ Filtro assignedToId adicionado:', options.assignedToId);
+  }
+
+  if (options?.supplierId) {
+    where.supplierId = options.supplierId;
+    console.log('✅ Filtro supplierId adicionado:', options.supplierId);
+  }
+
+  // Filtro por data de conclusão (usa updatedAt)
+  if (options?.startDate || options?.endDate) {
+    where.updatedAt = {};
+    if (options.startDate) {
+      where.updatedAt.gte = options.startDate;
+      console.log('✅ Filtro startDate adicionado:', options.startDate);
+    }
+    if (options.endDate) {
+      where.updatedAt.lte = options.endDate;
+      console.log('✅ Filtro endDate adicionado:', options.endDate);
+    }
+  }
+
+  console.log('\n📋 WHERE clause final:', JSON.stringify(where, null, 2));
+
+  // 🔥 CONTAR TOTAL DE ITENS (para paginação)
+  console.log('\n🔢 Contando total de itens...');
+  const total = await this.prisma.flowItem.count({ where });
+  console.log('✅ Total de itens encontrados:', total);
+
+  // 🔥 CALCULAR PAGINAÇÃO
+  const page = options?.page || 1;
+  const limit = options?.limit || 100;
+  const skip = (page - 1) * limit;
+
+  console.log('\n📄 Configuração de paginação:');
+  console.log('   page:', page);
+  console.log('   limit:', limit);
+  console.log('   skip:', skip);
+  console.log('   totalPages:', Math.ceil(total / limit));
+
+  // Buscar itens com paginação
+  console.log('\n🔍 Buscando itens no banco...');
+  const items = await this.prisma.flowItem.findMany({
+    where,
+    include: {
+      flow: {
+        select: {
+          id: true,
+          name: true,
+          color: true,
+        },
+      },
+      assignedTo: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+        },
+      },
+      supplier: {
+        select: {
+          id: true,
+          name: true,
+          category: true,
+        },
+      },
+      stage: {
+        select: {
+          id: true,
+          name: true,
+          order: true,
+        },
+      },
+      images: {
+        take: 1,
+        select: {
+          id: true,
+          url: true,
+        },
+      },
+    },
+    orderBy: {
+      updatedAt: 'desc',
+    },
+    skip,
+    take: limit,
+  });
+
+  console.log(`✅ Encontrados ${items.length} itens na página ${page}`);
+
+  // 🔥 LOG DOS IDs DOS ITENS RETORNADOS
+  if (items.length > 0) {
+    console.log('\n📦 IDs dos itens retornados:');
+    items.forEach((item, index) => {
+      console.log(`   ${index + 1}. ${item.id} - ${item.title} (${item.productRef})`);
+    });
+  } else {
+    console.log('⚠️ Nenhum item encontrado');
+  }
+
+  // Formatar para o dashboard com campos calculados
+  const formattedItems = items.map((item) => ({
+    id: item.id,
+    title: item.title,
+    productRef: item.productRef,
+    quantity: item.quantity,
+    orderNumber: item.orderNumber,
+    description: item.description,
+    flowId: item.flowId,
+    flowName: item.flow?.name,
+    flowColor: item.flow?.color || '#D35400',
+    assignedToId: item.assignedToId,
+    assignedToName: item.assignedTo?.name,
+    supplierId: item.supplierId,
+    supplierName: item.supplier?.name,
+    completedAt: item.updatedAt,
+    dueDate: item.dueDate,
+    productionStartedAt: item.productionStartedAt,
+    enteredAt: item.enteredAt,
+    stageId: item.stageId,
+    stageName: item.stage?.name,
+    productionTime: item.productionStartedAt
+      ? this.calculateProductionDays(item.productionStartedAt, item.updatedAt)
+      : null,
+    wasOverdue: item.dueDate
+      ? new Date(item.dueDate) < item.updatedAt
+      : false,
+    delayDays:
+      item.dueDate && new Date(item.dueDate) < item.updatedAt
+        ? Math.ceil(
+            (item.updatedAt.getTime() - new Date(item.dueDate).getTime()) /
+              (1000 * 60 * 60 * 24),
+          )
+        : 0,
+    imageUrl: item.images[0]?.url,
+  }));
+
+  const result = {
+    data: formattedItems,
+    total,
+    pages: Math.ceil(total / limit),
+    currentPage: page,
+    limit,
+  };
+
+  console.log('\n📤 RESPOSTA FINAL:');
+  console.log(JSON.stringify({
+    dataLength: result.data.length,
+    total: result.total,
+    pages: result.pages,
+    currentPage: result.currentPage,
+    limit: result.limit
+  }, null, 2));
+  
+  console.log('='.repeat(80) + '\n');
+
+  return result;
+}
 
   // ===========================================================================
   // 🔥 MÉTODO AUXILIAR PARA CALCULAR DIAS DE PRODUÇÃO
