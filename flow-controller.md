@@ -443,7 +443,7 @@ export class FlowController {
   }
 
   // ===========================================================================
-  // 🔥 NOVOS ENDPOINTS PARA GESTÃO DE PRAZOS POR ETAPA (COM FEEDBACK)
+  // 🔥 NOVOS ENDPOINTS PARA GESTÃO DE PRAZOS POR ETAPA
   // ===========================================================================
 
   /**
@@ -482,40 +482,12 @@ export class FlowController {
   }
 
   /**
-   * Atualizar prazo de uma etapa específica (COM CASCATA AUTOMÁTICA)
+   * Atualizar prazo de uma etapa específica
    */
   @Patch('items/:itemId/stages/:stageId')
   @ApiOperation({ 
     summary: 'Atualiza o prazo de uma etapa específica do item',
-    description: 'Permite alterar o prazo de uma etapa. Admin: aplica cascata automática. Usuário comum: só etapa atual.'
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Prazo atualizado com feedback do impacto cascata',
-    schema: {
-      example: {
-        id: "item-stage-123",
-        stage: { name: "Corte", color: "#2ecc71" },
-        suggestedDeadline: "2024-12-05",
-        message: "✅ Prazo da etapa Corte atualizado com sucesso",
-        cascade: {
-          applied: true,
-          updatedStages: [
-            {
-              stageId: "stage-costura",
-              stageName: "Costura",
-              oldDeadline: "2024-12-03",
-              newDeadline: "2024-12-07"
-            }
-          ],
-          dueDateImpact: {
-            oldDueDate: "2024-12-05",
-            newDueDate: "2024-12-09",
-            message: "⚠️ Prazo final foi ajustado para 09/12/2024 devido ao acúmulo de atrasos"
-          }
-        }
-      }
-    }
+    description: 'Permite alterar o prazo de uma etapa. Apenas admin ou etapa atual.'
   })
   async updateItemStageDeadline(
     @Req() req: any,
@@ -532,72 +504,13 @@ export class FlowController {
     );
   }
 
-   /**
-   * Atualizar múltiplos prazos de uma vez (apenas admin) COM CASCATA
+  /**
+   * Atualizar múltiplos prazos de uma vez (apenas admin)
    */
   @Patch('items/:itemId/stages/bulk')
   @ApiOperation({ 
     summary: 'Atualiza múltiplos prazos de um item (apenas admin)',
-    description: 'Permite atualizar vários prazos de uma só vez. Aplica cascata a partir da primeira etapa alterada.'
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Prazos atualizados com feedback do impacto cascata',
-    schema: {
-      example: {
-        message: "3 atualizações realizadas com sucesso",
-        success: true,
-        results: [
-          {
-            id: "item-stage-456",
-            stageId: "stage-corte",
-            suggestedDeadline: "2024-12-05",
-            status: "ATUAL"
-          },
-          {
-            id: "item-stage-789",
-            stageId: "stage-costura",
-            suggestedDeadline: "2024-12-06",
-            status: "PENDENTE"
-          },
-          {
-            id: "item-stage-101",
-            stageId: "stage-acabamento",
-            suggestedDeadline: "2024-12-07",
-            status: "PENDENTE"
-          }
-        ],
-        cascade: {
-          applied: true,
-          fromStageId: "stage-corte",
-          updatedStages: [
-            {
-              stageId: "stage-costura",
-              stageName: "Costura",
-              oldDeadline: "2024-12-03",
-              newDeadline: "2024-12-07"
-            },
-            {
-              stageId: "stage-acabamento",
-              stageName: "Acabamento",
-              oldDeadline: "2024-12-04",
-              newDeadline: "2024-12-08"
-            },
-            {
-              stageId: "stage-expedicao",
-              stageName: "Expedição",
-              oldDeadline: "2024-12-05",
-              newDeadline: "2024-12-09"
-            }
-          ],
-          dueDateImpact: {
-            oldDueDate: "2024-12-05",
-            newDueDate: "2024-12-09",
-            message: "⚠️ Prazo final foi ajustado para 09/12/2024 devido ao efeito cascata"
-          }
-        }
-      }
-    }
+    description: 'Permite atualizar vários prazos de uma só vez. Apenas administradores.'
   })
   async bulkUpdateItemStages(
     @Req() req: any,
@@ -612,94 +525,84 @@ export class FlowController {
     );
   }
 
-  @Get('items/:itemId')
-@ApiOperation({ summary: 'Busca um item específico' })
-async getItemById(
+ 
+@Post('items/:itemId/move-with-deadline')
+async moveItemWithDeadline(
   @Req() req: any,
   @Param('itemId', ParseUUIDPipe) itemId: string,
+  @Body() dto: MoveItemWithDeadlineDto,  // ✅ correto aqui
 ) {
-  this.logger.log(`🔍 Buscando item ${itemId}`);
-  return this.flowService.getItemById(itemId);
+  this.logger.log(`🎯 Movendo item ${itemId} com atualização de prazo`);
+  return this.flowService.moveItemWithDeadline(
+    itemId,
+    dto,  // ✅ passa o DTO completo, não os campos separados
+    req.user.id
+  );
+}
+
+ /**
+ * Dashboard de prazos
+ */
+@Get('deadline-dashboard')
+@ApiOperation({ 
+  summary: 'Dashboard completo de prazos',
+  description: 'Retorna estatísticas e timeline de prazos para análise'
+})
+@ApiQuery({
+  name: 'flowId',
+  required: false,
+  type: String,
+  description: 'Filtrar por fluxo específico'
+})
+@ApiQuery({
+  name: 'period',
+  required: false,
+  enum: ['today', 'week', 'month', 'all'],
+  description: 'Período para análise (padrão: week)'
+})
+@ApiResponse({
+  status: 200,
+  description: 'Dashboard retornado com sucesso',
+  type: Object, // Você pode criar um DTO de resposta específico se quiser
+})
+@ApiResponse({
+  status: 400,
+  description: 'Parâmetros inválidos'
+})
+@ApiResponse({
+  status: 401,
+  description: 'Não autorizado'
+})
+async getDeadlineDashboard(
+  @Req() req: any,
+  @Query() query: DeadlineDashboardQueryDto,  // ✅ Recebe o DTO completo
+) {
+  this.logger.log(`📊 Buscando dashboard de prazos - flowId: ${query.flowId}, period: ${query.period}`);
+
+  // 🔥 Validação adicional se necessário
+  if (query.period && !['today', 'week', 'month', 'all'].includes(query.period)) {
+    throw new BadRequestException('Período inválido. Use: today, week, month, all');
+  }
+
+  if (query.flowId) {
+    // Valida se o UUID é válido (opcional, já tem validação no DTO)
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(query.flowId)) {
+      throw new BadRequestException('ID do fluxo inválido');
+    }
+  }
+
+  // ✅ Passa o DTO completo, não apenas o flowId
+  return this.flowService.getDeadlineDashboard(query);
 }
 
   /**
-   * Mover item com atualização automática de prazos
-   */
-  @Post('items/:itemId/move-with-deadline')
-  @ApiOperation({ 
-    summary: 'Move item entre colunas e atualiza prazos automaticamente',
-    description: 'Move o item, marca etapa anterior como concluída e atualiza dueDate com prazo da nova etapa'
-  })
-  async moveItemWithDeadline(
-    @Req() req: any,
-    @Param('itemId', ParseUUIDPipe) itemId: string,
-    @Body() dto: MoveItemWithDeadlineDto,
-  ) {
-    this.logger.log(`🎯 Movendo item ${itemId} com atualização de prazo`);
-    return this.flowService.moveItemWithDeadline(
-      itemId,
-      dto,
-      req.user.id
-    );
-  }
-
-  /**
-   * Dashboard de prazos
-   */
-  @Get('deadline-dashboard')
-  @ApiOperation({ 
-    summary: 'Dashboard completo de prazos',
-    description: 'Retorna estatísticas e timeline de prazos para análise'
-  })
-  @ApiQuery({
-    name: 'flowId',
-    required: false,
-    type: String,
-    description: 'Filtrar por fluxo específico'
-  })
-  @ApiQuery({
-    name: 'period',
-    required: false,
-    enum: ['today', 'week', 'month', 'all'],
-    description: 'Período para análise (padrão: week)'
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Dashboard retornado com sucesso',
-    type: Object,
-  })
-  @ApiResponse({
-    status: 400,
-    description: 'Parâmetros inválidos'
-  })
-  async getDeadlineDashboard(
-    @Req() req: any,
-    @Query() query: DeadlineDashboardQueryDto,
-  ) {
-    this.logger.log(`📊 Buscando dashboard de prazos - flowId: ${query.flowId}, period: ${query.period}`);
-
-    // Validação adicional se necessário
-    if (query.period && !['today', 'week', 'month', 'all'].includes(query.period)) {
-      throw new BadRequestException('Período inválido. Use: today, week, month, all');
-    }
-
-    if (query.flowId) {
-      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-      if (!uuidRegex.test(query.flowId)) {
-        throw new BadRequestException('ID do fluxo inválido');
-      }
-    }
-
-    return this.flowService.getDeadlineDashboard(query);
-  }
-
-  /**
-   * Recalcular prazos de um item (manual)
+   * Recalcular prazos de um item baseado nos templates das etapas
    */
   @Post('items/:itemId/recalculate-deadlines')
   @ApiOperation({ 
-    summary: 'Recalcula os prazos de um item baseado no prazo final atual',
-    description: 'Redistribui os prazos das etapas restantes proporcionalmente ao prazo final'
+    summary: 'Recalcula os prazos de um item baseado nos templates das etapas',
+    description: 'Útil quando o prazo sugerido de alguma etapa é alterado'
   })
   async recalculateItemDeadlines(
     @Req() req: any,
@@ -710,58 +613,60 @@ async getItemById(
   }
 
   /**
-   * Recalcular prazos de múltiplos itens
-   */
-  @Post('items/recalculate-deadlines/bulk')
-  @ApiOperation({ 
-    summary: 'Recalcula prazos de múltiplos itens',
-    description: 'Permite recalcular prazos de vários itens de uma vez'
-  })
-  async bulkRecalculateDeadlines(
-    @Req() req: any,
-    @Body() dto: RecalculateDeadlinesDto,
-  ) {
-    this.logger.log(`🧮 Recalculando prazos em lote`);
-    
-    if (dto.allItems === 'true') {
-      throw new BadRequestException('Recálculo em massa ainda não implementado');
-    }
-    
-    if (!dto.itemIds || dto.itemIds.length === 0) {
-      throw new BadRequestException('Nenhum item especificado para recálculo');
-    }
-
-    const results: Array<{
-      itemId: string;
-      success: boolean;
-      result?: any;
-      error?: string;
-    }> = [];
-
-    for (const itemId of dto.itemIds) {
-      try {
-        const result = await this.flowService.recalculateItemDeadlines(itemId, req.user.id);
-        results.push({ 
-          itemId, 
-          success: true, 
-          result 
-        });
-      } catch (error) {
-        results.push({ 
-          itemId, 
-          success: false, 
-          error: error.message 
-        });
-      }
-    }
-
-    return {
-      total: dto.itemIds.length,
-      success: results.filter(r => r.success).length,
-      failed: results.filter(r => !r.success).length,
-      results
-    };
+ * Recalcular prazos de múltiplos itens
+ */
+@Post('items/recalculate-deadlines/bulk')
+@ApiOperation({ 
+  summary: 'Recalcula prazos de múltiplos itens',
+  description: 'Permite recalcular prazos de vários itens de uma vez'
+})
+async bulkRecalculateDeadlines(
+  @Req() req: any,
+  @Body() dto: RecalculateDeadlinesDto,
+) {
+  this.logger.log(`🧮 Recalculando prazos em lote`);
+  
+  if (dto.allItems === 'true') {
+    // Recalcular todos os itens do fluxo (implementar depois se necessário)
+    throw new BadRequestException('Recálculo em massa ainda não implementado');
   }
+  
+  if (!dto.itemIds || dto.itemIds.length === 0) {
+    throw new BadRequestException('Nenhum item especificado para recálculo');
+  }
+
+  // 🔥 CORREÇÃO: Tipar o array results
+  const results: Array<{
+    itemId: string;
+    success: boolean;
+    result?: any;
+    error?: string;
+  }> = [];
+
+  for (const itemId of dto.itemIds) {
+    try {
+      const result = await this.flowService.recalculateItemDeadlines(itemId, req.user.id);
+      results.push({ 
+        itemId, 
+        success: true, 
+        result 
+      });
+    } catch (error) {
+      results.push({ 
+        itemId, 
+        success: false, 
+        error: error.message 
+      });
+    }
+  }
+
+  return {
+    total: dto.itemIds.length,
+    success: results.filter(r => r.success).length,
+    failed: results.filter(r => !r.success).length,
+    results
+  };
+}
 
   // ===========================================================================
   // ENDPOINTS EXISTENTES (MANTIDOS)
@@ -794,44 +699,12 @@ async getItemById(
     return this.flowService.createFlowItem(flowId, req.user.id, dto);
   }
 
-  /**
-   * Atualizar item (COM REDISTRIBUIÇÃO AUTOMÁTICA se dueDate for alterado)
-   */
   @Put('items/:itemId')
-  @ApiOperation({ 
-    summary: 'Atualiza um item existente',
-    description: 'Se dueDate for alterado por admin, prazos das etapas são redistribuídos automaticamente'
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Item atualizado com feedback da redistribuição',
-    schema: {
-      example: {
-        id: "item-123",
-        title: "Vestido Floral",
-        dueDate: "2024-12-11",
-        message: "✅ Item atualizado com sucesso",
-        redistribution: {
-          message: "📊 Prazos das etapas redistribuídos automaticamente com base no novo prazo final",
-          daysPerStage: 2,
-          updatedStages: [
-            {
-              stageId: "stage-costura",
-              stageName: "Costura",
-              oldDeadline: "2024-12-06",
-              newDeadline: "2024-12-07"
-            }
-          ]
-        }
-      }
-    }
-  })
   async updateItem(
     @Req() req: any,
     @Param('itemId', ParseUUIDPipe) itemId: string,
     @Body() body: UpdateFlowItemDto,
   ) {
-    this.logger.log(`📝 Atualizando item ${itemId} pelo usuário ${req.user.id}`);
     return this.flowService.updateFlowItem(itemId, req.user.id, body);
   }
 

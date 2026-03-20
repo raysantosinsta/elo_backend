@@ -1300,6 +1300,14 @@ export class FlowService {
     );
   }
 
+  // ===========================================================================
+  // 🔥 NOVO: CRIAR ITEM COM PRAZOS POR ETAPA (CORRIGIDO)
+  // ===========================================================================
+
+  // ===========================================================================
+  // 🔥 CRIAR ITEM COM PRAZOS POR ETAPA (CORRIGIDO)
+  // ===========================================================================
+
   async createFlowItemWithStages(
     flowId: string,
     userId: string,
@@ -1307,16 +1315,10 @@ export class FlowService {
   ) {
     const companyId = this.getCompanyIdFromContext();
 
-    this.logger.log('========================================');
-    this.logger.log('🎯 [REQUISITO 3] CRIANDO ITEM COM PRAZOS POR ETAPA');
-    this.logger.log('========================================');
-    this.logger.log(`📦 flowId: ${flowId}`);
-    this.logger.log(`📦 userId: ${userId}`);
-    this.logger.log(`📦 dto:`, dto);
+    this.logger.log(`🎯 Criando item com prazos por etapa no fluxo ${flowId}`);
 
     // Primeiro cria o item normalmente
     const item = await this.createFlowItem(flowId, userId, dto);
-    this.logger.log(`✅ Item criado: ${item.id} - ${item.title}`);
 
     // Busca todas as etapas do fluxo
     const stages = await this.prisma.flowStage.findMany({
@@ -1324,103 +1326,115 @@ export class FlowService {
       orderBy: { order: 'asc' },
     });
 
-    this.logger.log(`📋 Etapas encontradas: ${stages.length}`);
-    stages.forEach((s, i) => {
-      this.logger.log(
-        `   ${i + 1}. ${s.name} (ID: ${s.id}) - prazo sugerido: ${s.suggestedDeadline || 'não definido'}`,
-      );
-    });
-
     if (stages.length === 0) {
-      this.logger.warn('⚠️ Nenhuma etapa encontrada!');
       return item;
     }
 
-    // Data de início
-    const startDate = new Date(); // 🔥 Usa HOJE como base
-    startDate.setHours(0, 0, 0, 0);
+    // Data de início (usa a data de entrada do item ou a data atual)
+    const startDate = item.enteredAt || new Date();
     const totalStages = stages.length;
 
-    // Define dias por etapa
-    let daysPerStage = 7;
+    // Define dias por etapa (padrão ou calculado)
+    let daysPerStage = 7; // padrão: 7 dias por etapa
+
     if (dto.dueDate) {
       const dueDateObj = new Date(dto.dueDate);
       const totalDays = Math.ceil(
         (dueDateObj.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24),
       );
+
+      // Garante pelo menos 1 dia por etapa
       daysPerStage = Math.max(1, Math.ceil(totalDays / totalStages));
-      this.logger.log(
-        `📅 dueDate fornecido: ${dto.dueDate}, totalDays: ${totalDays}, daysPerStage: ${daysPerStage}`,
+
+      this.logger.debug(
+        `📊 DueDate: ${dto.dueDate}, Total dias: ${totalDays}, Dias por etapa: ${daysPerStage}`,
       );
-    } else {
-      this.logger.log(`📅 Sem dueDate, usando padrão: 7 dias por etapa`);
     }
 
     // Cria registros de prazo para cada etapa
-    const itemStages = await this.prisma.$transaction(async (tx) => {
-      const created = [];
-      let currentDeadline: Date | null = null;
+    const itemStages = await this.prisma.$transaction(
+      async (tx) => {
+        const created = [];
+        let currentDeadline: Date | null = null;
 
-      for (let i = 0; i < stages.length; i++) {
-        const stage = stages[i];
+        for (let i = 0; i < stages.length; i++) {
+          const stage = stages[i];
 
-        // CÁLCULO PROGRESSIVO
-        const deadline = new Date(startDate);
-        deadline.setDate(deadline.getDate() + daysPerStage * (i + 1));
+          // 🔥 CÁLCULO PROGRESSIVO
+          const deadline = new Date(startDate);
+          deadline.setDate(deadline.getDate() + daysPerStage * (i + 1));
 
-        this.logger.log(`📅 Etapa ${i + 1}/${totalStages}: ${stage.name}`);
-        this.logger.log(`   - Prazo calculado: ${deadline.toISOString()}`);
+          // Garante que o prazo não seja anterior à data atual
+          if (deadline < new Date()) {
+            const tempDate = new Date();
+            tempDate.setDate(tempDate.getDate() + (i + 1));
+            deadline.setTime(tempDate.getTime());
+          }
 
-        if (stage.id === item.stageId) {
-          currentDeadline = deadline;
-          this.logger.log(
-            `   🔥 ESTA É A ETAPA ATUAL! Prazo: ${deadline.toISOString()}`,
+          // Se for a etapa atual, guarda o prazo para atualizar o item
+          if (stage.id === item.stageId) {
+            currentDeadline = deadline;
+          }
+
+          const itemStage = await tx.flowItemStage.create({
+            data: {
+              itemId: item.id,
+              stageId: stage.id,
+              companyId,
+              order: stage.order,
+              status: stage.id === item.stageId ? 'ATUAL' : 'PENDENTE',
+              deadline,
+              suggestedDeadline: deadline,
+              actualDeadline: stage.id === item.stageId ? new Date() : null,
+              // 🔥 NOVO: Guarda o prazo sugerido original da etapa
+              basedOnSuggestedDeadline: stage.suggestedDeadline,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            },
+            include: {
+              stage: {
+                select: {
+                  id: true,
+                  name: true,
+                  color: true,
+                  order: true,
+                },
+              },
+            },
+          });
+
+          created.push(itemStage as never);
+
+          this.logger.debug(
+            `✅ Etapa ${i + 1}/${totalStages}: ${stage.name} - Prazo: ${deadline.toISOString()}`,
           );
         }
 
-        const itemStage = await tx.flowItemStage.create({
-          data: {
-            itemId: item.id,
-            stageId: stage.id,
-            companyId,
-            order: stage.order,
-            status: stage.id === item.stageId ? 'ATUAL' : 'PENDENTE',
-            deadline,
-            suggestedDeadline: deadline,
-            actualDeadline: stage.id === item.stageId ? new Date() : null,
-            basedOnSuggestedDeadline: stage.suggestedDeadline,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-          },
-        });
+        // 🔥 NOVO: Atualiza o dueDate do item com o prazo da etapa atual
+        if (currentDeadline) {
+          await tx.flowItem.update({
+            where: { id: item.id },
+            data: {
+              dueDate: currentDeadline,
+              updatedAt: new Date(),
+            },
+          });
+        }
 
-        this.logger.log(`   ✅ Registro criado: ${itemStage.id}`);
-        created.push(itemStage as never);
-      }
-
-      // Atualiza o dueDate do item com o prazo da etapa atual
-      if (currentDeadline) {
-        this.logger.log(
-          `🔄 Atualizando dueDate do item de ${item.dueDate} para ${currentDeadline.toISOString()}`,
-        );
-
-        await tx.flowItem.update({
-          where: { id: item.id },
-          data: {
-            dueDate: currentDeadline,
-            updatedAt: new Date(),
-          },
-        });
-      }
-
-      return created;
-    });
+        return created;
+      },
+      {
+        timeout: 30000,
+        maxWait: 30000,
+        isolationLevel: 'ReadCommitted',
+      },
+    );
 
     this.logger.log(
-      `✅ [REQUISITO 3] Criados ${itemStages.length} registros de prazo`,
+      `✅ Criados ${itemStages.length} registros de prazo para o item ${item.id}`,
     );
-    this.logger.log('========================================\n');
 
+    // Busca o item atualizado com o novo dueDate
     const updatedItem = await this.prisma.flowItem.findUnique({
       where: { id: item.id },
     });
@@ -1432,196 +1446,11 @@ export class FlowService {
   }
 
   // ===========================================================================
-// 🔥 MÉTODO AUXILIAR: Criar registros de prazo faltantes (CORRIGIDO)
-// ===========================================================================
-private async createMissingItemStages(item: any): Promise<any[]> {
-  this.logger.log(`🔄 Criando registros de prazo faltantes para item ${item.id}`);
-
-  const companyId = this.getCompanyIdFromContext();
-  const stages = item.flow.stages;
-  const totalStages = stages.length;
-  
-  // 🔥 Data base: HOJE (meio-dia para evitar problemas de fuso)
-  const today = new Date();
-  today.setHours(12, 0, 0, 0);
-  
-  const created = [];
-  let currentDeadline: Date | null = null;
-
-  // Se tem dueDate, distribui as etapas de HOJE até o prazo final
-  if (item.dueDate) {
-    // 🔥 Parse da data preservando o dia correto
-    let dueDateObj: Date;
-    
-    if (typeof item.dueDate === 'string') {
-      // Se veio como string ISO (ex: "2026-03-31T12:00:00.000Z")
-      const datePart = item.dueDate.split('T')[0];
-      const [year, month, day] = datePart.split('-').map(Number);
-      
-      // Cria a data no horário local (meio-dia)
-      dueDateObj = new Date(year, month - 1, day, 12, 0, 0);
-    } else {
-      dueDateObj = new Date(item.dueDate);
-    }
-    
-    // Zera as horas para comparação
-    dueDateObj.setHours(0, 0, 0, 0);
-    today.setHours(0, 0, 0, 0);
-    
-    // 🔥 Calcula o total de dias disponíveis
-    const totalDays = Math.ceil(
-      (dueDateObj.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
-    );
-    
-    this.logger.debug(`📊 Hoje: ${today.toLocaleDateString()}`);
-    this.logger.debug(`📊 Prazo final: ${dueDateObj.toLocaleDateString()}`);
-    this.logger.debug(`📊 Total de dias: ${totalDays}`);
-    this.logger.debug(`📊 Total de etapas: ${totalStages}`);
-    
-    for (let i = 0; i < stages.length; i++) {
-      const stage = stages[i];
-      
-      let deadline: Date;
-      
-      if (i === 0) {
-        // 🔥 PRIMEIRA ETAPA: HOJE
-        deadline = new Date(today);
-        this.logger.debug(`📌 Primeira etapa (${stage.name}) é HOJE: ${deadline.toLocaleDateString()}`);
-      } 
-      else if (i === stages.length - 1) {
-        // 🔥 ÚLTIMA ETAPA: PRAZO FINAL
-        deadline = new Date(dueDateObj);
-        this.logger.debug(`📌 Última etapa (${stage.name}) é o prazo final: ${deadline.toLocaleDateString()}`);
-      } 
-      else {
-        // 🔥 ETAPAS INTERMEDIÁRIAS: distribuição proporcional
-        // progresso de 0 a 1, onde i=1 é a primeira etapa após hoje
-        const progress = i / (stages.length - 1);
-        
-        // 🔥 Usamos Math.round para melhor distribuição
-        // Isso evita que duas etapas caiam no mesmo dia
-        const daysToAdd = Math.round(totalDays * progress);
-        
-        deadline = new Date(today);
-        deadline.setDate(deadline.getDate() + daysToAdd);
-        
-        // 🔥 Garante que não ultrapasse o prazo final
-        if (deadline > dueDateObj) {
-          deadline = new Date(dueDateObj);
-        }
-        
-        this.logger.debug(`✅ Etapa ${i+1}/${totalStages}: ${stage.name}`);
-        this.logger.debug(`   - Progresso: ${(progress * 100).toFixed(0)}%`);
-        this.logger.debug(`   - Dias a adicionar: ${daysToAdd}`);
-        this.logger.debug(`   - Prazo: ${deadline.toLocaleDateString()}`);
-      }
-      
-      // 🔥 Verifica se é a etapa atual
-      if (stage.id === item.stageId) {
-        currentDeadline = deadline;
-        this.logger.debug(`   🔥 ESTA É A ETAPA ATUAL!`);
-      }
-      
-      // 🔥 Cria o registro de prazo
-      const itemStage = await this.prisma.flowItemStage.create({
-        data: {
-          itemId: item.id,
-          stageId: stage.id,
-          companyId,
-          order: stage.order,
-          status: stage.id === item.stageId ? 'ATUAL' : 'PENDENTE',
-          deadline,
-          suggestedDeadline: deadline,
-          actualDeadline: stage.id === item.stageId ? new Date() : null,
-          basedOnSuggestedDeadline: stage.suggestedDeadline,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-        include: {
-          stage: {
-            select: {
-              id: true,
-              name: true,
-              color: true,
-              order: true,
-            },
-          },
-        },
-      });
-      
-      created.push(itemStage as never);
-    }
-    
-    // 🔥 Atualiza o dueDate do item com o prazo da etapa atual
-    if (currentDeadline) {
-      this.logger.log(`🔄 dueDate do item atualizado de ${item.dueDate?.toLocaleDateString()} para ${currentDeadline.toLocaleDateString()}`);
-      
-      await this.prisma.flowItem.update({
-        where: { id: item.id },
-        data: {
-          dueDate: currentDeadline,
-          updatedAt: new Date(),
-        },
-      });
-    }
-  } else {
-    // 🔥 Sem dueDate, usa 7 dias por etapa a partir de HOJE
-    this.logger.debug(`📊 Sem dueDate, usando padrão: 7 dias por etapa`);
-    
-    for (let i = 0; i < stages.length; i++) {
-      const stage = stages[i];
-      
-      const deadline = new Date(today);
-      deadline.setDate(deadline.getDate() + 7 * i);
-      
-      this.logger.debug(`✅ Etapa ${i+1}/${totalStages}: ${stage.name} - Prazo: ${deadline.toLocaleDateString()}`);
-      
-      if (stage.id === item.stageId) {
-        currentDeadline = deadline;
-      }
-      
-      const itemStage = await this.prisma.flowItemStage.create({
-        data: {
-          itemId: item.id,
-          stageId: stage.id,
-          companyId,
-          order: stage.order,
-          status: stage.id === item.stageId ? 'ATUAL' : 'PENDENTE',
-          deadline,
-          suggestedDeadline: deadline,
-          actualDeadline: stage.id === item.stageId ? new Date() : null,
-          basedOnSuggestedDeadline: stage.suggestedDeadline,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-      });
-      
-      created.push(itemStage as never);
-    }
-    
-    // 🔥 Atualiza o dueDate do item
-    if (currentDeadline) {
-      await this.prisma.flowItem.update({
-        where: { id: item.id },
-        data: {
-          dueDate: currentDeadline,
-          updatedAt: new Date(),
-        },
-      });
-    }
-  }
-
-  this.logger.log(`✅ Criados ${created.length} registros de prazo para o item ${item.id}`);
-  return created;
-}
+  // 🔥 GERENCIAMENTO DE PRAZOS POR ETAPA - CORRIGIDO
+  // ===========================================================================
 
   async getItemStages(itemId: string) {
     const companyId = this.getCompanyIdFromContext();
-
-    this.logger.log('========================================');
-    this.logger.log('📋 [REQUISITO 4] BUSCANDO HISTÓRICO DE PRAZOS');
-    this.logger.log('========================================');
-    this.logger.log(`🔍 itemId: ${itemId}`);
 
     const itemStages = await this.prisma.flowItemStage.findMany({
       where: {
@@ -1643,13 +1472,8 @@ private async createMissingItemStages(item: any): Promise<any[]> {
       },
     });
 
-    this.logger.log(`📊 Encontrados ${itemStages.length} registros`);
-
     if (itemStages.length === 0) {
-      this.logger.warn(
-        '⚠️ Nenhum registro encontrado! Verificando se item existe...',
-      );
-
+      // Se não tem registros, busca o item e cria automaticamente
       const item = await this.prisma.flowItem.findFirst({
         where: { id: itemId, companyId },
         include: {
@@ -1664,45 +1488,101 @@ private async createMissingItemStages(item: any): Promise<any[]> {
       });
 
       if (!item) {
-        this.logger.error('❌ Item não encontrado!');
         throw new NotFoundException('Item não encontrado');
       }
 
-      this.logger.log(
-        `🔄 Item encontrado, mas sem registros. Criando automaticamente...`,
-      );
-      this.logger.log(
-        `📋 Fluxo: ${item.flow.name} com ${item.flow.stages.length} etapas`,
-      );
+      // Cria os registros automaticamente com prazos progressivos
+      return this.prisma.$transaction(
+        async (tx) => {
+          const created = [];
+          const totalStages = item.flow.stages.length;
 
-      // 🔥 CHAMADA CORRETA para o método que acabamos de criar
-      const created = await this.createMissingItemStages(item);
+          // Define a data base (usa a data de entrada ou data atual)
+          const baseDate = item.enteredAt || new Date();
+          let currentDeadline: Date | null = null;
 
-      this.logger.log(`✅ ${created.length} registros criados automaticamente`);
-      return created;
+          // Se tem dueDate, calcula dias totais disponíveis para distribuir
+          let daysPerStage = 7; // padrão: 7 dias por etapa
+
+          if (item.dueDate) {
+            const dueDateObj = new Date(item.dueDate);
+            const totalDays = Math.ceil(
+              (dueDateObj.getTime() - baseDate.getTime()) /
+                (1000 * 60 * 60 * 24),
+            );
+
+            // Distribui os dias proporcionalmente entre as etapas
+            daysPerStage = Math.max(1, Math.ceil(totalDays / totalStages));
+          }
+
+          for (let i = 0; i < item.flow.stages.length; i++) {
+            const stage = item.flow.stages[i];
+
+            // 🔥 CÁLCULO PROGRESSIVO
+            const deadline = new Date(baseDate);
+            deadline.setDate(deadline.getDate() + daysPerStage * (i + 1));
+
+            // Se for a etapa atual, guarda o prazo
+            if (stage.id === item.stageId) {
+              currentDeadline = deadline;
+            }
+
+            const itemStage = await tx.flowItemStage.create({
+              data: {
+                itemId: item.id,
+                stageId: stage.id,
+                companyId,
+                order: stage.order,
+                status: stage.id === item.stageId ? 'ATUAL' : 'PENDENTE',
+                deadline,
+                suggestedDeadline: deadline,
+                actualDeadline: stage.id === item.stageId ? new Date() : null,
+                // 🔥 NOVO: Guarda o prazo sugerido original da etapa
+                basedOnSuggestedDeadline: stage.suggestedDeadline,
+                createdAt: new Date(),
+                updatedAt: new Date(),
+              },
+              include: {
+                stage: {
+                  select: {
+                    id: true,
+                    name: true,
+                    color: true,
+                    order: true,
+                  },
+                },
+              },
+            });
+            created.push(itemStage as never);
+          }
+
+          // 🔥 NOVO: Atualiza o dueDate do item se necessário
+          if (
+            currentDeadline &&
+            item.dueDate?.getTime() !== currentDeadline.getTime()
+          ) {
+            await tx.flowItem.update({
+              where: { id: item.id },
+              data: {
+                dueDate: currentDeadline,
+                updatedAt: new Date(),
+              },
+            });
+          }
+
+          return created;
+        },
+        {
+          timeout: 60000,
+          maxWait: 60000,
+          isolationLevel: 'ReadCommitted',
+        },
+      );
     }
 
-    // Log detalhado de cada etapa
-    itemStages.forEach((stage, index) => {
-      this.logger.log(`${index + 1}. ${stage.stage.name}:`);
-      this.logger.log(`   - status: ${stage.status}`);
-      this.logger.log(`   - deadline: ${stage.deadline}`);
-      this.logger.log(`   - suggestedDeadline: ${stage.suggestedDeadline}`);
-      this.logger.log(
-        `   - actualDeadline: ${stage.actualDeadline || 'não concluída'}`,
-      );
-      this.logger.log(
-        `   - isCurrentStage: ${stage.stageId === itemStages.find((s) => s.status === 'ATUAL')?.stageId}`,
-      );
-    });
-
-    this.logger.log('========================================\n');
     return itemStages;
   }
 
-  // ===========================================================================
-  // 🔥 VERSÃO CORRIGIDA: updateItemStageDeadline COM CASCATA
-  // ===========================================================================
   async updateItemStageDeadline(
     itemId: string,
     stageId: string,
@@ -1822,8 +1702,6 @@ private async createMissingItemStages(item: any): Promise<any[]> {
       updateData.notes = dto.notes;
     }
 
-    const oldSuggestedDeadline = itemStage.suggestedDeadline;
-
     const updated = await this.prisma.flowItemStage.update({
       where: { id: itemStage.id },
       data: updateData,
@@ -1837,32 +1715,6 @@ private async createMissingItemStages(item: any): Promise<any[]> {
         },
       },
     });
-
-    // 🔥 DEFININDO O TIPO EXPLICITAMENTE PARA CASCADE RESULT
-    type CascadeResultType = {
-      updatedStages: any[];
-      dueDateChanged: boolean;
-      newDueDate?: Date;
-      oldDueDate?: Date;
-      impact: {
-        stageId: string;
-        stageName: string;
-        oldDeadline: Date;
-        newDeadline: Date;
-      }[];
-    };
-
-    let cascadeResult: CascadeResultType | null = null;
-
-    if (isAdmin && dto.suggestedDeadline) {
-      cascadeResult = await this.recalculateDownstreamStages(
-        itemId,
-        stageId,
-        new Date(dto.suggestedDeadline),
-        userId,
-        companyId,
-      );
-    }
 
     // 🔥 NOVO: Se a etapa atual foi atualizada, sincroniza o dueDate do item
     if (item.stageId === stageId && dto.suggestedDeadline) {
@@ -1884,51 +1736,19 @@ private async createMissingItemStages(item: any): Promise<any[]> {
       metadata: {
         stageId,
         stageName: updated.stage.name,
-        oldSuggestedDeadline,
+        oldSuggestedDeadline: itemStage.suggestedDeadline,
         newSuggestedDeadline: updated.suggestedDeadline,
         oldActualDeadline: itemStage.actualDeadline,
         newActualDeadline: updated.actualDeadline,
         oldStatus: itemStage.status,
         newStatus: updated.status,
         isAdmin,
-        cascadeApplied: !!cascadeResult,
-        dueDateChanged: cascadeResult?.dueDateChanged || false,
-        newDueDate: cascadeResult?.newDueDate,
       },
     });
 
-    // Retorna com feedback claro
-    const response: any = {
-      ...updated,
-      message: `✅ Prazo da etapa ${updated.stage.name} atualizado com sucesso`,
-    };
-
-    if (cascadeResult) {
-      response.cascade = {
-        applied: true,
-        updatedStages: cascadeResult.impact.map((i) => ({
-          stageId: i.stageId,
-          stageName: i.stageName,
-          oldDeadline: i.oldDeadline,
-          newDeadline: i.newDeadline,
-        })),
-      };
-
-      if (cascadeResult.dueDateChanged) {
-        response.cascade.dueDateImpact = {
-          oldDueDate: cascadeResult.oldDueDate,
-          newDueDate: cascadeResult.newDueDate,
-          message: `⚠️ Prazo final foi ajustado para ${cascadeResult.newDueDate?.toLocaleDateString()} devido ao acúmulo de atrasos`,
-        };
-      }
-    }
-
-    return response;
+    return updated;
   }
 
-  // ===========================================================================
-  // 🔥 VERSÃO CORRIGIDA: bulkUpdateItemStages COM CASCATA
-  // ===========================================================================
   async bulkUpdateItemStages(
     itemId: string,
     updates: BulkUpdateItemStagesDto['updates'],
@@ -1956,15 +1776,6 @@ private async createMissingItemStages(item: any): Promise<any[]> {
     // Busca o item para validar datas
     const item = await this.prisma.flowItem.findFirst({
       where: { id: itemId, companyId },
-      include: {
-        flow: {
-          include: {
-            stages: {
-              orderBy: { order: 'asc' },
-            },
-          },
-        },
-      },
     });
 
     if (!item) {
@@ -1973,9 +1784,8 @@ private async createMissingItemStages(item: any): Promise<any[]> {
 
     const results = [];
     const errors = [] as any;
-    const updatedStages = new Map<string, Date>();
 
-    // Processa cada update individualmente
+    // Processa cada update individualmente (não em transação)
     for (const update of updates) {
       try {
         // Valida se o stageId é um UUID válido
@@ -2004,7 +1814,7 @@ private async createMissingItemStages(item: any): Promise<any[]> {
         }
 
         // =========================================================================
-        // 🔥 VALIDAÇÕES DE DATAS
+        // 🔥 VALIDAÇÕES DE DATAS (copiadas do update individual)
         // =========================================================================
         const itemCreatedAt = item.createdAt;
         const today = new Date();
@@ -2057,7 +1867,6 @@ private async createMissingItemStages(item: any): Promise<any[]> {
         if (update.suggestedDeadline !== undefined) {
           updateData.suggestedDeadline = new Date(update.suggestedDeadline);
           updateData.deadline = new Date(update.suggestedDeadline);
-          updatedStages.set(update.stageId, new Date(update.suggestedDeadline));
         }
 
         if (update.actualDeadline !== undefined) {
@@ -2095,47 +1904,6 @@ private async createMissingItemStages(item: any): Promise<any[]> {
       }
     }
 
-    // 🔥 DEFININDO O TIPO EXPLICITAMENTE
-    type CascadeResultType = {
-      updatedStages: any[];
-      dueDateChanged: boolean;
-      newDueDate?: Date;
-      oldDueDate?: Date;
-      impact: {
-        stageId: string;
-        stageName: string;
-        oldDeadline: Date;
-        newDeadline: Date;
-      }[];
-    };
-
-    let cascadeResult: CascadeResultType | null = null;
-
-    if (updatedStages.size > 0) {
-      // Encontra a primeira etapa alterada (menor order)
-      const stages = item.flow.stages;
-      let firstUpdatedStage: { id: string; deadline: Date } | null = null;
-      let minOrder = Infinity;
-
-      for (const [stageId, deadline] of updatedStages.entries()) {
-        const stage = stages.find((s) => s.id === stageId);
-        if (stage && stage.order < minOrder) {
-          minOrder = stage.order;
-          firstUpdatedStage = { id: stageId, deadline };
-        }
-      }
-
-      if (firstUpdatedStage) {
-        cascadeResult = await this.recalculateDownstreamStages(
-          itemId,
-          firstUpdatedStage.id,
-          firstUpdatedStage.deadline,
-          userId,
-          companyId,
-        );
-      }
-    }
-
     await this.auditService.log({
       action: 'BULK_UPDATE_ITEM_STAGES',
       entity: 'FLOW_ITEM',
@@ -2147,47 +1915,20 @@ private async createMissingItemStages(item: any): Promise<any[]> {
         successfulUpdates: results.length,
         failedUpdates: errors.length,
         errors,
-        cascadeApplied: !!cascadeResult,
-        dueDateChanged: cascadeResult?.dueDateChanged || false,
       },
     });
 
-    // Monta resposta com feedback claro
-    const response: any = {
-      message: `${results.length} atualizações realizadas com sucesso`,
-      results,
-    };
-
+    // Se houver erros, retorna parcial com aviso
     if (errors.length > 0) {
-      response.success = false;
-      response.message = `${results.length} atualizações feitas, ${errors.length} falhas`;
-      response.errors = errors;
-    } else {
-      response.success = true;
-    }
-
-    if (cascadeResult) {
-      response.cascade = {
-        applied: true,
-        fromStageId: cascadeResult.impact[0]?.stageId,
-        updatedStages: cascadeResult.impact.map((i) => ({
-          stageId: i.stageId,
-          stageName: i.stageName,
-          oldDeadline: i.oldDeadline,
-          newDeadline: i.newDeadline,
-        })),
+      return {
+        success: false,
+        message: `${results.length} atualizações feitas, ${errors.length} falhas`,
+        results,
+        errors,
       };
-
-      if (cascadeResult.dueDateChanged) {
-        response.cascade.dueDateImpact = {
-          oldDueDate: cascadeResult.oldDueDate,
-          newDueDate: cascadeResult.newDueDate,
-          message: `⚠️ Prazo final foi ajustado para ${cascadeResult.newDueDate?.toLocaleDateString()} devido ao efeito cascata`,
-        };
-      }
     }
 
-    return response;
+    return results;
   }
 
   async recalculateItemDeadlines(itemId: string, userId: string) {
@@ -2287,37 +2028,35 @@ private async createMissingItemStages(item: any): Promise<any[]> {
     dto: MoveItemWithDeadlineDto,
     userId: string,
   ) {
-    this.logger.log('========================================');
-    this.logger.log('🎯 [REQUISITO 1] MOVENDO ITEM COM ATUALIZAÇÃO DE PRAZO');
-    this.logger.log('========================================');
-    this.logger.log(`📦 itemId: ${itemId}`);
-    this.logger.log(`📦 dto:`, dto);
+    const companyId = this.getCompanyIdFromContext();
 
+    this.logger.log(`🎯 Movendo item ${itemId} com atualização de prazo`);
+
+    const {
+      newStageId,
+      newOrder,
+      selectedResponsibleId,
+      selectedSupplierId,
+      newQuantity,
+    } = dto;
+
+    // Move o item
     const movedItem = await this.moveItem(
       itemId,
-      dto.newStageId,
+      newStageId,
       userId,
-      dto.newOrder,
-      dto.selectedResponsibleId,
-      dto.selectedSupplierId,
-      dto.newQuantity,
+      newOrder,
+      selectedResponsibleId,
+      selectedSupplierId,
+      newQuantity,
     );
 
-    this.logger.log(`✅ Item movido para stage: ${dto.newStageId}`);
-
+    // Atualiza os prazos
     const itemStage = await this.prisma.flowItemStage.findFirst({
-      where: {
-        itemId,
-        stageId: dto.newStageId,
-        companyId: this.getCompanyIdFromContext(),
-      },
+      where: { itemId, stageId: newStageId, companyId },
     });
 
     if (itemStage) {
-      this.logger.log(`📋 Registro de prazo encontrado para a nova etapa:`);
-      this.logger.log(`   - deadline: ${itemStage.deadline}`);
-      this.logger.log(`   - suggestedDeadline: ${itemStage.suggestedDeadline}`);
-
       await this.prisma.flowItemStage.update({
         where: { id: itemStage.id },
         data: {
@@ -2335,29 +2074,19 @@ private async createMissingItemStages(item: any): Promise<any[]> {
         },
       });
 
-      this.logger.log(
-        `🔄 [REQUISITO 1] dueDate do item atualizado para: ${itemStage.deadline}`,
-      );
-
+      // Marca etapas anteriores como concluídas
       const currentStage = await this.prisma.flowStage.findFirst({
-        where: {
-          id: dto.newStageId,
-          companyId: this.getCompanyIdFromContext(),
-        },
+        where: { id: newStageId, companyId },
       });
 
       if (currentStage) {
         const previousStages = await this.prisma.flowItemStage.findMany({
           where: {
             itemId,
-            companyId: this.getCompanyIdFromContext(),
+            companyId,
             order: { lt: currentStage.order },
           },
         });
-
-        this.logger.log(
-          `📋 Marcando ${previousStages.length} etapas anteriores como concluídas`,
-        );
 
         for (const prevStage of previousStages) {
           if (prevStage.status !== 'CONCLUIDO') {
@@ -2374,7 +2103,7 @@ private async createMissingItemStages(item: any): Promise<any[]> {
       }
     }
 
-    this.logger.log('========================================\n');
+    // ✅ Retorna o movedItem (já temos todas as informações)
     return movedItem;
   }
 
@@ -2731,8 +2460,9 @@ private async createMissingItemStages(item: any): Promise<any[]> {
   }
 
   // ===========================================================================
-  // 🔥 VERSÃO MELHORADA: updateFlowItem COM CASCATA (quando altera dueDate)
+  // 🔥 ATUALIZAR ITEM
   // ===========================================================================
+
   async updateFlowItem(
     itemId: string,
     userId: string,
@@ -2745,19 +2475,7 @@ private async createMissingItemStages(item: any): Promise<any[]> {
     const [item, user] = await Promise.all([
       this.prisma.flowItem.findFirst({
         where: { id: itemId, companyId },
-        include: {
-          stage: true,
-          assignedTo: true,
-          supplier: true,
-          flow: {
-            include: {
-              stages: {
-                orderBy: { order: 'asc' },
-              },
-            },
-          },
-          itemStages: true,
-        },
+        include: { stage: true, assignedTo: true, supplier: true },
       }),
       this.prisma.user.findFirst({
         where: { id: userId, companyId },
@@ -2859,20 +2577,14 @@ private async createMissingItemStages(item: any): Promise<any[]> {
       if (updateData[key] === undefined) delete updateData[key];
     });
 
-    let oldDueDate = item.dueDate;
-    let newDueDate: Date | null = null;
-
     if (data.dueDate !== undefined) {
-      newDueDate = data.dueDate ? new Date(data.dueDate) : null;
-      updateData.dueDate = newDueDate;
+      updateData.dueDate = data.dueDate ? new Date(data.dueDate) : null;
     }
-
     if (data.productionStartedAt !== undefined) {
       updateData.productionStartedAt = data.productionStartedAt
         ? new Date(data.productionStartedAt)
         : null;
     }
-
     if (data.deliveryAt !== undefined) {
       updateData.deliveryAt = data.deliveryAt
         ? new Date(data.deliveryAt)
@@ -2904,99 +2616,6 @@ private async createMissingItemStages(item: any): Promise<any[]> {
       },
     });
 
-    // 🔥 NOVO: Se admin alterou dueDate, redistribui prazos das etapas
-    // 👇 DECLARA O TIPO EXPLICITAMENTE
-    type RedistributionResult = {
-      applied: boolean;
-      updatedStages: {
-        stageId: string;
-        stageName: string;
-        oldDeadline: Date;
-        newDeadline: Date;
-      }[];
-      daysPerStage: number;
-    };
-
-    let redistributionResult: RedistributionResult | null = null;
-
-    if (
-      isAdmin &&
-      newDueDate &&
-      oldDueDate?.getTime() !== newDueDate.getTime()
-    ) {
-      this.logger.log(
-        `🔄 DueDate alterado, redistribuindo prazos das etapas restantes`,
-      );
-
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-
-      const currentStageIndex = item.flow.stages.findIndex(
-        (s) => s.id === item.stageId,
-      );
-      const remainingStages = item.flow.stages.length - currentStageIndex;
-
-      const daysAvailable = Math.ceil(
-        (newDueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
-      );
-
-      const daysPerStage = Math.max(
-        1,
-        Math.floor(daysAvailable / remainingStages),
-      );
-
-      let currentDate = new Date(today);
-      const updatedStages: {
-        stageId: string;
-        stageName: string;
-        oldDeadline: Date;
-        newDeadline: Date;
-      }[] = [];
-
-      for (let i = currentStageIndex; i < item.flow.stages.length; i++) {
-        const stage = item.flow.stages[i];
-        const itemStage = item.itemStages.find((is) => is.stageId === stage.id);
-
-        if (itemStage) {
-          const oldDeadline = itemStage.suggestedDeadline || itemStage.deadline;
-
-          if (i === currentStageIndex) {
-            // Etapa atual mantém a data de hoje
-            currentDate = new Date(today);
-          } else {
-            currentDate.setDate(currentDate.getDate() + daysPerStage);
-          }
-
-          // Garante que última etapa seja exatamente o novo dueDate
-          if (i === item.flow.stages.length - 1) {
-            currentDate = new Date(newDueDate);
-          }
-
-          await this.prisma.flowItemStage.update({
-            where: { id: itemStage.id },
-            data: {
-              suggestedDeadline: new Date(currentDate),
-              deadline: new Date(currentDate),
-              updatedAt: new Date(),
-            },
-          });
-
-          updatedStages.push({
-            stageId: stage.id,
-            stageName: stage.name,
-            oldDeadline,
-            newDeadline: new Date(currentDate),
-          });
-        }
-      }
-
-      redistributionResult = {
-        applied: true,
-        updatedStages,
-        daysPerStage,
-      };
-    }
-
     await this.auditService.log({
       action: 'UPDATE_ITEM',
       entity: 'FLOW_ITEM',
@@ -3010,32 +2629,20 @@ private async createMissingItemStages(item: any): Promise<any[]> {
         adminRole: isAdmin ? user.role : undefined,
         userId: user.id,
         userName: user.name,
+
+        // Informações da mudança
         changedFields,
         totalChanged: changedFields.length,
         timestamp: new Date().toISOString(),
+
+        // Informações adicionais (opcional)
         entityId: itemId,
         entityType: 'FLOW_ITEM',
-        dueDateRedistributed: !!redistributionResult,
       },
     });
 
     await this.invalidateFlowCache(companyId, item.flowId);
-
-    // Retorna com feedback claro
-    const response: any = {
-      ...updated,
-      message: `✅ Item atualizado com sucesso`,
-    };
-
-    if (redistributionResult) {
-      response.redistribution = {
-        message: `📊 Prazos das etapas redistribuídos automaticamente com base no novo prazo final`,
-        daysPerStage: redistributionResult.daysPerStage,
-        updatedStages: redistributionResult.updatedStages,
-      };
-    }
-
-    return response;
+    return updated;
   }
 
   // ===========================================================================
@@ -3101,7 +2708,8 @@ private async createMissingItemStages(item: any): Promise<any[]> {
                 stage: true,
                 assignedTo: true,
                 supplier: true,
-                flow: { select: { id: true, name: true, color: true } },
+                flow: { select: { id: true, name: true,
+                    color: true, } },
               },
             }),
             tx.flowStage.findFirst({ where: { id: newStageId, companyId } }),
@@ -3922,299 +3530,4 @@ private async createMissingItemStages(item: any): Promise<any[]> {
       await this.cacheManager.del(`flow_stats_${flowId}`);
     }
   }
-
-  async getItemById(itemId: string) {
-  const companyId = this.getCompanyIdFromContext();
-  
-  const item = await this.prisma.flowItem.findFirst({
-    where: { id: itemId, companyId },
-    include: {
-      stage: true,
-      assignedTo: { select: { id: true, name: true } },
-      supplier: { select: { id: true, name: true } },
-      images: true,
-      audios: true,
-      videos: true,
-      itemStages: {
-        include: {
-          stage: true,
-        },
-        orderBy: { order: 'asc' },
-      },
-    },
-  });
-
-  if (!item) {
-    throw new NotFoundException('Item não encontrado');
-  }
-
-  return item;
-}
-
- private async recalculateDownstreamStages(
-  itemId: string,
-  fromStageId: string,
-  newDeadline: Date,
-  userId: string,
-  companyId: string,
-) {
-  this.logger.log('========================================');
-  this.logger.log('🔄 [REQUISITO 8] RECALCULANDO ETAPAS EM CASCATA');
-  this.logger.log('========================================');
-  this.logger.log(`📦 itemId: ${itemId}`);
-  this.logger.log(`📦 fromStageId: ${fromStageId}`);
-  this.logger.log(`📦 newDeadline: ${newDeadline.toISOString()}`);
-
-  const item = await this.prisma.flowItem.findUnique({
-    where: { id: itemId },
-    include: {
-      flow: {
-        include: {
-          stages: {
-            orderBy: { order: 'asc' },
-          },
-        },
-      },
-      itemStages: {
-        include: {
-          stage: true,
-        },
-      },
-    },
-  });
-
-  if (!item) {
-    this.logger.error('❌ Item não encontrado');
-    throw new NotFoundException('Item não encontrado');
-  }
-
-  this.logger.log(`📋 Fluxo: ${item.flow.name}`);
-  
-  // Busca o prazo da ÚLTIMA etapa (prazo final real)
-  const lastStage = item.flow.stages[item.flow.stages.length - 1];
-  const lastItemStage = item.itemStages.find(is => is.stageId === lastStage.id);
-  
-  if (!lastItemStage || !lastItemStage.deadline) {
-    this.logger.error('❌ Não foi possível encontrar o prazo final do item');
-    throw new BadRequestException('Prazo final não encontrado');
-  }
-  
-  const dueDate = new Date(lastItemStage.deadline);
-  dueDate.setHours(0, 0, 0, 0);
-  
-  this.logger.log(`📋 Prazo final REAL (última etapa): ${dueDate.toLocaleDateString()}`);
-
-  const stages = item.flow.stages;
-  const fromIndex = stages.findIndex((s) => s.id === fromStageId);
-
-  this.logger.log(
-    `📍 Índice da etapa alterada: ${fromIndex} (${stages[fromIndex].name})`,
-  );
-
-  if (fromIndex === -1) {
-    this.logger.error('❌ Etapa não encontrada');
-    throw new BadRequestException('Etapa não encontrada no fluxo');
-  }
-
-  // 🔥 SE FOR A ÚLTIMA ETAPA, NÃO FAZ NADA
-  if (fromIndex === stages.length - 1) {
-    this.logger.log(`ℹ️ É a última etapa, não há o que recalcular`);
-    return {
-      updatedStages: [],
-      dueDateChanged: false,
-      impact: [],
-    };
-  }
-
-  // 🔥 VERIFICA SE AS ETAPAS SEGUINTES PRECISAM DE AJUSTE
-  const remainingStages = stages.length - fromIndex - 1;
-  this.logger.log(`📊 Etapas restantes: ${remainingStages}`);
-
-  const impact: {
-    stageId: string;
-    stageName: string;
-    oldDeadline: Date;
-    newDeadline: Date;
-  }[] = [];
-
-  // 🔥 PRIMEIRO: Verifica se as datas atuais já são válidas
-  let precisaRecalcular = false;
-  let dataEsperada = new Date(newDeadline);
-  dataEsperada.setDate(dataEsperada.getDate() + 1); // Começa da próxima etapa
-
-  for (let i = fromIndex + 1; i < stages.length; i++) {
-    const stage = stages[i];
-    const itemStage = item.itemStages.find((is) => is.stageId === stage.id);
-
-    if (itemStage) {
-      const currentDeadline = new Date(itemStage.deadline);
-      currentDeadline.setHours(0, 0, 0, 0);
-      
-      this.logger.debug(`   Verificando ${stage.name}: atual ${currentDeadline.toLocaleDateString()}, esperado mínimo ${dataEsperada.toLocaleDateString()}`);
-      
-      // Se a data atual for menor que a esperada, precisa recalcular
-      if (currentDeadline < dataEsperada) {
-        this.logger.debug(`   ⚠️ ${stage.name} está antes do esperado!`);
-        precisaRecalcular = true;
-        break;
-      }
-      
-      dataEsperada.setDate(dataEsperada.getDate() + 1);
-    }
-  }
-
-  // 🔥 Se não precisa recalcular, retorna sem mudanças
-  if (!precisaRecalcular) {
-    this.logger.log(`✅ Etapas seguintes já estão OK, mantendo prazos atuais`);
-    return {
-      updatedStages: [],
-      dueDateChanged: false,
-      impact: [],
-    };
-  }
-
-  this.logger.log(`⚠️ Necessário recalcular etapas seguintes`);
-
-  // 🔥 DIAS RESTANTES ATÉ O PRAZO FINAL
-  const daysRemaining = Math.ceil(
-    (dueDate.getTime() - newDeadline.getTime()) / (1000 * 60 * 60 * 24)
-  );
-
-  this.logger.log(`📊 Dias restantes até o prazo final: ${daysRemaining}`);
-
-  // 🔥 Verifica se precisa aumentar o prazo final
-  if (daysRemaining < remainingStages) {
-    this.logger.log(`⚠️ Dias insuficientes! Necessário aumentar prazo final.`);
-
-    const newDueDate = new Date(newDeadline);
-    newDueDate.setDate(newDueDate.getDate() + remainingStages);
-
-    this.logger.log(
-      `📅 Novo prazo final calculado: ${newDueDate.toLocaleDateString()}`,
-    );
-
-    // Atualiza o prazo da ÚLTIMA etapa
-    if (lastItemStage) {
-      await this.prisma.flowItemStage.update({
-        where: { id: lastItemStage.id },
-        data: {
-          suggestedDeadline: newDueDate,
-          deadline: newDueDate,
-          updatedAt: new Date(),
-        },
-      });
-      
-      this.logger.log(
-        `✅ Prazo da última etapa atualizado para ${newDueDate.toLocaleDateString()}`,
-      );
-    }
-
-    let currentDate = new Date(newDeadline);
-
-    for (let i = fromIndex + 1; i < stages.length; i++) {
-      const stage = stages[i];
-      const itemStage = item.itemStages.find((is) => is.stageId === stage.id);
-
-      if (itemStage) {
-        const oldDeadline = itemStage.suggestedDeadline || itemStage.deadline;
-        currentDate.setDate(currentDate.getDate() + 1);
-
-        this.logger.log(
-          `   ${stage.name}: ${new Date(oldDeadline).toLocaleDateString()} → ${currentDate.toLocaleDateString()}`,
-        );
-
-        await this.prisma.flowItemStage.update({
-          where: { id: itemStage.id },
-          data: {
-            suggestedDeadline: new Date(currentDate),
-            deadline: new Date(currentDate),
-            updatedAt: new Date(),
-          },
-        });
-
-        impact.push({
-          stageId: stage.id,
-          stageName: stage.name,
-          oldDeadline: new Date(oldDeadline),
-          newDeadline: new Date(currentDate),
-        });
-      }
-    }
-
-    await this.auditService.log({
-      action: 'DUE_DATE_AUTO_INCREASED',
-      entity: 'FLOW_ITEM',
-      entityId: itemId,
-      userId,
-      companyId,
-      metadata: {
-        reason: `Aumento no prazo da etapa ${fromStageId}`,
-        oldDueDate: dueDate,
-        newDueDate,
-        increasedBy: Math.ceil(
-          (newDueDate.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24)
-        ) + ' dias',
-      },
-    });
-
-    return {
-      updatedStages: impact,
-      dueDateChanged: true,
-      newDueDate,
-      oldDueDate: dueDate,
-      impact,
-    };
-  }
-
-  // 🔥 TEM DIAS SUFICIENTES - Distribui proporcionalmente
-  const daysPerStage = Math.floor(daysRemaining / remainingStages);
-  this.logger.log(`📊 Distribuindo ${daysPerStage} dias por etapa`);
-
-  let currentDate = new Date(newDeadline);
-
-  for (let i = fromIndex + 1; i < stages.length; i++) {
-    const stage = stages[i];
-    const itemStage = item.itemStages.find((is) => is.stageId === stage.id);
-
-    if (itemStage) {
-      const oldDeadline = itemStage.suggestedDeadline || itemStage.deadline;
-      
-      currentDate.setDate(currentDate.getDate() + daysPerStage);
-
-      // Garante que a última etapa seja o prazo final
-      if (i === stages.length - 1) {
-        currentDate = new Date(dueDate);
-      }
-
-      this.logger.log(
-        `   ${stage.name}: ${new Date(oldDeadline).toLocaleDateString()} → ${currentDate.toLocaleDateString()}`,
-      );
-
-      await this.prisma.flowItemStage.update({
-        where: { id: itemStage.id },
-        data: {
-          suggestedDeadline: new Date(currentDate),
-          deadline: new Date(currentDate),
-          updatedAt: new Date(),
-        },
-      });
-
-      impact.push({
-        stageId: stage.id,
-        stageName: stage.name,
-        oldDeadline: new Date(oldDeadline),
-        newDeadline: new Date(currentDate),
-      });
-    }
-  }
-
-  this.logger.log(`✅ Cascata concluída. ${impact.length} etapas ajustadas.`);
-  this.logger.log('========================================\n');
-
-  return {
-    updatedStages: impact,
-    dueDateChanged: false,
-    impact,
-  };
-}
 }
