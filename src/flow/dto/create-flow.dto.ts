@@ -1,4 +1,6 @@
 /* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
 import {
   IsNotEmpty,
   IsString,
@@ -13,9 +15,10 @@ import {
   Min,
   Max,
   IsDate,
+  ValidateNested,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 
 export enum DateFilterType {
   PRODUCTION_STARTED = 'productionStartedAt',
@@ -164,37 +167,34 @@ export class UpdateItemStageDeadlineDto {
   notes?: string;
 }
 
-// ===========================================================================
-// 🔥 DTOs PARA GESTÃO DE PRAZOS POR ETAPA - ATUALIZADO
-// ===========================================================================
-
 export class BulkUpdateItemStageDto {
   @ApiProperty({
     description: 'ID da etapa',
     example: '550e8400-e29b-41d4-a716-446655440000',
   })
-  @IsUUID()
+  @IsUUID('4') // 🔥 ESPECIFIQUE A VERSÃO DO UUID
   @IsNotEmpty()
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+  @Transform(({ value }) => value?.trim()) // 🔥 LIMPA ESPAÇOS EM BRANCO
   stageId: string;
 
   @ApiProperty({
+    required: false,
     description: 'Prazo sugerido para a etapa',
-    example: '2025-12-31T23:59:59.999Z',
+    example: '2025-12-31',
   })
-  @IsDate()
-  @Type(() => Date)
-  @IsNotEmpty()
-  suggestedDeadline: Date;
+  @IsOptional()
+  @IsDateString()
+  suggestedDeadline?: string;
 
   @ApiProperty({
     required: false,
     description: 'Prazo real da etapa (quando foi concluída)',
-    example: '2025-12-31T23:59:59.999Z',
+    example: '2025-12-31',
   })
   @IsOptional()
-  @IsDate()
-  @Type(() => Date)
-  actualDeadline?: Date;  // ✅ ADICIONADO
+  @IsDateString()
+  actualDeadline?: string;
 
   @ApiProperty({
     required: false,
@@ -204,7 +204,7 @@ export class BulkUpdateItemStageDto {
   })
   @IsOptional()
   @IsString()
-  status?: string;  // ✅ ADICIONADO
+  status?: string;
 
   @ApiProperty({
     required: false,
@@ -222,6 +222,8 @@ export class BulkUpdateItemStagesDto {
   })
   @IsArray()
   @IsNotEmpty()
+  @ValidateNested({ each: true }) // 🔥 CRUCIAL: valida cada item do array
+  @Type(() => BulkUpdateItemStageDto) // 🔥 CRUCIAL: transforma para a classe correta
   updates: BulkUpdateItemStageDto[];
 }
 

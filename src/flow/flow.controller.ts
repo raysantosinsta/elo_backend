@@ -1,4 +1,5 @@
 /* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/restrict-template-expressions */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unused-vars */
@@ -465,6 +466,7 @@ export class FlowController {
     return this.flowService.createFlowItemWithStages(body.flowId, req.user.id, body);
   }
 
+
   /**
    * Buscar histórico completo de prazos de um item
    */
@@ -481,120 +483,51 @@ export class FlowController {
     return this.flowService.getItemStages(itemId);
   }
 
-  /**
-   * Atualizar prazo de uma etapa específica (COM CASCATA AUTOMÁTICA)
-   */
-  @Patch('items/:itemId/stages/:stageId')
-  @ApiOperation({ 
-    summary: 'Atualiza o prazo de uma etapa específica do item',
-    description: 'Permite alterar o prazo de uma etapa. Admin: aplica cascata automática. Usuário comum: só etapa atual.'
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Prazo atualizado com feedback do impacto cascata',
-    schema: {
-      example: {
-        id: "item-stage-123",
-        stage: { name: "Corte", color: "#2ecc71" },
-        suggestedDeadline: "2024-12-05",
-        message: "✅ Prazo da etapa Corte atualizado com sucesso",
-        cascade: {
-          applied: true,
-          updatedStages: [
-            {
-              stageId: "stage-costura",
-              stageName: "Costura",
-              oldDeadline: "2024-12-03",
-              newDeadline: "2024-12-07"
-            }
-          ],
-          dueDateImpact: {
-            oldDueDate: "2024-12-05",
-            newDueDate: "2024-12-09",
-            message: "⚠️ Prazo final foi ajustado para 09/12/2024 devido ao acúmulo de atrasos"
-          }
-        }
-      }
-    }
-  })
-  async updateItemStageDeadline(
-    @Req() req: any,
-    @Param('itemId', ParseUUIDPipe) itemId: string,
-    @Param('stageId', ParseUUIDPipe) stageId: string,
-    @Body() dto: UpdateItemStageDeadlineDto,
-  ) {
-    this.logger.log(`🔄 Atualizando prazo da etapa ${stageId} do item ${itemId}`);
-    return this.flowService.updateItemStageDeadline(
-      itemId, 
-      stageId, 
-      dto, 
-      req.user.id
-    );
-  }
+  
 
-   /**
-   * Atualizar múltiplos prazos de uma vez (apenas admin) COM CASCATA
+/**
+   * Atualização em massa de prazos por etapa (COM CASCATA AUTOMÁTICA)
+   * 🔥 ESTA ROTA VEM ANTES DE /:stageId
    */
   @Patch('items/:itemId/stages/bulk')
   @ApiOperation({ 
-    summary: 'Atualiza múltiplos prazos de um item (apenas admin)',
-    description: 'Permite atualizar vários prazos de uma só vez. Aplica cascata a partir da primeira etapa alterada.'
+    summary: 'Atualiza múltiplos prazos de etapas de um item',
+    description: 'Permite atualizar vários prazos de uma vez e aplica cascata automaticamente'
   })
   @ApiResponse({
     status: 200,
-    description: 'Prazos atualizados com feedback do impacto cascata',
+    description: 'Prazos atualizados com sucesso',
     schema: {
       example: {
-        message: "3 atualizações realizadas com sucesso",
+        message: "1 atualizações realizadas com sucesso",
+        results: [],
         success: true,
-        results: [
+        updatedStages: [
           {
-            id: "item-stage-456",
-            stageId: "stage-corte",
-            suggestedDeadline: "2024-12-05",
-            status: "ATUAL"
-          },
-          {
-            id: "item-stage-789",
-            stageId: "stage-costura",
-            suggestedDeadline: "2024-12-06",
-            status: "PENDENTE"
-          },
-          {
-            id: "item-stage-101",
-            stageId: "stage-acabamento",
-            suggestedDeadline: "2024-12-07",
-            status: "PENDENTE"
+            id: "stage-id-1",
+            stageId: "stage-id-1",
+            suggestedDeadline: "2026-03-25T00:00:00.000Z",
+            deadline: "2026-03-25T00:00:00.000Z",
+            status: "PENDENTE",
+            stage: {
+              id: "stage-id-1",
+              name: "Corte",
+              color: "#FF0000",
+              order: 3
+            }
           }
         ],
         cascade: {
           applied: true,
-          fromStageId: "stage-corte",
+          fromStageId: "stage-id-1",
           updatedStages: [
             {
-              stageId: "stage-costura",
+              stageId: "stage-id-2",
               stageName: "Costura",
-              oldDeadline: "2024-12-03",
-              newDeadline: "2024-12-07"
-            },
-            {
-              stageId: "stage-acabamento",
-              stageName: "Acabamento",
-              oldDeadline: "2024-12-04",
-              newDeadline: "2024-12-08"
-            },
-            {
-              stageId: "stage-expedicao",
-              stageName: "Expedição",
-              oldDeadline: "2024-12-05",
-              newDeadline: "2024-12-09"
+              oldDeadline: "2026-03-26T00:00:00.000Z",
+              newDeadline: "2026-03-27T00:00:00.000Z"
             }
-          ],
-          dueDateImpact: {
-            oldDueDate: "2024-12-05",
-            newDueDate: "2024-12-09",
-            message: "⚠️ Prazo final foi ajustado para 09/12/2024 devido ao efeito cascata"
-          }
+          ]
         }
       }
     }
@@ -602,15 +535,53 @@ export class FlowController {
   async bulkUpdateItemStages(
     @Req() req: any,
     @Param('itemId', ParseUUIDPipe) itemId: string,
-    @Body() dto: BulkUpdateItemStagesDto,
+    @Body() bulkUpdateDto: { updates: Array<{ 
+      stageId: string; 
+      suggestedDeadline?: string;
+      actualDeadline?: string;
+      status?: string;
+      notes?: string;
+    }> },
   ) {
-    this.logger.log(`📦 Atualizando ${dto.updates.length} prazos do item ${itemId}`);
-    return this.flowService.bulkUpdateItemStages(
-      itemId, 
-      dto.updates, 
-      req.user.id
+    this.logger.log(`📦 Atualizando ${bulkUpdateDto.updates.length} prazos do item ${itemId}`);
+    
+    if (!bulkUpdateDto.updates || bulkUpdateDto.updates.length === 0) {
+      throw new BadRequestException('Nenhuma atualização fornecida');
+    }
+
+    const result = await this.flowService.bulkUpdateItemStages(
+      itemId,
+      bulkUpdateDto.updates,
+      req.user.id,
+      req.user.companyId,
     );
+
+    // ✅ Retorna os stages atualizados na resposta
+    return {
+      ...result,
+      updatedStages: result.updatedStages,
+    };
   }
+
+/**
+ * Atualizar prazo de uma etapa específica (COM CASCATA AUTOMÁTICA)
+ * 🔥 ESTA ROTA VEM DEPOIS DE /bulk
+ */
+@Patch('items/:itemId/stages/:stageId')
+async updateItemStageDeadline(
+  @Req() req: any,
+  @Param('itemId', ParseUUIDPipe) itemId: string,
+  @Param('stageId', ParseUUIDPipe) stageId: string,
+  @Body() dto: UpdateItemStageDeadlineDto,
+) {
+  this.logger.log(`🔄 Atualizando prazo da etapa ${stageId} do item ${itemId}`);
+  return this.flowService.updateItemStageDeadline(
+    itemId, 
+    stageId, 
+    dto, 
+    req.user.id
+  );
+}
 
   @Get('items/:itemId')
 @ApiOperation({ summary: 'Busca um item específico' })
@@ -642,6 +613,8 @@ async getItemById(
       req.user.id
     );
   }
+
+  
 
   /**
    * Dashboard de prazos
