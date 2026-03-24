@@ -525,6 +525,11 @@ export class UpdateFlowItemDto {
   @IsArray()
   @IsUUID('4', { each: true })
   removeAudioIds?: string[];
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsUUID()
+  flowId?: string; // 🔥 ADICIONE ESTA LINHA
 }
 
 // ===========================================================================

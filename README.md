@@ -76,3 +76,6 @@ CREATE INDEX "itens_etapas_prazo_ordem_idx" ON "public"."itens_etapas_prazo"("or
 
 -- AlterTable
 ALTER TABLE "public"."itens_etapas_prazo" ADD COLUMN     "baseado_em_prazo_sugerido" INTEGER;
+
+
+rodar seed no nestjs -> npx prisma db seed
