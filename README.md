@@ -8,7 +8,7 @@ npx prisma migrate diff \
 
   mkdir prisma/migrations/20260101_funcao_prazo_3
 
-  npx prisma migrate resolve --applied 20260101_funcao_prazo_3
+  npx prisma migrate resolve --applied 20260101_funcao_prazo_4
 
 
    npx prisma generate

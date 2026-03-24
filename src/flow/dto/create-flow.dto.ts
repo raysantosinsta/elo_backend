@@ -73,18 +73,10 @@ export class CreateStageDto {
   @IsString()
   allowedRole?: string;
 
-  @ApiProperty({
-    required: false,
-    description: 'Prazo sugerido em dias (template para novos itens)',
-    example: 3,
-    minimum: 0,
-    maximum: 365,
-  })
   @IsOptional()
-  @IsNumber()
+  @IsInt()
   @Min(0)
-  @Max(365)
-  suggestedDeadline?: number;
+  defaultDays?: number; // 🔥 NOVO CAMPO
 }
 
 export class UpdateStageDto {
