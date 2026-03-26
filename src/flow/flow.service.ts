@@ -1,4 +1,5 @@
 /* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unsafe-enum-comparison */
 /* eslint-disable @typescript-eslint/restrict-template-expressions */
 /* eslint-disable prefer-const */
 /* eslint-disable @typescript-eslint/no-misused-promises */
@@ -1134,118 +1135,176 @@ this.logger.log(
   return items;
 }
 
-  async getFilteredItems(filters: FlowFilterDto) {
-      console.log('🚨🚨🚨 MÉTODO getFilteredItems FOI CHAMADO COM A CORREÇÃO! 🚨🚨🚨');
+async getFilteredItems(filters: FlowFilterDto) {
+  const companyId = this.getCompanyIdFromContext();
 
-    const companyId = this.getCompanyIdFromContext();
+  // 🔥 BUSCAR CONFIGURAÇÃO DA EMPRESA
+  const company = await this.prisma.company.findUnique({
+    where: { id: companyId },
+    select: { notificationDays: true },
+  });
+  
+  const notificationDays = company?.notificationDays ?? 7;
 
-    const {
-      startDate,
-      endDate,
-      dateType,
-      isOverdue,
-      isUpcoming,
-      assignedToId,
-      supplierId,
-      status,
-      productRef,
-    } = filters;
+  const {
+    startDate,
+    endDate,
+    dateType,
+    isOverdue,
+    isUpcoming,
+    assignedToId,
+    supplierId,
+    status,
+    productRef,
+  } = filters;
 
-    this.logger.log(`🔍 FILTRANDO ITENS para empresa ${companyId}`);
+  this.logger.log(`🔍 FILTRANDO ITENS para empresa ${companyId}`);
+  this.logger.log(`📅 notificationDays configurado: ${notificationDays}`);
+  this.logger.log(`📅 Parâmetros recebidos:`, {
+    startDate,
+    endDate,
+    isUpcoming,
+    isOverdue,
+    dateType, // 🔥 LOG DO dateType
+  });
 
-    const whereClause: any = { companyId };
+  const whereClause: any = { companyId };
 
-     // 🔥 CORREÇÃO CRÍTICA: Excluir itens CONCLUÍDOS por padrão
+  // Status filter
   if (!status) {
     whereClause.status = { not: 'CONCLUIDO' };
     this.logger.log(`🔥 STATUS FILTER APLICADO: excluindo CONCLUIDO`);
-  } else {
-    this.logger.log(`⚠️ STATUS ESPECÍFICO SOLICITADO: ${status}`);
   }
 
-    if (assignedToId) whereClause.assignedToId = assignedToId;
-    if (supplierId)
-      whereClause.supplierId = supplierId === 'internal' ? null : supplierId;
-    if (status) whereClause.status = status;
-    if (productRef?.trim()) {
-      whereClause.productRef = {
-        contains: productRef.trim(),
-        mode: 'insensitive',
-      };
-    }
+  // Basic filters
+  if (assignedToId) whereClause.assignedToId = assignedToId;
+  if (supplierId)
+    whereClause.supplierId = supplierId === 'internal' ? null : supplierId;
+  if (status) whereClause.status = status;
+  if (productRef?.trim()) {
+    whereClause.productRef = {
+      contains: productRef.trim(),
+      mode: 'insensitive',
+    };
+  }
 
-    if (isUpcoming === 'true') {
-      const today = new Date();
-      today.setUTCHours(0, 0, 0, 0);
-      const sevenDaysFromNow = new Date(today);
-      sevenDaysFromNow.setUTCDate(sevenDaysFromNow.getUTCDate() + 7);
-      sevenDaysFromNow.setUTCHours(23, 59, 59, 999);
+  // 🔥 CORREÇÃO: Determinar qual campo de data usar
+  // Se é filtro de upcoming ou overdue, sempre usa dueDate
+  // Se tem dateType explícito, usa o especificado
+  // Se não tem, usa dueDate (prazo) como padrão
+  let dateField = 'dueDate';
+  
+  if (dateType === 'productionStartedAt') {
+    dateField = 'productionStartedAt';
+  } else if (dateType === 'dueDate') {
+    dateField = 'dueDate';
+  } else if (isUpcoming === 'true' || isOverdue === 'true') {
+    dateField = 'dueDate';
+  }
 
-      whereClause.dueDate = { gte: today, lte: sevenDaysFromNow };
-      whereClause.status = { not: 'CONCLUIDO' };
-       this.logger.log(`📅 FILTRO UPCOMING: status excluindo CONCLUIDO`);
-    } else if (isOverdue === 'true') {
-      const today = new Date();
-      today.setUTCHours(0, 0, 0, 0);
+  this.logger.log(`📅 Campo de data utilizado: ${dateField}`);
 
-      whereClause.dueDate = { lt: today };
-      whereClause.status = { not: 'CONCLUIDO' };
-          this.logger.log(`📅 FILTRO OVERDUE: status excluindo CONCLUIDO`);
+  // 🔥 NOVA LÓGICA DE DATAS
+  // PRIORIDADE 1: Se tem startDate e endDate (filtro de data explícito)
+  if (startDate && endDate) {
+    const dateFilter: any = {};
+    
+    const start = new Date(startDate);
+    start.setUTCHours(0, 0, 0, 0);
+    dateFilter.gte = start;
+    
+    const end = new Date(endDate);
+    end.setUTCHours(23, 59, 59, 999);
+    dateFilter.lte = end;
+    
+    whereClause[dateField] = dateFilter;
+    
+    this.logger.log(`📅 USANDO DATAS EXPLÍCITAS (prioridade 1):`, {
+      field: dateField,
+      start: start.toISOString(),
+      end: end.toISOString(),
+    });
+  } 
+  // PRIORIDADE 2: Filtro de próximos a vencer (usando notificationDays configurado)
+  else if (isUpcoming === 'true') {
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    
+    const limitDate = new Date(today);
+    limitDate.setUTCDate(today.getUTCDate() + notificationDays);
+    limitDate.setUTCHours(23, 59, 59, 999);
 
-    } else if (startDate || endDate) {
-      const dateField =
-        dateType === DateFilterType.DUE_DATE
-          ? 'dueDate'
-          : 'productionStartedAt';
-      const dateFilter: any = {};
-      if (startDate) dateFilter.gte = new Date(startDate);
-      if (endDate) dateFilter.lte = new Date(endDate);
-      whereClause[dateField] = dateFilter;
-
-      // 🔥 Manter exclusão de concluídos
-      if (!status) {
-       whereClause.status = { not: 'CONCLUIDO' };
-      this.logger.log(`📅 FILTRO POR DATA: status excluindo CONCLUIDO`);
-
-      }
-    }
-
-      this.logger.log(`📋 WHERE CLAUSE: ${JSON.stringify(whereClause, null, 2)}`);
-
-
-    const items = await this.prisma.flowItem.findMany({
-      where: whereClause,
-      include: {
-        stage: { select: { id: true, name: true, order: true, color: true } },
-        flow: { select: { id: true, name: true, color: true } },
-        supplier: { select: { id: true, name: true, category: true } },
-        assignedTo: { select: { id: true, name: true, email: true } },
-        images: { select: { id: true, url: true, filename: true } },
-        audios: { select: { id: true, url: true, filename: true } },
-        videos: { select: { id: true, url: true, filename: true } },
-      },
-      orderBy: { dueDate: 'asc' },
+    this.logger.log(`📅 FILTRO UPCOMING (prioridade 2):`, {
+      field: 'dueDate',
+      todayUTC: today.toISOString(),
+      limitUTC: limitDate.toISOString(),
+      notificationDays,
     });
 
-    // 🔥 CONTAGEM DETALHADA
-  const totalItems = items.length;
-  const completedItems = items.filter(i => i.status === 'CONCLUIDO').length;
-  const pendingItems = items.filter(i => i.status === 'PENDENTE').length;
-  const inProgressItems = items.filter(i => i.status === 'EM_ANDAMENTO').length;
+    whereClause.dueDate = { gte: today, lte: limitDate };
+  } 
+  // PRIORIDADE 3: Filtro de atrasados
+  else if (isOverdue === 'true') {
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
 
-  this.logger.log(`✅ RESULTADO DA QUERY:`);
-  this.logger.log(`   - Total: ${totalItems}`);
-  this.logger.log(`   - CONCLUÍDOS: ${completedItems}`);
-  this.logger.log(`   - PENDENTES: ${pendingItems}`);
-  this.logger.log(`   - EM_ANDAMENTO: ${inProgressItems}`);
+    this.logger.log(`📅 FILTRO OVERDUE (prioridade 3):`, {
+      field: 'dueDate',
+      todayUTC: today.toISOString(),
+    });
 
-  if (completedItems > 0) {
-    this.logger.error(`⚠️ AVISO: Ainda existem ${completedItems} itens CONCLUÍDOS sendo retornados!`);
-    this.logger.error(`   Exemplos: ${items.filter(i => i.status === 'CONCLUIDO').slice(0, 3).map(i => i.title).join(', ')}`);
+    whereClause.dueDate = { lt: today };
+  }
+  // PRIORIDADE 4: Filtro por intervalo de datas (sem isUpcoming/isOverdue)
+  else if (startDate || endDate) {
+    const dateFilter: any = {};
+    
+    if (startDate) {
+      const start = new Date(startDate);
+      start.setUTCHours(0, 0, 0, 0);
+      dateFilter.gte = start;
+      this.logger.log(`📅 DATA INICIAL: ${start.toISOString()}`);
+    }
+    
+    if (endDate) {
+      const end = new Date(endDate);
+      end.setUTCHours(23, 59, 59, 999);
+      dateFilter.lte = end;
+      this.logger.log(`📅 DATA FINAL: ${end.toISOString()}`);
+    }
+    
+    whereClause[dateField] = dateFilter;
+    
+    this.logger.log(`📅 USANDO INTERVALO DE DATAS (prioridade 4):`, {
+      field: dateField,
+      dateFilter,
+    });
   }
 
-    return items;
-  }
+  this.logger.log(`📋 WHERE CLAUSE: ${JSON.stringify(whereClause, null, 2)}`);
+
+  const items = await this.prisma.flowItem.findMany({
+    where: whereClause,
+    include: {
+      stage: { select: { id: true, name: true, order: true, color: true } },
+      flow: { select: { id: true, name: true, color: true } },
+      supplier: { select: { id: true, name: true, category: true } },
+      assignedTo: { select: { id: true, name: true, email: true } },
+      images: { select: { id: true, url: true, filename: true } },
+      audios: { select: { id: true, url: true, filename: true } },
+      videos: { select: { id: true, url: true, filename: true } },
+    },
+    orderBy: { dueDate: 'asc' },
+  });
+
+  // 🔥 LOG DOS ITENS ENCONTRADOS
+  this.logger.log(`✅ ITENS ENCONTRADOS: ${items.length}`);
+  items.forEach(item => {
+    this.logger.log(`   - ${item.title}: dueDate=${item.dueDate?.toISOString()}`);
+  });
+
+  return items;
+}
 
   private hasFilters(filters: FlowFilterDto): boolean {
     return !!(

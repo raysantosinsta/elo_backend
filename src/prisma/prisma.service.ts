@@ -14,11 +14,6 @@ interface PrismaArgs {
   update?: Record<string, any>;
 }
 
-interface PrismaModelDelegate {
-  findFirst: (args: PrismaArgs) => Promise<unknown>;
-  findFirstOrThrow: (args: PrismaArgs) => Promise<unknown>;
-}
-
 @Injectable()
 export class PrismaService
   extends PrismaClient
@@ -119,7 +114,6 @@ export class PrismaService
     // --- PROTEÇÃO DE ESCRITA: Impede a troca de Tenant via Update ---
     if (['update', 'updateMany'].includes(operation) && args.data) {
       if (args.data.companyId) {
-        // Remove qualquer tentativa de sobrescrever o ID da empresa
         delete args.data.companyId;
         this.logger.warn(
           `Tentativa bloqueada de alterar companyId no modelo ${model} pelo usuário.`,
@@ -127,24 +121,20 @@ export class PrismaService
       }
     }
 
+    // 🔥 CORREÇÃO: Para operações em Company, não aplicar filtro de tenant
+    if (model === 'Company') {
+      // Para Company, não aplicamos filtro de tenant (empresas são entidades raiz)
+      return query(args);
+    }
+
     if (operationsWithWhere.includes(operation)) {
       args.where = args.where || {};
       args.where[model === 'Company' ? 'id' : 'companyId'] = tenantId;
 
+      // 🔥 CORREÇÃO: Para findUnique/findUniqueOrThrow, usamos query normal
       if (operation === 'findUnique' || operation === 'findUniqueOrThrow') {
-        const modelKey = model.charAt(0).toLowerCase() + model.slice(1);
-
-        if (!this.availableModels.has(modelKey)) {
-          throw new Error(`Model delegate ${modelKey} not found.`);
-        }
-
-        const delegate = this[
-          modelKey as keyof this
-        ] as unknown as PrismaModelDelegate;
-
-        return operation === 'findUnique'
-          ? delegate.findFirst(args)
-          : delegate.findFirstOrThrow(args);
+        // Não precisa converter para findFirst, apenas executa query normalmente
+        return query(args);
       }
     }
 

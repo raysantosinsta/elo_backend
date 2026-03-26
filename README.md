@@ -6,10 +6,10 @@ npx prisma migrate diff \
   --to-schema-datamodel prisma/schema.prisma \
   --script 
 
-  mkdir prisma/migrations/20260101_funcao_prazo_3
+  mkdir prisma/migrations/20260101_funcao_prazo_3 
 
-  npx prisma migrate resolve --applied 20260101_funcao_prazo_4
-
+  npx prisma migrate resolve --applied 20260101_funcao_prazo_4 
+npx prisma migrate resolve --applied 20260101_remover_prazo_fixo_7
 
    npx prisma generate
 

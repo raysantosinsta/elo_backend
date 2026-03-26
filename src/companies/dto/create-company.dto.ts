@@ -13,6 +13,7 @@ import {
   Min,
 } from 'class-validator';
 import { PartialType } from '@nestjs/mapped-types';
+import { ApiProperty } from '@nestjs/swagger';
 
 /**
  * DTO para Criação de Empresa
@@ -73,7 +74,14 @@ export class CreateCompanyDto {
   @IsEnum(SimpleStatus, { message: 'Status inválido' })
   status?: SimpleStatus;
 
-  // SEGURANÇA: userCreateId removido. Injeção automática via PrismaService.
+// 🔥 ADICIONE ESTE CAMPO AQUI:
+  @ApiProperty({ example: 7, description: 'Dias de antecedência para notificações' })
+  @IsOptional()
+  @IsInt({ message: 'notificationDays deve ser um número' })
+  @Min(1)
+  @Max(90)
+  @Type(() => Number) // Garante a conversão para número
+  notificationDays?: number;
 }
 
 /**
@@ -101,4 +109,18 @@ export class PaginationDto {
   @Max(100)
   @Type(() => Number) // Converte string da URL para Number
   limit?: number = 10;
+}
+
+export class UpdateNotificationSettingsDto {
+  @ApiProperty({
+    description: 'Dias de antecedência para notificações de vencimento',
+    example: 7,
+    minimum: 1,
+    maximum: 90,
+    required: true,
+  })
+  @IsInt({ message: 'O campo notificationDays deve ser um número inteiro' })
+  @Min(1, { message: 'O valor mínimo para notificationDays é 1' })
+  @Max(90, { message: 'O valor máximo para notificationDays é 90' })
+  notificationDays: number;
 }

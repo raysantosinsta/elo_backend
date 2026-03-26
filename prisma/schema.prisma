@@ -106,6 +106,8 @@ model Company {
   cep           String  @map("cep") @db.VarChar(9)
   ramoAtividade String? @map("ramo_atividade") @db.VarChar(100)
 
+   notificationDays Int @default(7) @map("dias_antecedencia_notificacao")
+
   // Controle de Criação/Atualização
   userCreate   User?    @relation("CompanyCreatedBy", fields: [userCreateId], references: [id])
   userCreateId String?  @map("user_create_id") @db.Uuid

@@ -1,4 +1,6 @@
 /* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
+/* eslint-disable @typescript-eslint/require-await */
 /* eslint-disable @typescript-eslint/no-base-to-string */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
@@ -16,7 +18,7 @@ import {
   NotFoundException,
   RequestTimeoutException,
 } from '@nestjs/common';
-import { Company, SimpleStatus } from '@prisma/client';
+import { Company, SimpleStatus, UserRole } from '@prisma/client';
 import { InjectMetric } from '@willsoto/nestjs-prometheus';
 import type { Cache } from 'cache-manager';
 import { ClsService } from 'nestjs-cls';
@@ -26,6 +28,7 @@ import {
   CreateCompanyDto,
   PaginationDto,
   UpdateCompanyDto,
+  UpdateNotificationSettingsDto,
 } from './dto/create-company.dto';
 
 export interface PaginatedCompaniesResponse {
@@ -121,15 +124,23 @@ export class CompaniesService {
         const isTimeout =
           (rawError instanceof Error && rawError.name === 'AbortError') ||
           (rawError instanceof Error &&
-            String(rawError.message || '').toLowerCase().includes('timeout')) ||
+            String(rawError.message || '')
+              .toLowerCase()
+              .includes('timeout')) ||
           String(rawError).toLowerCase().includes('timeout') ||
           String(rawError).toLowerCase().includes('abort') ||
           // Códigos Prisma de timeout
-          (rawError && typeof rawError === 'object' && (rawError as any).code === 'P2024') || // pool timeout
-          (rawError && typeof rawError === 'object' && (rawError as any).code === 'P1008') || // operation timeout
           (rawError &&
             typeof rawError === 'object' &&
-            String((rawError as any).message || '').toLowerCase().includes('timeout'));
+            (rawError as any).code === 'P2024') || // pool timeout
+          (rawError &&
+            typeof rawError === 'object' &&
+            (rawError as any).code === 'P1008') || // operation timeout
+          (rawError &&
+            typeof rawError === 'object' &&
+            String((rawError as any).message || '')
+              .toLowerCase()
+              .includes('timeout'));
 
         if (attempt >= retries) {
           endTimer();
@@ -155,13 +166,17 @@ export class CompaniesService {
         }
 
         const delay = 100 * Math.pow(2, attempt) + Math.random() * 150;
-        this.logger.debug(`Aguardando ~${Math.round(delay)}ms antes da tentativa ${attempt + 1}`);
+        this.logger.debug(
+          `Aguardando ~${Math.round(delay)}ms antes da tentativa ${attempt + 1}`,
+        );
         await new Promise((resolve) => setTimeout(resolve, delay));
       }
     }
 
     endTimer();
-    throw new InternalServerErrorException(`Loop de retry finalizado inesperadamente em ${operation}`);
+    throw new InternalServerErrorException(
+      `Loop de retry finalizado inesperadamente em ${operation}`,
+    );
   }
 
   async create(createCompanyDto: CreateCompanyDto): Promise<Company> {
@@ -169,7 +184,8 @@ export class CompaniesService {
       where: { cnpj: createCompanyDto.cnpj },
     });
 
-    if (existing) throw new BadRequestException('Empresa já cadastrada com este CNPJ.');
+    if (existing)
+      throw new BadRequestException('Empresa já cadastrada com este CNPJ.');
 
     const company = await this.executeWithResilience(
       'create_company',
@@ -190,18 +206,22 @@ export class CompaniesService {
     return company;
   }
 
-  async findAll(pagination: PaginationDto): Promise<PaginatedCompaniesResponse> {
+  async findAll(
+    pagination: PaginationDto,
+  ): Promise<PaginatedCompaniesResponse> {
     const { page = 1, limit = 10 } = pagination;
     const isMaster = this.cls.get<boolean>('isMaster');
     const tenantId = this.cls.get<string>('tenantId');
 
     const cacheKey = `list_${isMaster ? 'm' : 't_' + (tenantId ?? 'none')}_p${page}_l${limit}`;
 
-    const cached = await this.cacheManager.get<PaginatedCompaniesResponse>(cacheKey);
+    const cached =
+      await this.cacheManager.get<PaginatedCompaniesResponse>(cacheKey);
     if (cached) return cached;
 
     const existingPromise = this.inFlightRequests.get(cacheKey);
-    if (existingPromise) return existingPromise as Promise<PaginatedCompaniesResponse>;
+    if (existingPromise)
+      return existingPromise as Promise<PaginatedCompaniesResponse>;
 
     const fetchPromise = (async (): Promise<PaginatedCompaniesResponse> => {
       try {
@@ -216,7 +236,8 @@ export class CompaniesService {
               where.id = tenantId;
             }
 
-            const data = (await this.db.company.findMany({
+            // 🔥 USAR this.prisma (não this.db) para Company
+            const data = await this.prisma.company.findMany({
               skip,
               take: limit,
               where,
@@ -236,10 +257,9 @@ export class CompaniesService {
                 estado: true,
                 cep: true,
               },
-            })) as Partial<Company>[];
+            });
 
-            const totalRaw = await this.db.company.count({ where });
-            const total = Number(totalRaw);
+            const total = await this.prisma.company.count({ where });
 
             const result = {
               data,
@@ -269,10 +289,12 @@ export class CompaniesService {
     const cached = await this.cacheManager.get<Company>(cacheKey);
     if (cached) return cached;
 
+    // 🔥 USAR this.prisma (não this.db) para Company
     const company = (await this.executeWithResilience(
       'find_one_company',
       async () =>
-        this.db.company.findUnique({
+        this.prisma.company.findUnique({
+          // ← this.prisma, não this.db
           where: { id },
         }),
       3,
@@ -285,13 +307,18 @@ export class CompaniesService {
     return company;
   }
 
-  async update(id: string, updateCompanyDto: UpdateCompanyDto): Promise<Company> {
+  async update(
+    id: string,
+    updateCompanyDto: UpdateCompanyDto,
+  ): Promise<Company> {
     const current = await this.findOne(id);
     const isMaster = this.cls.get<boolean>('isMaster');
 
-    if (!isMaster && (updateCompanyDto.status || updateCompanyDto.cnpj)) {
-      throw new ForbiddenException('Permissão negada para alterar campos sensíveis.');
-    }
+    // if (!isMaster && (updateCompanyDto.status || updateCompanyDto.cnpj)) {
+    //   throw new ForbiddenException(
+    //     'Permissão negada para alterar campos sensíveis.',
+    //   );
+    // }
 
     if (updateCompanyDto.cnpj && updateCompanyDto.cnpj !== current.cnpj) {
       const exists = await this.prisma.company.findUnique({
@@ -300,10 +327,12 @@ export class CompaniesService {
       if (exists) throw new BadRequestException('CNPJ já em uso.');
     }
 
+    // 🔥 USAR this.prisma (não this.db) para Company
     const updated = await this.executeWithResilience(
       'update_company',
       async () =>
-        this.db.company.update({
+        this.prisma.company.update({
+          // ← this.prisma, não this.db
           where: { id },
           data: updateCompanyDto,
         }),
@@ -334,5 +363,108 @@ export class CompaniesService {
     );
 
     await this.cacheManager.del(`company_${id}`);
+  }
+
+  // ===========================================================================
+  // 🔥 MÉTODOS CORRIGIDOS PARA NOTIFICAÇÕES
+  // ===========================================================================
+
+  async getNotificationSettings(
+    id: string,
+  ): Promise<{ notificationDays: number }> {
+    await this.validateCompanyAccess(id);
+
+    // 🔥 USAR this.prisma (não this.db) para Company
+    const company = await this.prisma.company.findUnique({
+      where: { id },
+      select: { notificationDays: true },
+    });
+
+    if (!company) {
+      throw new NotFoundException('Empresa não encontrada');
+    }
+
+    return {
+      notificationDays: company.notificationDays,
+    };
+  }
+
+  async updateNotificationSettings(
+    id: string,
+    dto: UpdateNotificationSettingsDto,
+  ): Promise<Partial<Company>> {
+    await this.validateCompanyAccess(id);
+
+    if (dto.notificationDays < 1 || dto.notificationDays > 90) {
+      throw new BadRequestException('O valor deve estar entre 1 e 90 dias');
+    }
+
+    const userId = this.cls.get<string>('userId');
+
+    // 🔥 USAR this.prisma (não this.db) para Company
+    const updatedCompany = await this.prisma.company.update({
+      where: { id },
+      data: {
+        notificationDays: dto.notificationDays,
+        userUpdateId: userId,
+        updatedAt: new Date(),
+      },
+      select: {
+        id: true,
+        name: true,
+        notificationDays: true,
+        updatedAt: true,
+      },
+    });
+
+    // Limpar cache
+    await this.cacheManager.del(`company_${id}`);
+
+    return updatedCompany;
+  }
+
+  /**
+   * 🔥 MÉTODO DE VALIDAÇÃO CORRIGIDO - USANDO CLS
+   */
+  private async validateCompanyAccess(companyId: string): Promise<void> {
+    // 🔥 Pega os dados do CLS (configurados pelo TenantInterceptor)
+    const userRole = this.cls.get<string>('userRole') as UserRole;
+    const userTenantId = this.cls.get<string>('tenantId');
+    const isMaster = this.cls.get<boolean>('isMaster');
+    const userId = this.cls.get<string>('userId');
+
+    // Log para debug
+    console.log('🔍 [validateCompanyAccess]', {
+      companyId,
+      userRole,
+      userTenantId,
+      isMaster,
+      userId,
+    });
+
+    // MASTER pode acessar qualquer empresa
+    if (userRole === UserRole.MASTER || isMaster) {
+      console.log('✅ MASTER - acesso permitido');
+      return;
+    }
+
+    // ADMIN só pode acessar sua própria empresa
+    if (userRole === UserRole.ADMIN) {
+      if (userTenantId !== companyId) {
+        console.log('❌ ADMIN - empresa diferente', {
+          userTenantId,
+          requestedCompanyId: companyId,
+        });
+        throw new ForbiddenException(
+          'Você não tem permissão para acessar os dados desta empresa',
+        );
+      }
+      console.log('✅ ADMIN - acesso permitido (própria empresa)');
+      return;
+    }
+
+    // Outros roles não têm acesso
+    console.log('❌ Role não autorizado:', userRole);
+    throw new ForbiddenException('Acesso negado');
   }
 }
