@@ -12,4 +12,6 @@ npx prisma migrate diff \
 
 
    npx prisma generate
+
    
+   [Documento sem título (8).pdf](https://github.com/user-attachments/files/26282779/Documento.sem.titulo.8.pdf)
