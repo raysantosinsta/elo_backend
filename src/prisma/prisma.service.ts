@@ -74,18 +74,25 @@ export class PrismaService
     args: PrismaArgs,
     userId: string,
   ): void {
+    // Verificação de segurança: se não houver args ou data, não faz nada
+    if (!args || (!args.data && !args.create && !args.update)) return;
+
     if (operation === 'create') {
       args.data = { ...args.data, userCreateId: userId, userUpdateId: userId };
     } else if (['update', 'updateMany', 'upsert'].includes(operation)) {
       if (operation === 'upsert') {
-        args.create = {
-          ...args.create,
-          userCreateId: userId,
-          userUpdateId: userId,
-        };
-        args.update = { ...args.update, userUpdateId: userId };
+        if (args.create)
+          args.create = {
+            ...args.create,
+            userCreateId: userId,
+            userUpdateId: userId,
+          };
+        if (args.update) args.update = { ...args.update, userUpdateId: userId };
       } else {
-        if (args.data) args.data = { ...args.data, userUpdateId: userId };
+        // 🔥 IMPORTANTE: Se o data for nulo ou não for objeto, ignora
+        if (args.data && typeof args.data === 'object') {
+          args.data.userUpdateId = userId;
+        }
       }
     }
   }
