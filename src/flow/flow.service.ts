@@ -1032,279 +1032,285 @@ export class FlowService {
   }
 
   async getFilteredItemsByFlow(flowId: string, filters: FlowFilterDto) {
-  const companyId = this.getCompanyIdFromContext();
+    const companyId = this.getCompanyIdFromContext();
 
-  const {
-    isOverdue,
-    isUpcoming,
-    assignedToId,
-    supplierId,
-    status,
-    productRef,
-  } = filters;
+    const {
+      isOverdue,
+      isUpcoming,
+      assignedToId,
+      supplierId,
+      status,
+      productRef,
+    } = filters;
 
-  this.logger.log(
-    `🔍 FILTRANDO ITENS do fluxo ${flowId} para empresa ${companyId}`,
-  );
+    this.logger.log(
+      `🔍 FILTRANDO ITENS do fluxo ${flowId} para empresa ${companyId}`,
+    );
 
-  const flow = await this.prisma.productFlow.findFirst({
-    where: { id: flowId, companyId },
-  });
+    const flow = await this.prisma.productFlow.findFirst({
+      where: { id: flowId, companyId },
+    });
 
-  if (!flow) {
-    throw new NotFoundException('Fluxo não encontrado');
-  }
+    if (!flow) {
+      throw new NotFoundException('Fluxo não encontrado');
+    }
 
-  const whereClause: any = {
-    companyId,
-    flowId,
-  };
-
-  // 🔥 CORREÇÃO CRÍTICA: Excluir itens CONCLUÍDOS por padrão
-  if (!status) {
-    whereClause.status = { not: 'CONCLUIDO' };
-  }
-
-  if (assignedToId) {
-    whereClause.assignedToId = assignedToId;
-  }
-
-  if (supplierId) {
-    whereClause.supplierId = supplierId === 'internal' ? null : supplierId;
-  }
-
-  if (status) {
-    whereClause.status = status;
-  }
-
-  if (productRef && productRef.trim() !== '') {
-    whereClause.productRef = {
-      contains: productRef.trim(),
-      mode: 'insensitive',
+    const whereClause: any = {
+      companyId,
+      flowId,
     };
-  }
 
-  if (isOverdue === 'true') {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    // 🔥 CORREÇÃO CRÍTICA: Excluir itens CONCLUÍDOS por padrão
+    if (!status) {
+      whereClause.status = { not: 'CONCLUIDO' };
+    }
 
-    whereClause.AND = [
-      { dueDate: { not: null } },
-      { dueDate: { lt: today } },
-      { status: { not: 'CONCLUIDO' } },
-    ];
-  }
+    if (assignedToId) {
+      whereClause.assignedToId = assignedToId;
+    }
 
-  if (isUpcoming === 'true') {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    if (supplierId) {
+      whereClause.supplierId = supplierId === 'internal' ? null : supplierId;
+    }
 
-    const sevenDaysFromNow = new Date(today);
-    sevenDaysFromNow.setDate(sevenDaysFromNow.getDate() + 7);
-    sevenDaysFromNow.setHours(23, 59, 59, 999);
+    if (status) {
+      whereClause.status = status;
+    }
 
-    whereClause.AND = [
-      { dueDate: { not: null } },
-      { dueDate: { gte: today, lte: sevenDaysFromNow } },
-      { status: { not: 'CONCLUIDO' } },
-    ];
-  }
+    if (productRef && productRef.trim() !== '') {
+      whereClause.productRef = {
+        contains: productRef.trim(),
+        mode: 'insensitive',
+      };
+    }
 
-  const items = await this.prisma.flowItem.findMany({
-    where: whereClause,
-    include: {
-      stage: { select: { id: true, name: true, order: true, color: true } },
-      flow: { select: { id: true, name: true, color: true } },
-      supplier: { select: { id: true, name: true, category: true } },
-      assignedTo: { select: { id: true, name: true, email: true } },
-    },
-    orderBy: { dueDate: 'asc' },
-  });
+    if (isOverdue === 'true') {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
 
-  // 🔥 LOG DETALHADO
-const completedItems = items.filter(i => i.status === 'CONCLUIDO');
-console.log(`📊 [BACKEND] Total itens: ${items.length}, CONCLUÍDOS: ${completedItems.length}`);
-console.log(`📊 [BACKEND] Status no whereClause:`, whereClause.status);
-console.log(`📊 [BACKEND] Where clause completo:`, JSON.stringify(whereClause, null, 2));
+      whereClause.AND = [
+        { dueDate: { not: null } },
+        { dueDate: { lt: today } },
+        { status: { not: 'CONCLUIDO' } },
+      ];
+    }
 
-this.logger.log(
-  `✅ Retornando ${items.length} itens para o fluxo ${flowId} (excluídos CONCLUÍDOS)`,
-);
+    if (isUpcoming === 'true') {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
 
+      const sevenDaysFromNow = new Date(today);
+      sevenDaysFromNow.setDate(sevenDaysFromNow.getDate() + 7);
+      sevenDaysFromNow.setHours(23, 59, 59, 999);
 
-  return items;
-}
+      whereClause.AND = [
+        { dueDate: { not: null } },
+        { dueDate: { gte: today, lte: sevenDaysFromNow } },
+        { status: { not: 'CONCLUIDO' } },
+      ];
+    }
 
-async getFilteredItems(filters: FlowFilterDto) {
-  const companyId = this.getCompanyIdFromContext();
-
-  // 🔥 BUSCAR CONFIGURAÇÃO DA EMPRESA
-  const company = await this.prisma.company.findUnique({
-    where: { id: companyId },
-    select: { notificationDays: true },
-  });
-  
-  const notificationDays = company?.notificationDays ?? 7;
-
-  const {
-    startDate,
-    endDate,
-    dateType,
-    isOverdue,
-    isUpcoming,
-    assignedToId,
-    supplierId,
-    status,
-    productRef,
-  } = filters;
-
-  this.logger.log(`🔍 FILTRANDO ITENS para empresa ${companyId}`);
-  this.logger.log(`📅 notificationDays configurado: ${notificationDays}`);
-  this.logger.log(`📅 Parâmetros recebidos:`, {
-    startDate,
-    endDate,
-    isUpcoming,
-    isOverdue,
-    dateType, // 🔥 LOG DO dateType
-  });
-
-  const whereClause: any = { companyId };
-
-  // Status filter
-  if (!status) {
-    whereClause.status = { not: 'CONCLUIDO' };
-    this.logger.log(`🔥 STATUS FILTER APLICADO: excluindo CONCLUIDO`);
-  }
-
-  // Basic filters
-  if (assignedToId) whereClause.assignedToId = assignedToId;
-  if (supplierId)
-    whereClause.supplierId = supplierId === 'internal' ? null : supplierId;
-  if (status) whereClause.status = status;
-  if (productRef?.trim()) {
-    whereClause.productRef = {
-      contains: productRef.trim(),
-      mode: 'insensitive',
-    };
-  }
-
-  // 🔥 CORREÇÃO: Determinar qual campo de data usar
-  // Se é filtro de upcoming ou overdue, sempre usa dueDate
-  // Se tem dateType explícito, usa o especificado
-  // Se não tem, usa dueDate (prazo) como padrão
-  let dateField = 'dueDate';
-  
-  if (dateType === 'productionStartedAt') {
-    dateField = 'productionStartedAt';
-  } else if (dateType === 'dueDate') {
-    dateField = 'dueDate';
-  } else if (isUpcoming === 'true' || isOverdue === 'true') {
-    dateField = 'dueDate';
-  }
-
-  this.logger.log(`📅 Campo de data utilizado: ${dateField}`);
-
-  // 🔥 NOVA LÓGICA DE DATAS
-  // PRIORIDADE 1: Se tem startDate e endDate (filtro de data explícito)
-  if (startDate && endDate) {
-    const dateFilter: any = {};
-    
-    const start = new Date(startDate);
-    start.setUTCHours(0, 0, 0, 0);
-    dateFilter.gte = start;
-    
-    const end = new Date(endDate);
-    end.setUTCHours(23, 59, 59, 999);
-    dateFilter.lte = end;
-    
-    whereClause[dateField] = dateFilter;
-    
-    this.logger.log(`📅 USANDO DATAS EXPLÍCITAS (prioridade 1):`, {
-      field: dateField,
-      start: start.toISOString(),
-      end: end.toISOString(),
-    });
-  } 
-  // PRIORIDADE 2: Filtro de próximos a vencer (usando notificationDays configurado)
-  else if (isUpcoming === 'true') {
-    const today = new Date();
-    today.setUTCHours(0, 0, 0, 0);
-    
-    const limitDate = new Date(today);
-    limitDate.setUTCDate(today.getUTCDate() + notificationDays);
-    limitDate.setUTCHours(23, 59, 59, 999);
-
-    this.logger.log(`📅 FILTRO UPCOMING (prioridade 2):`, {
-      field: 'dueDate',
-      todayUTC: today.toISOString(),
-      limitUTC: limitDate.toISOString(),
-      notificationDays,
+    const items = await this.prisma.flowItem.findMany({
+      where: whereClause,
+      include: {
+        stage: { select: { id: true, name: true, order: true, color: true } },
+        flow: { select: { id: true, name: true, color: true } },
+        supplier: { select: { id: true, name: true, category: true } },
+        assignedTo: { select: { id: true, name: true, email: true } },
+      },
+      orderBy: { dueDate: 'asc' },
     });
 
-    whereClause.dueDate = { gte: today, lte: limitDate };
-  } 
-  // PRIORIDADE 3: Filtro de atrasados
-  else if (isOverdue === 'true') {
-    const today = new Date();
-    today.setUTCHours(0, 0, 0, 0);
+    // 🔥 LOG DETALHADO
+    const completedItems = items.filter((i) => i.status === 'CONCLUIDO');
+    console.log(
+      `📊 [BACKEND] Total itens: ${items.length}, CONCLUÍDOS: ${completedItems.length}`,
+    );
+    console.log(`📊 [BACKEND] Status no whereClause:`, whereClause.status);
+    console.log(
+      `📊 [BACKEND] Where clause completo:`,
+      JSON.stringify(whereClause, null, 2),
+    );
 
-    this.logger.log(`📅 FILTRO OVERDUE (prioridade 3):`, {
-      field: 'dueDate',
-      todayUTC: today.toISOString(),
+    this.logger.log(
+      `✅ Retornando ${items.length} itens para o fluxo ${flowId} (excluídos CONCLUÍDOS)`,
+    );
+
+    return items;
+  }
+
+  async getFilteredItems(filters: FlowFilterDto) {
+    const companyId = this.getCompanyIdFromContext();
+
+    // 🔥 BUSCAR CONFIGURAÇÃO DA EMPRESA
+    const company = await this.prisma.company.findUnique({
+      where: { id: companyId },
+      select: { notificationDays: true },
     });
 
-    whereClause.dueDate = { lt: today };
-  }
-  // PRIORIDADE 4: Filtro por intervalo de datas (sem isUpcoming/isOverdue)
-  else if (startDate || endDate) {
-    const dateFilter: any = {};
-    
-    if (startDate) {
+    const notificationDays = company?.notificationDays ?? 7;
+
+    const {
+      startDate,
+      endDate,
+      dateType,
+      isOverdue,
+      isUpcoming,
+      assignedToId,
+      supplierId,
+      status,
+      productRef,
+    } = filters;
+
+    this.logger.log(`🔍 FILTRANDO ITENS para empresa ${companyId}`);
+    this.logger.log(`📅 notificationDays configurado: ${notificationDays}`);
+    this.logger.log(`📅 Parâmetros recebidos:`, {
+      startDate,
+      endDate,
+      isUpcoming,
+      isOverdue,
+      dateType, // 🔥 LOG DO dateType
+    });
+
+    const whereClause: any = { companyId };
+
+    // Status filter
+    if (!status) {
+      whereClause.status = { not: 'CONCLUIDO' };
+      this.logger.log(`🔥 STATUS FILTER APLICADO: excluindo CONCLUIDO`);
+    }
+
+    // Basic filters
+    if (assignedToId) whereClause.assignedToId = assignedToId;
+    if (supplierId)
+      whereClause.supplierId = supplierId === 'internal' ? null : supplierId;
+    if (status) whereClause.status = status;
+    if (productRef?.trim()) {
+      whereClause.productRef = {
+        contains: productRef.trim(),
+        mode: 'insensitive',
+      };
+    }
+
+    // 🔥 CORREÇÃO: Determinar qual campo de data usar
+    // Se é filtro de upcoming ou overdue, sempre usa dueDate
+    // Se tem dateType explícito, usa o especificado
+    // Se não tem, usa dueDate (prazo) como padrão
+    let dateField = 'dueDate';
+
+    if (dateType === 'productionStartedAt') {
+      dateField = 'productionStartedAt';
+    } else if (dateType === 'dueDate') {
+      dateField = 'dueDate';
+    } else if (isUpcoming === 'true' || isOverdue === 'true') {
+      dateField = 'dueDate';
+    }
+
+    this.logger.log(`📅 Campo de data utilizado: ${dateField}`);
+
+    // 🔥 NOVA LÓGICA DE DATAS
+    // PRIORIDADE 1: Se tem startDate e endDate (filtro de data explícito)
+    if (startDate && endDate) {
+      const dateFilter: any = {};
+
       const start = new Date(startDate);
       start.setUTCHours(0, 0, 0, 0);
       dateFilter.gte = start;
-      this.logger.log(`📅 DATA INICIAL: ${start.toISOString()}`);
-    }
-    
-    if (endDate) {
+
       const end = new Date(endDate);
       end.setUTCHours(23, 59, 59, 999);
       dateFilter.lte = end;
-      this.logger.log(`📅 DATA FINAL: ${end.toISOString()}`);
+
+      whereClause[dateField] = dateFilter;
+
+      this.logger.log(`📅 USANDO DATAS EXPLÍCITAS (prioridade 1):`, {
+        field: dateField,
+        start: start.toISOString(),
+        end: end.toISOString(),
+      });
     }
-    
-    whereClause[dateField] = dateFilter;
-    
-    this.logger.log(`📅 USANDO INTERVALO DE DATAS (prioridade 4):`, {
-      field: dateField,
-      dateFilter,
+    // PRIORIDADE 2: Filtro de próximos a vencer (usando notificationDays configurado)
+    else if (isUpcoming === 'true') {
+      const today = new Date();
+      today.setUTCHours(0, 0, 0, 0);
+
+      const limitDate = new Date(today);
+      limitDate.setUTCDate(today.getUTCDate() + notificationDays);
+      limitDate.setUTCHours(23, 59, 59, 999);
+
+      this.logger.log(`📅 FILTRO UPCOMING (prioridade 2):`, {
+        field: 'dueDate',
+        todayUTC: today.toISOString(),
+        limitUTC: limitDate.toISOString(),
+        notificationDays,
+      });
+
+      whereClause.dueDate = { gte: today, lte: limitDate };
+    }
+    // PRIORIDADE 3: Filtro de atrasados
+    else if (isOverdue === 'true') {
+      const today = new Date();
+      today.setUTCHours(0, 0, 0, 0);
+
+      this.logger.log(`📅 FILTRO OVERDUE (prioridade 3):`, {
+        field: 'dueDate',
+        todayUTC: today.toISOString(),
+      });
+
+      whereClause.dueDate = { lt: today };
+    }
+    // PRIORIDADE 4: Filtro por intervalo de datas (sem isUpcoming/isOverdue)
+    else if (startDate || endDate) {
+      const dateFilter: any = {};
+
+      if (startDate) {
+        const start = new Date(startDate);
+        start.setUTCHours(0, 0, 0, 0);
+        dateFilter.gte = start;
+        this.logger.log(`📅 DATA INICIAL: ${start.toISOString()}`);
+      }
+
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setUTCHours(23, 59, 59, 999);
+        dateFilter.lte = end;
+        this.logger.log(`📅 DATA FINAL: ${end.toISOString()}`);
+      }
+
+      whereClause[dateField] = dateFilter;
+
+      this.logger.log(`📅 USANDO INTERVALO DE DATAS (prioridade 4):`, {
+        field: dateField,
+        dateFilter,
+      });
+    }
+
+    this.logger.log(`📋 WHERE CLAUSE: ${JSON.stringify(whereClause, null, 2)}`);
+
+    const items = await this.prisma.flowItem.findMany({
+      where: whereClause,
+      include: {
+        stage: { select: { id: true, name: true, order: true, color: true } },
+        flow: { select: { id: true, name: true, color: true } },
+        supplier: { select: { id: true, name: true, category: true } },
+        assignedTo: { select: { id: true, name: true, email: true } },
+        images: { select: { id: true, url: true, filename: true } },
+        audios: { select: { id: true, url: true, filename: true } },
+        videos: { select: { id: true, url: true, filename: true } },
+      },
+      orderBy: { dueDate: 'asc' },
     });
+
+    // 🔥 LOG DOS ITENS ENCONTRADOS
+    this.logger.log(`✅ ITENS ENCONTRADOS: ${items.length}`);
+    items.forEach((item) => {
+      this.logger.log(
+        `   - ${item.title}: dueDate=${item.dueDate?.toISOString()}`,
+      );
+    });
+
+    return items;
   }
-
-  this.logger.log(`📋 WHERE CLAUSE: ${JSON.stringify(whereClause, null, 2)}`);
-
-  const items = await this.prisma.flowItem.findMany({
-    where: whereClause,
-    include: {
-      stage: { select: { id: true, name: true, order: true, color: true } },
-      flow: { select: { id: true, name: true, color: true } },
-      supplier: { select: { id: true, name: true, category: true } },
-      assignedTo: { select: { id: true, name: true, email: true } },
-      images: { select: { id: true, url: true, filename: true } },
-      audios: { select: { id: true, url: true, filename: true } },
-      videos: { select: { id: true, url: true, filename: true } },
-    },
-    orderBy: { dueDate: 'asc' },
-  });
-
-  // 🔥 LOG DOS ITENS ENCONTRADOS
-  this.logger.log(`✅ ITENS ENCONTRADOS: ${items.length}`);
-  items.forEach(item => {
-    this.logger.log(`   - ${item.title}: dueDate=${item.dueDate?.toISOString()}`);
-  });
-
-  return items;
-}
 
   private hasFilters(filters: FlowFilterDto): boolean {
     return !!(
@@ -1569,7 +1575,23 @@ async getFilteredItems(filters: FlowFilterDto) {
           entityId: item.id,
           userId,
           companyId,
-          metadata: { flowId: item.flowId, stageName: targetStage.name },
+          newData: {
+            title: item.title,
+            status: item.status,
+            productRef: item.productRef,
+            quantity: item.quantity,
+            priority: item.priority,
+            dueDate: item.dueDate,
+            orderNumber: item.orderNumber,
+            assignedToId: item.assignedToId,
+            supplierId: item.supplierId,
+            stageId: item.stageId,
+          },
+          metadata: {
+            flowId: item.flowId,
+            stageName: targetStage.name,
+            createdAt: item.createdAt,
+          },
         });
 
         await this.invalidateFlowCache(companyId, flowId);
@@ -3194,61 +3216,125 @@ async getFilteredItems(filters: FlowFilterDto) {
     };
   }
 
-async updateFlowItem(itemId: string, userId: string, data: UpdateFlowItemDto) {
-  const companyId = this.getCompanyIdFromContext();
+  async updateFlowItem(
+    itemId: string,
+    userId: string,
+    data: UpdateFlowItemDto,
+  ) {
+    const companyId = this.getCompanyIdFromContext();
 
-  // 1. Extraia TUDO o que não é coluna direta da tabela 'itens_fluxo'
-  const { 
-    assignedToId, 
-    supplierId, 
-    stageId, 
-    flowId, 
-    removeImageIds, 
-    removeVideoIds, 
-    removeAudioIds,
-    ...rest 
-  } = data;
+    // 1. Busca o item antes da alteração para ter o "oldData"
+    const oldItem = await this.prisma.flowItem.findFirst({
+      where: { id: itemId, companyId },
+    });
 
-  // 2. Monte o updateData APENAS com campos que existem no schema.prisma para FlowItem
-  const updateData: any = {};
-  
-  // Lista de campos escalares permitidos (baseado no seu schema)
-  const allowedFields = ['title', 'orderNumber', 'status', 'productRef', 'quantity', 'priority', 'description', 'orderInStage'];
-  
-  for (const field of allowedFields) {
-    if (rest[field] !== undefined) {
-      updateData[field] = rest[field];
+    if (!oldItem) {
+      throw new NotFoundException('Item não encontrado');
     }
-  }
 
-  // 3. Datas (Conversão explícita)
-  if (data.dueDate) updateData.dueDate = new Date(data.dueDate);
-  if (data.productionStartedAt) updateData.productionStartedAt = new Date(data.productionStartedAt);
-  if (data.deliveryAt) updateData.deliveryAt = new Date(data.deliveryAt);
+    // 2. Extração e limpeza de campos (conforme sua lógica atual)
+    const {
+      assignedToId,
+      supplierId,
+      stageId,
+      flowId,
+      removeImageIds,
+      removeVideoIds,
+      removeAudioIds,
+      ...rest
+    } = data;
 
-  // 4. Relações (Use a sintaxe de objeto do Prisma)
-  if (assignedToId !== undefined) {
-    updateData.assignedTo = assignedToId ? { connect: { id: assignedToId } } : { disconnect: true };
-  }
-  if (supplierId !== undefined) {
-    updateData.supplier = supplierId ? { connect: { id: supplierId } } : { disconnect: true };
-  }
+    const updateData: any = {};
+    const allowedFields = [
+      'title',
+      'orderNumber',
+      'status',
+      'productRef',
+      'quantity',
+      'priority',
+      'description',
+      'orderInStage',
+    ];
 
-  // 5. Execução na transação
-  return await this.prisma.$transaction(async (tx) => {
-    // Lógica para deletar mídias se houver IDs em removeImageIds...
-    
-    return await tx.flowItem.update({
-      where: { id: itemId },
-      data: updateData, // Agora updateData está 100% limpo
-      include: {
-        assignedTo: { select: { id: true, name: true } },
-        supplier: { select: { id: true, name: true } },
-        stage: { select: { id: true, name: true } },
+    for (const field of allowedFields) {
+      if (rest[field] !== undefined) {
+        updateData[field] = rest[field];
+      }
+    }
+
+    if (data.dueDate) updateData.dueDate = new Date(data.dueDate);
+    if (data.productionStartedAt)
+      updateData.productionStartedAt = new Date(data.productionStartedAt);
+    if (data.deliveryAt) updateData.deliveryAt = new Date(data.deliveryAt);
+
+    if (assignedToId !== undefined) {
+      updateData.assignedTo = assignedToId
+        ? { connect: { id: assignedToId } }
+        : { disconnect: true };
+    }
+    if (supplierId !== undefined) {
+      updateData.supplier = supplierId
+        ? { connect: { id: supplierId } }
+        : { disconnect: true };
+    }
+
+    // 3. Execução da atualização
+    const updatedItem = await this.prisma.$transaction(async (tx) => {
+      // Lógica de remoção de mídias (se houver)...
+
+      return await tx.flowItem.update({
+        where: { id: itemId },
+        data: updateData,
+        include: {
+          assignedTo: { select: { id: true, name: true } },
+          supplier: { select: { id: true, name: true } },
+          stage: { select: { id: true, name: true } },
+        },
+      });
+    });
+
+    // 🔥 4. REGISTRO NO HISTÓRICO (O que estava faltando)
+    // Criamos um objeto apenas com o que realmente mudou para o log ficar limpo
+    const changesOnly: any = {};
+    const oldValuesOnly: any = {};
+
+    Object.keys(updateData).forEach((key) => {
+      // Evita comparar objetos de conexão do Prisma
+      if (['assignedTo', 'supplier', 'stage'].includes(key)) return;
+
+      const oldValue =
+        oldItem[key] instanceof Date
+          ? oldItem[key].toISOString()
+          : oldItem[key];
+      const newValue =
+        updateData[key] instanceof Date
+          ? updateData[key].toISOString()
+          : updateData[key];
+
+      if (JSON.stringify(oldValue) !== JSON.stringify(newValue)) {
+        changesOnly[key] = updateData[key];
+        oldValuesOnly[key] = oldItem[key];
       }
     });
-  });
-}
+
+    // Só registra se houver mudanças reais
+    if (Object.keys(changesOnly).length > 0) {
+      await this.auditService.log({
+        action: 'UPDATE_ITEM',
+        entity: 'FLOW_ITEM',
+        entityId: itemId,
+        userId,
+        companyId,
+        oldData: oldValuesOnly,
+        newData: changesOnly,
+        metadata: {
+          title: updatedItem.title,
+        },
+      });
+    }
+
+    return updatedItem;
+  }
 
   // ===========================================================================
   // 🔥 MOVER ITEM (AJUSTADO: SEM CONCLUSÃO AUTOMÁTICA E COM HISTÓRICO)
