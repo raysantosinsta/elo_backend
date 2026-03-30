@@ -943,6 +943,13 @@ export class FlowService {
   async getFilteredKanbanBoard(flowId: string, filters: FlowFilterDto) {
     const companyId = this.getCompanyIdFromContext();
 
+    // 🔥 ADICIONAR LOG PARA VERIFICAR
+    console.log('🔍 [getFilteredKanbanBoard] isOverdue:', filters.isOverdue);
+    console.log(
+      '🔍 [getFilteredKanbanBoard] isOverdue type:',
+      typeof filters.isOverdue,
+    );
+
     console.log('\n');
     console.log('='.repeat(80));
     console.log('🔍 [getFilteredKanbanBoard] INICIANDO FILTRAGEM');
@@ -1139,6 +1146,11 @@ export class FlowService {
     return items;
   }
 
+  private parseBooleanFlag(value: string | undefined): boolean {
+    if (value === undefined || value === null) return false;
+    return value === 'true' || value === '1' || value === 'on';
+  }
+
   async getFilteredItems(filters: FlowFilterDto) {
     const companyId = this.getCompanyIdFromContext();
 
@@ -1169,7 +1181,9 @@ export class FlowService {
       endDate,
       isUpcoming,
       isOverdue,
-      dateType, // 🔥 LOG DO dateType
+      dateType,
+      isOverdueType: typeof isOverdue,
+      isUpcomingType: typeof isUpcoming,
     });
 
     const whereClause: any = { companyId };
@@ -1192,23 +1206,46 @@ export class FlowService {
       };
     }
 
-    // 🔥 CORREÇÃO: Determinar qual campo de data usar
-    // Se é filtro de upcoming ou overdue, sempre usa dueDate
-    // Se tem dateType explícito, usa o especificado
-    // Se não tem, usa dueDate (prazo) como padrão
-    let dateField = 'dueDate';
+    // 🔥 FUNÇÃO HELPER PARA CONVERTER STRING BOOLEAN
+    const parseBooleanFlag = (value: string | undefined | boolean): boolean => {
+      if (value === undefined || value === null) return false;
+      if (typeof value === 'boolean') return value;
+      return value === 'true' || value === '1' || value === 'on';
+    };
 
+    // 🔥 CONVERTER PARA BOOLEAN CORRETAMENTE
+    const isOverdueBool = parseBooleanFlag(isOverdue);
+    const isUpcomingBool = parseBooleanFlag(isUpcoming);
+
+    // 🔥 Determinar campo de data
+    let dateField = 'dueDate';
     if (dateType === 'productionStartedAt') {
       dateField = 'productionStartedAt';
     } else if (dateType === 'dueDate') {
       dateField = 'dueDate';
-    } else if (isUpcoming === 'true' || isOverdue === 'true') {
+    } else if (isUpcomingBool || isOverdueBool) {
       dateField = 'dueDate';
     }
 
     this.logger.log(`📅 Campo de data utilizado: ${dateField}`);
 
-    // 🔥 NOVA LÓGICA DE DATAS
+    // 🔥 Data UTC para hoje (início do dia)
+    const now = new Date();
+    const todayUTC = new Date(
+      Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate(),
+        0,
+        0,
+        0,
+        0,
+      ),
+    );
+
+    // =========================================================================
+    // 🔥 LÓGICA DE DATAS - PRIORIDADES
+    // =========================================================================
     // PRIORIDADE 1: Se tem startDate e endDate (filtro de data explícito)
     if (startDate && endDate) {
       const dateFilter: any = {};
@@ -1230,34 +1267,31 @@ export class FlowService {
       });
     }
     // PRIORIDADE 2: Filtro de próximos a vencer (usando notificationDays configurado)
-    else if (isUpcoming === 'true') {
-      const today = new Date();
-      today.setUTCHours(0, 0, 0, 0);
-
-      const limitDate = new Date(today);
-      limitDate.setUTCDate(today.getUTCDate() + notificationDays);
+    else if (isUpcomingBool) {
+      const limitDate = new Date(todayUTC);
+      limitDate.setUTCDate(todayUTC.getUTCDate() + notificationDays);
       limitDate.setUTCHours(23, 59, 59, 999);
 
       this.logger.log(`📅 FILTRO UPCOMING (prioridade 2):`, {
         field: 'dueDate',
-        todayUTC: today.toISOString(),
+        todayUTC: todayUTC.toISOString(),
         limitUTC: limitDate.toISOString(),
         notificationDays,
       });
 
-      whereClause.dueDate = { gte: today, lte: limitDate };
+      whereClause.dueDate = { gte: todayUTC, lte: limitDate };
     }
     // PRIORIDADE 3: Filtro de atrasados
-    else if (isOverdue === 'true') {
-      const today = new Date();
-      today.setUTCHours(0, 0, 0, 0);
-
+    else if (isOverdueBool) {
       this.logger.log(`📅 FILTRO OVERDUE (prioridade 3):`, {
         field: 'dueDate',
-        todayUTC: today.toISOString(),
+        todayUTC: todayUTC.toISOString(),
       });
 
-      whereClause.dueDate = { lt: today };
+      whereClause.dueDate = {
+        not: null,
+        lt: todayUTC,
+      };
     }
     // PRIORIDADE 4: Filtro por intervalo de datas (sem isUpcoming/isOverdue)
     else if (startDate || endDate) {
@@ -1301,11 +1335,24 @@ export class FlowService {
       orderBy: { dueDate: 'asc' },
     });
 
-    // 🔥 LOG DOS ITENS ENCONTRADOS
+    // 🔥 LOG DOS ITENS ENCONTRADOS COM ANÁLISE DE ATRASO
+    const overdueItems = items.filter(
+      (item) =>
+        item.dueDate &&
+        new Date(item.dueDate) < todayUTC &&
+        item.status !== 'CONCLUIDO',
+    );
+
     this.logger.log(`✅ ITENS ENCONTRADOS: ${items.length}`);
+    this.logger.log(`📊 ITENS ATRASADOS: ${overdueItems.length}`);
+
     items.forEach((item) => {
+      const isItemOverdue =
+        item.dueDate &&
+        new Date(item.dueDate) < todayUTC &&
+        item.status !== 'CONCLUIDO';
       this.logger.log(
-        `   - ${item.title}: dueDate=${item.dueDate?.toISOString()}`,
+        `   - ${item.title}: dueDate=${item.dueDate?.toISOString()} | status=${item.status} | atrasado=${isItemOverdue ? 'SIM' : 'NÃO'}`,
       );
     });
 
@@ -1542,7 +1589,7 @@ export class FlowService {
           enteredAt: new Date(),
           orderNumber: dto.orderNumber?.trim() ?? '',
           productRef: dto.productRef?.trim() ?? '',
-          quantity: dto.quantity ?? 1,
+          quantity: dto.quantity,
           priority: dto.priority ?? 3,
           status: dto.status ?? 'PENDENTE',
           description: dto.description?.trim() ?? null,

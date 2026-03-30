@@ -17,7 +17,7 @@ import {
   IsDate,
   ValidateNested,
 } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 
 export enum DateFilterType {
@@ -365,10 +365,9 @@ export class CreateFlowItemDto {
   @IsString()
   productRef?: string;
 
-  @ApiProperty({ required: false, example: 5, minimum: 1 })
+  @ApiProperty({ required: false, example: 5, minimum: 0 })
   @IsOptional()
   @IsNumber()
-  @Min(1)
   quantity?: number;
 
   @ApiProperty({ required: false, example: 3, minimum: 1, maximum: 5 })
@@ -453,12 +452,12 @@ export class UpdateFlowItemDto {
     required: false,
     example: 5,
     description: 'Quantidade do item (mínimo 1)',
-    minimum: 1,
+    minimum: 0,
   })
   @IsOptional()
   @IsNumber()
   @IsInt()
-  @Min(1)
+  @Min(0)
   quantity?: number;
 
   @ApiProperty({ required: false, example: 3, minimum: 1, maximum: 5 })
@@ -556,20 +555,14 @@ export class FlowFilterDto {
   @IsEnum(DateFilterType)
   dateType?: DateFilterType;
 
-  @ApiProperty({
-    required: false,
-    description: 'Filtrar itens atrasados (true/false)',
-  })
+  @ApiPropertyOptional({ description: 'Filtrar itens atrasados' })
   @IsOptional()
-  @IsBooleanString()
+  @IsBooleanString() // 🔥 USAR IsBooleanString para aceitar "true"/"false" como string
   isOverdue?: string;
 
-  @ApiProperty({
-    required: false,
-    description: 'Filtrar itens com prazo nos próximos 7 dias (true/false)',
-  })
+  @ApiPropertyOptional({ description: 'Filtrar itens próximos' })
   @IsOptional()
-  @IsBooleanString()
+  @IsBooleanString() // 🔥 USAR IsBooleanString
   isUpcoming?: string;
 
   @ApiProperty({ required: false })

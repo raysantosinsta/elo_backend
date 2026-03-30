@@ -122,7 +122,7 @@ export class CompaniesController {
   // ===========================================================================
 
   @Get(':id/notification-settings')
-  @Roles(UserRole.MASTER, UserRole.ADMIN)
+  @Roles(UserRole.MASTER, UserRole.ADMIN, UserRole.EMPLOYER)
   @ApiOperation({
     summary: 'Busca configurações de notificação da empresa',
     description: 'Retorna os dias de antecedência configurados para notificações',

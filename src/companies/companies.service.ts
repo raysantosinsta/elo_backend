@@ -395,6 +395,15 @@ export class CompaniesService {
   ): Promise<Partial<Company>> {
     await this.validateCompanyAccess(id);
 
+    // 🔥 BLOQUEAR EMPLOYER DE FAZER ALTERAÇÕES
+    const userRole = this.cls.get<string>('userRole') as UserRole;
+
+    if (userRole === UserRole.EMPLOYER) {
+      throw new ForbiddenException(
+        'Você não tem permissão para alterar as configurações da empresa',
+      );
+    }
+
     if (dto.notificationDays < 1 || dto.notificationDays > 90) {
       throw new BadRequestException('O valor deve estar entre 1 e 90 dias');
     }
@@ -460,6 +469,23 @@ export class CompaniesService {
         );
       }
       console.log('✅ ADMIN - acesso permitido (própria empresa)');
+      return;
+    }
+
+    // 🔥 EMPLOYER: Permite apenas leitura da própria empresa
+    if (userRole === UserRole.EMPLOYER) {
+      if (userTenantId !== companyId) {
+        console.log('❌ EMPLOYER - empresa diferente', {
+          userTenantId,
+          requestedCompanyId: companyId,
+        });
+        throw new ForbiddenException(
+          'Você não tem permissão para acessar os dados desta empresa',
+        );
+      }
+      // Outros roles não têm acesso
+      console.log('❌ Role não autorizado:', userRole);
+      // 🔥 IMPORTANTE: RETORNAR AQUI, NÃO JOGAR ERRO!
       return;
     }
 
