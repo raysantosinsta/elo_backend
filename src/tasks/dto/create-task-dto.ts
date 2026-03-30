@@ -29,7 +29,8 @@ export function validateFiles(files: {
   videos?: any[];
 }) {
   // Regex segura e permissiva
-  const allowedMimesRegex = /(jpg|jpeg|png|webp|gif|mpeg|mp3|wav|ogg|m4a|mp4|webm|quicktime|mov|avi|x-msvideo|octet-stream)/;
+  const allowedMimesRegex =
+    /(jpg|jpeg|png|webp|gif|mpeg|mp3|wav|ogg|m4a|mp4|webm|quicktime|mov|avi|x-msvideo|octet-stream)/;
 
   // Junta todos os arquivos em um único array para validar um por um
   const allFiles = [
@@ -45,11 +46,11 @@ export function validateFiles(files: {
         `Tipo de arquivo inválido: ${file.originalname} (${file.mimetype}). Tipos permitidos: Imagens, Áudios e Vídeos comuns.`,
       );
     }
-    
+
     // Validação de tamanho extra (ex: 100MB)
-    const maxSize = 100 * 1024 * 1024; 
+    const maxSize = 100 * 1024 * 1024;
     if (file.size > maxSize) {
-       throw new BadRequestException(
+      throw new BadRequestException(
         `Arquivo muito grande: ${file.originalname}. Máximo permitido: 100MB.`,
       );
     }
@@ -75,23 +76,17 @@ export class CreateTaskDto {
   @IsOptional() @IsDateString() dueDate?: string | Date;
   @IsOptional() @IsUUID() assignedToId?: string;
 
+// 🔥 REMOVER O @Transform E DEIXAR COMO STRING
   @IsOptional()
-  @Transform(({ value }) => {
-    if (typeof value === 'string') {
-      try { return JSON.parse(value); } catch (e) { return null; }
-    }
-    return value;
-  })
-  @ValidateNested()
-  @Type(() => CreateTaskAddressDto)
-  address?: CreateTaskAddressDto;
+  @IsString()
+  address?: string; // 👈 MUDAR PARA STRING
 
   @IsOptional() @IsString() finalComment?: string;
   @IsOptional() @IsDateString() scheduledAt?: string | Date;
   @IsOptional() @IsInt() @Type(() => Number) priority?: number;
   @IsOptional() @IsInt() @Type(() => Number) columnOrder?: number;
   @IsOptional() @IsUUID() routeId?: string;
-  
+
   @IsOptional() status?: any;
   @IsOptional() images?: any;
   @IsOptional() audios?: any;
@@ -118,7 +113,11 @@ export class UpdateTaskDto {
   @IsOptional()
   @Transform(({ value }) => {
     if (typeof value === 'string') {
-      try { return JSON.parse(value); } catch (e) { return null; }
+      try {
+        return JSON.parse(value);
+      } catch (e) {
+        return null;
+      }
     }
     return value;
   })
@@ -129,17 +128,23 @@ export class UpdateTaskDto {
 
   @IsOptional()
   @IsArray()
-  @Transform(({ value }) => (typeof value === 'string' ? JSON.parse(value) : value))
+  @Transform(({ value }) =>
+    typeof value === 'string' ? JSON.parse(value) : value,
+  )
   removeImageIds?: string[];
 
   @IsOptional()
   @IsArray()
-  @Transform(({ value }) => (typeof value === 'string' ? JSON.parse(value) : value))
+  @Transform(({ value }) =>
+    typeof value === 'string' ? JSON.parse(value) : value,
+  )
   removeAudioIds?: string[];
 
   @IsOptional()
   @IsArray()
-  @Transform(({ value }) => (typeof value === 'string' ? JSON.parse(value) : value))
+  @Transform(({ value }) =>
+    typeof value === 'string' ? JSON.parse(value) : value,
+  )
   removeVideoIds?: string[];
 
   @IsOptional() images?: any;

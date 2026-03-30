@@ -39,7 +39,13 @@ import {
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { TenantInterceptor } from 'src/common/interceptors/tenant.interceptor'; // 🔥 Injetar Contexto
-import { CreateTaskAddressDto, CreateTaskDto, FinalizeTaskDto, UpdateTaskDto, validateFiles } from './dto/create-task-dto';
+import {
+  CreateTaskAddressDto,
+  CreateTaskDto,
+  FinalizeTaskDto,
+  UpdateTaskDto,
+  validateFiles,
+} from './dto/create-task-dto';
 import { TasksService, UploadedFile } from './tasks.service';
 import { TaskStatus, User } from '@prisma/client';
 import { FileLoggerInterceptor } from 'src/common/interceptors/file-logger.interceptor';
@@ -53,48 +59,98 @@ import { CurrentUser } from 'src/auth/current-user.decorator';
 export class TasksController {
   private readonly logger = new Logger(TasksController.name);
 
-  constructor(private readonly tasksService: TasksService) { }
+  constructor(private readonly tasksService: TasksService) {}
 
-  @Post()
-  @ApiOperation({ summary: 'Cria uma nova tarefa' })
-  @ApiConsumes('multipart/form-data')
-  @ApiResponse({ status: 201, description: 'Tarefa criada.' })
-  @UseInterceptors(FileFieldsInterceptor([{ name: 'images', maxCount: 10 }, { name: 'audios', maxCount: 10 }, { name: 'videos', maxCount: 5 }]), FileLoggerInterceptor)
-  async create(
-    @CurrentUser() user: any,
-    @Body() createTaskDto: CreateTaskDto,
-    @UploadedFiles() // 🔥 Validação de Arquivo
-    files: { images?: UploadedFile[]; audios?: UploadedFile[]; videos?: UploadedFile[] },
-  ) {
 
-    if (!user.companyId) {
-      throw new BadRequestException('Usuário não está vinculado a uma empresa.');
-    }
+// src/tasks/tasks.controller.ts
 
-    // ✅ CHAME A VALIDAÇÃO MANUAL AQUI
-    // Se falhar, ela joga um BadRequestException e para a execução
-    if (files) {
-      validateFiles(files);
-    }
-
-    createTaskDto.companyId = user.companyId;
-    createTaskDto.createdById = user.id;
-
-    // Não precisa injetar user, o service pega do CLS
-    return this.tasksService.create(createTaskDto, files);
+@Post()
+@ApiOperation({ summary: 'Cria uma nova tarefa' })
+@ApiConsumes('multipart/form-data')
+@ApiResponse({ status: 201, description: 'Tarefa criada.' })
+@UseInterceptors(
+  FileFieldsInterceptor([
+    { name: 'images', maxCount: 10 },
+    { name: 'audios', maxCount: 10 },
+    { name: 'videos', maxCount: 5 },
+  ]),
+  FileLoggerInterceptor,
+)
+async create(
+  @CurrentUser() user: any,
+  @Body() createTaskDto: CreateTaskDto,
+  @UploadedFiles()
+  files: {
+    images?: UploadedFile[];
+    audios?: UploadedFile[];
+    videos?: UploadedFile[];
+  },
+) {
+  if (!user.companyId) {
+    throw new BadRequestException('Usuário não está vinculado a uma empresa.');
   }
+
+  console.log('📦 [CONTROLLER] Address cru recebido:', createTaskDto.address);
+  console.log('📦 [CONTROLLER] Type of address:', typeof createTaskDto.address);
+
+  // 🔥 FAZER O PARSE MANUALMENTE
+  let parsedAddress: CreateTaskAddressDto | undefined = undefined;
+
+  if (typeof createTaskDto.address === 'string' && createTaskDto.address.trim() !== '') {
+    try {
+      const parsed = JSON.parse(createTaskDto.address);
+      console.log('✅ [CONTROLLER] Address parseado:', parsed);
+      
+      if (parsed && typeof parsed === 'object' && parsed.cep) {
+        parsedAddress = parsed as CreateTaskAddressDto;
+      }
+    } catch (e) {
+      console.error('❌ [CONTROLLER] Erro ao parsear address:', e);
+    }
+  }
+
+  // 🔥 CRIAR UM OBJETO COM O ADDRESS PARSEADO
+  const finalDto = {
+    ...createTaskDto,
+    address: parsedAddress,
+  };
+
+  console.log('📦 [CONTROLLER] Address final:', finalDto.address);
+
+  if (files) {
+    validateFiles(files);
+  }
+
+  finalDto.companyId = user.companyId;
+  finalDto.createdById = user.id;
+
+  return this.tasksService.create(finalDto as CreateTaskDto, files);
+}
 
   @Put(':id')
   @ApiOperation({ summary: 'Atualiza uma tarefa existente' })
   @ApiConsumes('multipart/form-data')
-  @UseInterceptors(FileFieldsInterceptor([{ name: 'images', maxCount: 10 }, { name: 'audios', maxCount: 10 }, { name: 'videos', maxCount: 5 }]))
+  @UseInterceptors(
+    FileFieldsInterceptor([
+      { name: 'images', maxCount: 10 },
+      { name: 'audios', maxCount: 10 },
+      { name: 'videos', maxCount: 5 },
+    ]),
+  )
   async update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() updateTaskDto: UpdateTaskDto,
     @UploadedFiles()
-    files: { images?: UploadedFile[]; audios?: UploadedFile[]; videos?: UploadedFile[] },
+    files: {
+      images?: UploadedFile[];
+      audios?: UploadedFile[];
+      videos?: UploadedFile[];
+    },
   ) {
-    if (files && (files.images?.length || files.audios?.length || files.videos?.length)) {
+    if (
+      files &&
+      (files.images?.length || files.audios?.length || files.videos?.length)
+    ) {
       // Certifique-se que sua função validateFiles aceita arquivos parciais/opcionais
       validateFiles(files);
     }
@@ -105,7 +161,8 @@ export class TasksController {
   @ApiOperation({ summary: 'Move a tarefa entre colunas e/ou altera status' })
   async updateStatus(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: { columnId?: string; status?: TaskStatus; columnOrder?: number },
+    @Body()
+    body: { columnId?: string; status?: TaskStatus; columnOrder?: number },
   ) {
     const dto = new UpdateTaskDto();
     dto.columnId = body.columnId;
@@ -152,7 +209,7 @@ export class TasksController {
     @Query('endDate') endDate?: string,
     @Query('assignedToId') assignedToId?: string,
     @Query('hasLocation') hasLocation?: string,
-    @Query('dateType') dateType?: string, 
+    @Query('dateType') dateType?: string,
     @Query('isOverdue') isOverdue?: string,
   ) {
     let hasLocationBool: boolean | undefined = undefined;
@@ -170,7 +227,7 @@ export class TasksController {
       endDate,
       assignedToId,
       hasLocation: hasLocationBool,
-      dateType, 
+      dateType,
       isOverdue: isOverdueBool, // <--- PASSADO
     });
   }
