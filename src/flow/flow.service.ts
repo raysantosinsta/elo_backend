@@ -3822,27 +3822,77 @@ export class FlowService {
 
     console.log('\n' + '='.repeat(80));
     console.log('📊 [GET_COMPLETED_ITEMS] ========================');
+    console.log('🔍 COMPANY_ID:', companyId);
+    console.log('🔍 OPTIONS RECEBIDOS:', JSON.stringify(options, null, 2));
+    console.log('🔍 START_DATE:', options?.startDate);
+    console.log('🔍 END_DATE:', options?.endDate);
+    console.log('🔍 START_DATE TYPE:', typeof options?.startDate);
+    console.log('🔍 END_DATE TYPE:', typeof options?.endDate);
 
     const where: any = { companyId, status: 'CONCLUIDO' };
 
-    if (options?.flowId) where.flowId = options.flowId;
+    if (options?.flowId) {
+      console.log('📌 FILTRO FLOW_ID:', options.flowId);
+      where.flowId = options.flowId;
+    }
     if (options?.productRef) {
+      console.log('📌 FILTRO PRODUCT_REF:', options.productRef);
+
       where.productRef = { contains: options.productRef, mode: 'insensitive' };
     }
-    if (options?.assignedToId) where.assignedToId = options.assignedToId;
-    if (options?.supplierId) where.supplierId = options.supplierId;
-
-    if (options?.startDate || options?.endDate) {
-      where.updatedAt = {};
-      if (options.startDate) where.updatedAt.gte = options.startDate;
-      if (options.endDate) where.updatedAt.lte = options.endDate;
+    if (options?.assignedToId) {
+      console.log('📌 FILTRO ASSIGNED_TO_ID:', options.assignedToId);
+      where.assignedToId = options.assignedToId;
+    }
+    if (options?.supplierId) {
+      console.log('📌 FILTRO SUPPLIER_ID:', options.supplierId);
+      where.supplierId = options.supplierId;
     }
 
+    if (options?.startDate || options?.endDate) {
+      console.log('📅 🔥 APLICANDO FILTRO DE DATA!');
+      console.log('   startDate:', options.startDate);
+      console.log('   endDate:', options.endDate);
+      where.updatedAt = {};
+      if (options.startDate) {
+        console.log(
+          '   📅 startDate convertido:',
+          options.startDate.toISOString(),
+        );
+        where.updatedAt.gte = options.startDate;
+      }
+      if (options.endDate) {
+        console.log('   📅 endDate convertido:', options.endDate.toISOString());
+        where.updatedAt.lte = options.endDate;
+      }
+    } else {
+      console.log('📅 ⚠️ NENHUM FILTRO DE DATA APLICADO!');
+    }
+    console.log('\n📋 WHERE CLAUSE COMPLETO:');
+    console.log(JSON.stringify(where, null, 2));
+    // 🔥 LOG: Buscar todos os itens concluídos sem filtro de data para comparação
+    const allCompletedItems = await this.prisma.flowItem.findMany({
+      where: { companyId, status: 'CONCLUIDO' },
+      select: { id: true, title: true, updatedAt: true },
+    });
+
+    console.log('\n📊 TODOS OS ITENS CONCLUÍDOS NO BANCO:');
+    console.log(`   Total: ${allCompletedItems.length}`);
+    allCompletedItems.slice(0, 10).forEach((item) => {
+      console.log(
+        `   - ${item.title} | concluído em: ${item.updatedAt.toISOString()}`,
+      );
+    });
+
     const total = await this.prisma.flowItem.count({ where });
+    console.log('\n📊 TOTAL APÓS FILTROS:', total);
 
     const page = options?.page || 1;
     const limit = options?.limit || 100;
     const skip = (page - 1) * limit;
+
+    console.log('\n📄 PAGINAÇÃO:');
+    console.log(`   page: ${page}, limit: ${limit}, skip: ${skip}`);
 
     const items = await this.prisma.flowItem.findMany({
       where,
@@ -3857,6 +3907,14 @@ export class FlowService {
       skip,
       take: limit,
     });
+
+    console.log('\n📦 ITENS RETORNADOS:', items.length);
+    items.slice(0, 5).forEach((item) => {
+      console.log(
+        `   - ${item.title} | updatedAt: ${item.updatedAt.toISOString()}`,
+      );
+    });
+    console.log('='.repeat(80) + '\n');
 
     const formattedItems = items.map((item) => ({
       id: item.id,
@@ -3906,101 +3964,145 @@ export class FlowService {
   }
 
   async getCompletionStats(
-    period: 'today' | 'week' | 'month' | 'year' = 'week',
-  ) {
-    const companyId = this.getCompanyIdFromContext();
+  period: 'today' | 'week' | 'month' | 'year' = 'week',
+  flowId?: string,
+) {
+  const companyId = this.getCompanyIdFromContext();
 
-    const now = new Date();
-    let startDate: Date;
+  console.log('\n' + '='.repeat(80));
+  console.log('📊 [SERVICE] getCompletionStats');
+  console.log('='.repeat(80));
+  console.log('📥 Parâmetros recebidos:');
+  console.log('   - period:', period);
+  console.log('   - flowId:', flowId);
+  console.log('   - companyId:', companyId);
 
-    switch (period) {
-      case 'today':
-        startDate = new Date(now.setHours(0, 0, 0, 0));
-        break;
-      case 'week':
-        startDate = new Date(now.setDate(now.getDate() - 7));
-        break;
-      case 'month':
-        startDate = new Date(now.setMonth(now.getMonth() - 1));
-        break;
-      case 'year':
-        startDate = new Date(now.setFullYear(now.getFullYear() - 1));
-        break;
-      default:
-        startDate = new Date(now.setDate(now.getDate() - 7));
-    }
+  const now = new Date();
+  let startDate: Date;
 
-    const completedItems = await this.prisma.flowItem.findMany({
-      where: {
-        companyId,
-        status: 'CONCLUIDO',
-        updatedAt: { gte: startDate },
-      },
-      include: {
-        flow: { select: { id: true, name: true } },
-        assignedTo: { select: { id: true, name: true } },
-      },
-    });
-
-    const totalCompleted = completedItems.length;
-
-    const byFlow = completedItems.reduce(
-      (acc, item) => {
-        const flowName = item.flow?.name || 'Sem fluxo';
-        acc[flowName] = (acc[flowName] || 0) + 1;
-        return acc;
-      },
-      {} as Record<string, number>,
-    );
-
-    const byResponsible = completedItems.reduce(
-      (acc, item) => {
-        const name = item.assignedTo?.name || 'Não atribuído';
-        acc[name] = (acc[name] || 0) + 1;
-        return acc;
-      },
-      {} as Record<string, number>,
-    );
-
-    const itemsWithProductionTime = completedItems.filter(
-      (item) => item.productionStartedAt,
-    );
-
-    const avgProductionTime =
-      itemsWithProductionTime.length > 0
-        ? itemsWithProductionTime.reduce((sum, item) => {
-            const days = this.calculateProductionDays(
-              item.productionStartedAt!,
-              item.updatedAt,
-            );
-            return sum + days;
-          }, 0) / itemsWithProductionTime.length
-        : 0;
-
-    const overdueCount = completedItems.filter(
-      (item) => item.dueDate && new Date(item.dueDate) < item.updatedAt,
-    ).length;
-
-    return {
-      period,
-      startDate,
-      endDate: new Date(),
-      total: totalCompleted,
-      byFlow,
-      byResponsible,
-      averages: {
-        productionTime: Math.round(avgProductionTime * 10) / 10,
-        perDay: Math.round((totalCompleted / 7) * 10) / 10,
-      },
-      overdue: {
-        count: overdueCount,
-        percentage:
-          totalCompleted > 0
-            ? Math.round((overdueCount / totalCompleted) * 100)
-            : 0,
-      },
-    };
+  switch (period) {
+    case 'today':
+      startDate = new Date(now);
+      startDate.setHours(0, 0, 0, 0);
+      break;
+    case 'week':
+      startDate = new Date(now);
+      startDate.setDate(now.getDate() - 7);
+      startDate.setHours(0, 0, 0, 0);
+      break;
+    case 'month':
+      startDate = new Date(now);
+      startDate.setMonth(now.getMonth() - 1);
+      startDate.setHours(0, 0, 0, 0);
+      break;
+    case 'year':
+      startDate = new Date(now);
+      startDate.setFullYear(now.getFullYear() - 1);
+      startDate.setHours(0, 0, 0, 0);
+      break;
+    default:
+      startDate = new Date(now);
+      startDate.setDate(now.getDate() - 7);
+      startDate.setHours(0, 0, 0, 0);
   }
+
+  console.log('📅 Período calculado:');
+  console.log('   - startDate:', startDate.toISOString());
+  console.log('   - endDate:', now.toISOString());
+
+  // 🔥 CONSTRUIR WHERE CLAUSE COM FILTRO DE FLUXO
+  const where: any = {
+    companyId,
+    status: 'CONCLUIDO',
+    updatedAt: { gte: startDate },
+  };
+
+  // 🔥 ADICIONAR FILTRO POR FLUXO SE FORNECIDO
+  if (flowId) {
+    console.log('📌 Aplicando filtro por fluxo:', flowId);
+    where.flowId = flowId;
+  }
+
+  console.log('📋 WHERE CLAUSE:', JSON.stringify(where, null, 2));
+
+  const completedItems = await this.prisma.flowItem.findMany({
+    where,
+    include: {
+      flow: { select: { id: true, name: true } },
+      assignedTo: { select: { id: true, name: true } },
+    },
+    orderBy: { updatedAt: 'desc' },
+  });
+
+  console.log('📦 Itens concluídos encontrados:', completedItems.length);
+
+  const totalCompleted = completedItems.length;
+
+  const byFlow = completedItems.reduce(
+    (acc, item) => {
+      const flowName = item.flow?.name || 'Sem fluxo';
+      acc[flowName] = (acc[flowName] || 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>,
+  );
+
+  const byResponsible = completedItems.reduce(
+    (acc, item) => {
+      const name = item.assignedTo?.name || 'Não atribuído';
+      acc[name] = (acc[name] || 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>,
+  );
+
+  const itemsWithProductionTime = completedItems.filter(
+    (item) => item.productionStartedAt,
+  );
+
+  const avgProductionTime =
+    itemsWithProductionTime.length > 0
+      ? itemsWithProductionTime.reduce((sum, item) => {
+          const days = this.calculateProductionDays(
+            item.productionStartedAt!,
+            item.updatedAt,
+          );
+          return sum + days;
+        }, 0) / itemsWithProductionTime.length
+      : 0;
+
+  const overdueCount = completedItems.filter(
+    (item) => item.dueDate && new Date(item.dueDate) < item.updatedAt,
+  ).length;
+
+  console.log('📊 Estatísticas calculadas:');
+  console.log('   - total:', totalCompleted);
+  console.log('   - fluxos únicos:', Object.keys(byFlow).length);
+  console.log('   - responsáveis únicos:', Object.keys(byResponsible).length);
+  console.log('   - atrasados:', overdueCount);
+  console.log('   - tempo médio produção:', avgProductionTime);
+  console.log('='.repeat(80) + '\n');
+
+  return {
+    period,
+    startDate,
+    endDate: new Date(),
+    total: totalCompleted,
+    byFlow,
+    byResponsible,
+    averages: {
+      productionTime: Math.round(avgProductionTime * 10) / 10,
+      perDay: Math.round((totalCompleted / 7) * 10) / 10,
+    },
+    overdue: {
+      count: overdueCount,
+      percentage:
+        totalCompleted > 0
+          ? Math.round((overdueCount / totalCompleted) * 100)
+          : 0,
+    },
+  };
+}
 
   private calculateProductionDays(startDate: Date, endDate: Date): number {
     const start = new Date(startDate).getTime();

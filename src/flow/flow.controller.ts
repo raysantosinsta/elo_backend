@@ -1,4 +1,5 @@
 /* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/restrict-template-expressions */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
@@ -926,98 +927,199 @@ async getItemById(
     return this.flowService.getKanbanBoardByStageName(flowId, stageName);
   }
 
-  @Get('completed-items')
-  @ApiOperation({ 
-    summary: 'Lista itens concluídos para dashboard',
-    description: 'Retorna itens com status CONCLUIDO com paginação'
-  })
-  @ApiQuery({ name: 'page', required: false, type: Number, description: 'Número da página (padrão: 1)' })
-  @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Itens por página (padrão: 10)' })
-  @ApiQuery({ name: 'flowId', required: false, type: String, description: 'Filtrar por ID do fluxo' })
-  @ApiQuery({ name: 'startDate', required: false, type: String, description: 'Data inicial (YYYY-MM-DD)' })
-  @ApiQuery({ name: 'endDate', required: false, type: String, description: 'Data final (YYYY-MM-DD)' })
-  @ApiQuery({ name: 'productRef', required: false, type: String, description: 'Filtrar por referência do produto' })
-  @ApiQuery({ name: 'assignedToId', required: false, type: String, description: 'Filtrar por responsável' })
-  @ApiQuery({ name: 'supplierId', required: false, type: String, description: 'Filtrar por fornecedor' })
-  async getCompletedItems(
-    @Req() req: any,
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
-    @Query('flowId') flowId?: string,
-    @Query('startDate') startDate?: string,
-    @Query('endDate') endDate?: string,
-    @Query('productRef') productRef?: string,
-    @Query('assignedToId') assignedToId?: string,
-    @Query('supplierId') supplierId?: string,
-  ) {
-    console.log('\n' + '='.repeat(80));
-    console.log('🎯 [CONTROLLER] getCompletedItems');
-    console.log('='.repeat(80));
-    console.log('📥 Query params recebidos:', {
-      page,
-      limit,
-      flowId,
-      startDate,
-      endDate,
-      productRef,
-      assignedToId,
-      supplierId
-    });
+ @Get('completed-items')
+@ApiOperation({ 
+  summary: 'Lista itens concluídos para dashboard',
+  description: 'Retorna itens com status CONCLUIDO com paginação'
+})
+@ApiQuery({ name: 'page', required: false, type: Number, description: 'Número da página (padrão: 1)' })
+@ApiQuery({ name: 'limit', required: false, type: Number, description: 'Itens por página (padrão: 10)' })
+@ApiQuery({ name: 'flowId', required: false, type: String, description: 'Filtrar por ID do fluxo' })
+@ApiQuery({ name: 'startDate', required: false, type: String, description: 'Data inicial (YYYY-MM-DD)' })
+@ApiQuery({ name: 'endDate', required: false, type: String, description: 'Data final (YYYY-MM-DD)' })
+@ApiQuery({ name: 'productRef', required: false, type: String, description: 'Filtrar por referência do produto' })
+@ApiQuery({ name: 'assignedToId', required: false, type: String, description: 'Filtrar por responsável' })
+@ApiQuery({ name: 'supplierId', required: false, type: String, description: 'Filtrar por fornecedor' })
+@ApiQuery({ name: 'period', required: false, type: String, description: 'Período: today, week, month, year' })
+async getCompletedItems(
+  @Req() req: any,
+  @Query('page') page?: string,
+  @Query('limit') limit?: string,
+  @Query('flowId') flowId?: string,
+  @Query('startDate') startDate?: string,
+  @Query('endDate') endDate?: string,
+  @Query('productRef') productRef?: string,
+  @Query('assignedToId') assignedToId?: string,
+  @Query('supplierId') supplierId?: string,
+  @Query('period') period?: string,
+) {
+  console.log('\n' + '='.repeat(80));
+  console.log('🎯 [CONTROLLER] getCompletedItems');
+  console.log('='.repeat(80));
+  console.log('📥 Query params recebidos:');
+  console.log('   - page:', page);
+  console.log('   - limit:', limit);
+  console.log('   - flowId:', flowId);
+  console.log('   - startDate:', startDate);
+  console.log('   - endDate:', endDate);
+  console.log('   - productRef:', productRef);
+  console.log('   - assignedToId:', assignedToId);
+  console.log('   - supplierId:', supplierId);
+  console.log('   - period:', period);
+  
+  const options: any = {};
+  
+  // Paginação
+  if (page) options.page = parseInt(page);
+  if (limit) options.limit = parseInt(limit);
+  
+  // Filtros básicos
+  if (flowId) options.flowId = flowId;
+  if (productRef) options.productRef = productRef;
+  if (assignedToId) options.assignedToId = assignedToId;
+  if (supplierId) options.supplierId = supplierId;
+  
+  // 🔥 CONVERSÃO DO PERÍODO PARA DATAS
+  if (period && !startDate && !endDate) {
+    console.log('\n📅 CONVERTENDO PERÍODO:', period);
+    const now = new Date();
+    const todayUTC = new Date(Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate(),
+      0, 0, 0, 0
+    ));
     
-    const options: any = {};
-    
-    if (page) options.page = parseInt(page);
-    if (limit) options.limit = parseInt(limit);
-    if (flowId) options.flowId = flowId;
-    if (productRef) options.productRef = productRef;
-    if (assignedToId) options.assignedToId = assignedToId;
-    if (supplierId) options.supplierId = supplierId;
-    
-    if (startDate) {
-      const date = new Date(startDate);
-      date.setUTCHours(0, 0, 0, 0);
-      options.startDate = date;
+    switch (period) {
+      case 'today':
+        options.startDate = new Date(todayUTC);
+        options.endDate = new Date(todayUTC);
+        options.endDate.setUTCHours(23, 59, 59, 999);
+        console.log(`   Hoje: ${options.startDate.toISOString()} até ${options.endDate.toISOString()}`);
+        break;
+        
+      case 'week':
+        options.startDate = new Date(todayUTC);
+        options.startDate.setUTCDate(todayUTC.getUTCDate() - 7);
+        options.endDate = new Date(todayUTC);
+        options.endDate.setUTCHours(23, 59, 59, 999);
+        console.log(`   Últimos 7 dias: ${options.startDate.toISOString()} até ${options.endDate.toISOString()}`);
+        break;
+        
+      case 'month':
+        options.startDate = new Date(todayUTC);
+        options.startDate.setUTCMonth(todayUTC.getUTCMonth() - 1);
+        options.endDate = new Date(todayUTC);
+        options.endDate.setUTCHours(23, 59, 59, 999);
+        console.log(`   Último mês: ${options.startDate.toISOString()} até ${options.endDate.toISOString()}`);
+        break;
+        
+      case 'year':
+        options.startDate = new Date(todayUTC);
+        options.startDate.setUTCFullYear(todayUTC.getUTCFullYear() - 1);
+        options.endDate = new Date(todayUTC);
+        options.endDate.setUTCHours(23, 59, 59, 999);
+        console.log(`   Último ano: ${options.startDate.toISOString()} até ${options.endDate.toISOString()}`);
+        break;
+        
+      default:
+        console.log(`   ⚠️ Período não reconhecido: ${period}, ignorando`);
     }
-    
-    if (endDate) {
-      const date = new Date(endDate);
-      date.setUTCHours(23, 59, 59, 999);
-      options.endDate = date;
-    }
-
-    console.log('📦 Options enviadas para service:', options);
-    
+  }
+  
+  // 🔥 DATAS EXPLÍCITAS SOBRESCREVEM O PERÍODO
+  if (startDate) {
+    console.log('\n📅 USANDO START_DATE DIRETO:', startDate);
+    const date = new Date(startDate);
+    date.setUTCHours(0, 0, 0, 0);
+    options.startDate = date;
+    console.log(`   Convertido para: ${options.startDate.toISOString()}`);
+  }
+  
+  if (endDate) {
+    console.log('📅 USANDO END_DATE DIRETO:', endDate);
+    const date = new Date(endDate);
+    date.setUTCHours(23, 59, 59, 999);
+    options.endDate = date;
+    console.log(`   Convertido para: ${options.endDate.toISOString()}`);
+  }
+  
+  // 🔥 LOG DAS DATAS FINAIS
+  console.log('\n📅 DATAS FINAIS PARA FILTRO:');
+  console.log(`   startDate: ${options.startDate ? options.startDate.toISOString() : 'NÃO DEFINIDO'}`);
+  console.log(`   endDate: ${options.endDate ? options.endDate.toISOString() : 'NÃO DEFINIDO'}`);
+  
+  console.log('\n📦 Options finais enviadas para service:', JSON.stringify(options, null, 2));
+  
+  try {
     const result = await this.flowService.getCompletedItems(options);
     
-    console.log('📤 Resposta do controller:', {
-      dataLength: result.data.length,
-      total: result.total,
-      pages: result.pages,
-      currentPage: result.currentPage
-    });
+    console.log('\n📤 Resposta do service:');
+    console.log(`   - dataLength: ${result.data.length}`);
+    console.log(`   - total: ${result.total}`);
+    console.log(`   - pages: ${result.pages}`);
+    console.log(`   - currentPage: ${result.currentPage}`);
     console.log('='.repeat(80) + '\n');
     
     return result;
+  } catch (error) {
+    console.error('\n❌ ERRO AO BUSCAR ITENS CONCLUÍDOS:');
+    console.error('   - Message:', error.message);
+    console.error('   - Stack:', error.stack);
+    console.log('='.repeat(80) + '\n');
+    throw error;
   }
+}
 
-  @Get('completed-items/stats')
-  @ApiOperation({
-    summary: 'Estatísticas de itens concluídos',
-    description: 'Retorna estatísticas agregadas para o dashboard',
-  })
-  @ApiQuery({
-    name: 'period',
-    required: false,
-    enum: ['today', 'week', 'month', 'year'],
-    description: 'Período para análise (padrão: week)',
-  })
-  async getCompletionStats(
-    @Req() req: any,
-    @Query('period') period?: 'today' | 'week' | 'month' | 'year',
-  ) {
-    this.logger.log(`📊 [CONTROLLER] Buscando estatísticas de conclusão`);
-    return this.flowService.getCompletionStats(period || 'week');
+ @Get('completed-items/stats')
+@ApiOperation({
+  summary: 'Estatísticas de itens concluídos',
+  description: 'Retorna estatísticas agregadas para o dashboard',
+})
+@ApiQuery({
+  name: 'period',
+  required: false,
+  enum: ['today', 'week', 'month', 'year'],
+  description: 'Período para análise (padrão: week)',
+})
+@ApiQuery({
+  name: 'flowId',
+  required: false,
+  type: String,
+  description: 'Filtrar por ID do fluxo específico',
+})
+async getCompletionStats(
+  @Req() req: any,
+  @Query('period') period?: 'today' | 'week' | 'month' | 'year',
+  @Query('flowId') flowId?: string,
+) {
+  console.log('\n' + '='.repeat(80));
+  console.log('📊 [CONTROLLER] getCompletionStats');
+  console.log('='.repeat(80));
+  console.log('📥 Parâmetros recebidos:');
+  console.log('   - period:', period);
+  console.log('   - flowId:', flowId);
+  
+  // Validação do flowId se for fornecido
+  if (flowId) {
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(flowId)) {
+      throw new BadRequestException('ID do fluxo inválido');
+    }
   }
+  
+  this.logger.log(`📊 [CONTROLLER] Buscando estatísticas de conclusão - período: ${period || 'week'}, fluxo: ${flowId || 'todos'}`);
+  
+  const result = await this.flowService.getCompletionStats(period || 'week', flowId);
+  
+  console.log('📤 Resposta das estatísticas:');
+  console.log('   - total:', result.total);
+  console.log('   - por fluxo:', Object.keys(result.byFlow).length);
+  console.log('   - por responsável:', Object.keys(result.byResponsible).length);
+  console.log('='.repeat(80) + '\n');
+  
+  return result;
+}
 
   @Get('completed-items/:itemId')
   @ApiOperation({ summary: 'Busca um item concluído específico' })
