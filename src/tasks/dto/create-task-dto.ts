@@ -76,7 +76,7 @@ export class CreateTaskDto {
   @IsOptional() @IsDateString() dueDate?: string | Date;
   @IsOptional() @IsUUID() assignedToId?: string;
 
-// 🔥 REMOVER O @Transform E DEIXAR COMO STRING
+  // 🔥 REMOVER O @Transform E DEIXAR COMO STRING
   @IsOptional()
   @IsString()
   address?: string; // 👈 MUDAR PARA STRING
@@ -109,14 +109,15 @@ export class UpdateTaskDto {
   @IsOptional() @IsString() finalComment?: string;
   @IsOptional() @IsUUID() completedById?: string;
 
-  // --- CAMPO QUE FALTAVA ---
+  // 🔥 CORREÇÃO: Address com transform e validação
   @IsOptional()
   @Transform(({ value }) => {
+    if (!value) return undefined;
     if (typeof value === 'string') {
       try {
         return JSON.parse(value);
       } catch (e) {
-        return null;
+        return undefined;
       }
     }
     return value;
@@ -124,7 +125,6 @@ export class UpdateTaskDto {
   @ValidateNested()
   @Type(() => CreateTaskAddressDto)
   address?: CreateTaskAddressDto;
-  // -------------------------
 
   @IsOptional()
   @IsArray()
