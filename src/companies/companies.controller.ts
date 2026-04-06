@@ -1,4 +1,9 @@
 /* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/require-await */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
 import {
   Body,
   Controller,
@@ -33,6 +38,7 @@ import {
   PaginationDto,
   UpdateCompanyDto,
 } from './dto/create-company.dto';
+import { UpdateCompanyNotificationDto } from './dto/update-company-notification.dto';
 
 // Interface para garantir o contrato de retorno
 interface PaginatedCompaniesResponse {
@@ -40,6 +46,10 @@ interface PaginatedCompaniesResponse {
   total: number;
   page: number;
   lastPage: number;
+}
+
+interface NotificationSettingsResponse {
+  notificationDays: number;
 }
 
 @ApiTags('Companies')
@@ -81,6 +91,7 @@ export class CompaniesController {
     await this.companiesService.remove(id);
   }
 
+
   @Get()
   @Roles(UserRole.MASTER, UserRole.ADMIN)
   @ApiOperation({
@@ -104,5 +115,57 @@ export class CompaniesController {
     @Param('id', new ParseUUIDPipe()) id: string,
   ): Promise<Company> {
     return this.companiesService.findOne(id);
+  }
+
+   // ===========================================================================
+  // 🔥 NOVOS ENDPOINTS PARA CONFIGURAÇÕES DE NOTIFICAÇÃO
+  // ===========================================================================
+
+  @Get(':id/notification-settings')
+  @Roles(UserRole.MASTER, UserRole.ADMIN, UserRole.EMPLOYER)
+  @ApiOperation({
+    summary: 'Busca configurações de notificação da empresa',
+    description: 'Retorna os dias de antecedência configurados para notificações',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Configurações encontradas',
+    schema: {
+      example: {
+        notificationDays: 7,
+      },
+    },
+  })
+  @ApiResponse({ status: 404, description: 'Empresa não encontrada' })
+  async getNotificationSettings(
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ): Promise<NotificationSettingsResponse> {
+    return this.companiesService.getNotificationSettings(id);
+  }
+
+  @Patch(':id/notification-settings')
+  @Roles(UserRole.MASTER, UserRole.ADMIN)
+  @ApiOperation({
+    summary: 'Atualiza configurações de notificação da empresa',
+    description: 'Define com quantos dias de antecedência enviar notificações (1-90 dias)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Configurações atualizadas com sucesso',
+    schema: {
+      example: {
+        id: 'uuid',
+        name: 'Minha Empresa',
+        notificationDays: 14,
+      },
+    },
+  })
+  @ApiResponse({ status: 400, description: 'Dados inválidos (fora do range 1-90)' })
+  @ApiResponse({ status: 404, description: 'Empresa não encontrada' })
+  async updateNotificationSettings(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: UpdateCompanyNotificationDto,
+  ): Promise<Partial<Company>> {
+    return this.companiesService.updateNotificationSettings(id, dto);
   }
 }

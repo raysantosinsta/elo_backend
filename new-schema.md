@@ -106,8 +106,6 @@ model Company {
   cep           String  @map("cep") @db.VarChar(9)
   ramoAtividade String? @map("ramo_atividade") @db.VarChar(100)
 
-   notificationDays Int @default(7) @map("dias_antecedencia_notificacao")
-
   // Controle de Criação/Atualização
   userCreate   User?    @relation("CompanyCreatedBy", fields: [userCreateId], references: [id])
   userCreateId String?  @map("user_create_id") @db.Uuid
@@ -894,11 +892,8 @@ model FlowStage {
   order Int     @default(0) @map("ordem")
   color String? @map("cor") @db.VarChar(7)
 
-  // 🔥 NOVO CAMPO: Dias padrão para conclusão da etapa
-  defaultDays Int? @default(1) @map("dias_padrao")
-
-  // // NOVO CAMPO: Prazo sugerido em dias (template)
-  // suggestedDeadline Int? @default(0) @map("prazo_sugerido_dias")
+  // NOVO CAMPO: Prazo sugerido em dias (template)
+  suggestedDeadline Int? @default(0) @map("prazo_sugerido_dias")
 
   allowedRole String? @map("cargo_permitido") @db.VarChar(100)
 

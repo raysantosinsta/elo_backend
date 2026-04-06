@@ -1,298 +1,217 @@
-### VARIÁVEIS GLOBAIS (Preencha conforme você cria os recursos)
 @baseUrl = http://localhost:3000
-@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIwOTgyNDQ5OS0yNDFmLTQ3ZTgtYjlkMS05NDBkNjY3ZWQxMWYiLCJlbWFpbCI6ImhpZ2hhZG1AZ21haWwuY29tIiwicm9sZSI6IkFETUlOIiwiY29tcGFueUlkIjoiMzI4ZjVmMDgtZDhhMy00NjM3LWJiY2MtYTlkNTZiNmY4NDU2IiwiaWF0IjoxNzczNjc4NzI4LCJleHAiOjE3NzM2Nzk2Mjh9.jwRKR8TDcxH_KsM6L-pcO-20KXACu6lYNssE6B7Zqlc
-@companyId = ID_DA_EMPRESA_DO_TOKEN (Opcional, o backend pega do token)
 
-# --- IDs PARA TESTE (Atualize após criar os recursos) ---
-@flowId = c0c774c1-c759-4c16-8da6-1f180bb73489
-@stageId = 6a58ca42-2095-47d3-abfe-750e1ed35a35
-@itemId = be027ee7-395e-4cfd-bb49-ad2f5d55f6d2
-@templateId = cole_o_id_do_template_aqui
-@mediaId = cole_o_id_da_midia_aqui
-
-# ==============================================================================
-# 1️⃣ GESTÃO DE FLUXOS (ESTEIRAS)
-# ==============================================================================
-
-### 1.1 Listar Fluxos da Empresa
-GET {{baseUrl}}/flow
-Authorization: Bearer {{token}}
-
-### 1.2 Criar Novo Fluxo
-# Requer Permissão: MANAGE_FLOW (Admin/Gestor)
-POST {{baseUrl}}/flow
-Authorization: Bearer {{token}}
+### ====================================================
+### 🔐 1. LOGIN - EXECUTE ISSO PRIMEIRO
+### ====================================================
+POST {{baseUrl}}/auth/login
 Content-Type: application/json
 
 {
-  "name": "Coleção Inverno 2026",
-  "color": "#8E44AD"
+  "email": "highadm@gmail.com",
+  "password": "senha123"
 }
 
-### 1.3 Deletar Fluxo
-DELETE {{baseUrl}}/flow/{{flowId}}
-Authorization: Bearer {{token}}
+### APÓS EXECUTAR O LOGIN ACIMA, COPIE O access_token E COLE NA LINHA ABAIXO
+@authToken = COLE_SEU_TOKEN_AQUI
 
-### 1.4 Ver Quadro Kanban Completo (Board)
-GET {{baseUrl}}/flow/{{flowId}}/board
-Authorization: Bearer {{token}}
+### ====================================================
+### 📋 2. CRIAR FLUXO
+### ====================================================
+POST {{baseUrl}}/flow
+Authorization: Bearer {{authToken}}
+Content-Type: application/json
 
-# ==============================================================================
-# 2️⃣ GESTÃO DE ETAPAS (COLUNAS)
-# ==============================================================================
+{
+  "name": "Coleção Verão 2025",
+  "color": "#3498db",
+  "deadline": "2025-12-31T23:59:59.999Z"
+}
 
-### 2.1 Criar Etapa (Stage)
-# allowedRole: Defina quem pode mover cards desta coluna (ex: "modelista", "piloteira")
+### APÓS CRIAR O FLUXO, COPIE O ID E COLE NA LINHA ABAIXO
+@flowId = COLE_O_FLOW_ID_AQUI
+
+### ====================================================
+### 🏷️ 3. CRIAR ETAPA 1 - MODELAGEM
+### ====================================================
 POST {{baseUrl}}/flow/{{flowId}}/stages
-Authorization: Bearer {{token}}
+Authorization: Bearer {{authToken}}
 Content-Type: application/json
 
 {
   "name": "Modelagem",
-  "color": "#2980B9",
-  "allowedRole": "modelista" 
+  "color": "#2ecc71",
+  "allowedRole": "modelista",
+  "suggestedDeadline": 5
 }
 
-### 2.2 Criar Outra Etapa (Para teste de movimento)
+### APÓS CRIAR A ETAPA 1, COPIE O ID E COLE NA LINHA ABAIXO
+@stageId1 = COLE_O_STAGE_ID_1_AQUI
+
+### ====================================================
+### 🏷️ 4. CRIAR ETAPA 2 - CORTE
+### ====================================================
 POST {{baseUrl}}/flow/{{flowId}}/stages
-Authorization: Bearer {{token}}
+Authorization: Bearer {{authToken}}
 Content-Type: application/json
 
 {
-  "name": "Pilotagem",
-  "color": "#27AE60",
-  "allowedRole": "piloteira"
+  "name": "Corte",
+  "color": "#e74c3c",
+  "allowedRole": "cortador",
+  "suggestedDeadline": 3
 }
 
-### 2.3 Atualizar Etapa
-PUT {{baseUrl}}/flow/stages/{{stageId}}
-Authorization: Bearer {{token}}
+@stageId2 = COLE_O_STAGE_ID_2_AQUI
+
+### ====================================================
+### 🏷️ 5. CRIAR ETAPA 3 - COSTURA
+### ====================================================
+POST {{baseUrl}}/flow/{{flowId}}/stages
+Authorization: Bearer {{authToken}}
 Content-Type: application/json
 
 {
-  "name": "Modelagem (Revisão)",
-  "allowedRole": "modelista"
+  "name": "Costura",
+  "color": "#f39c12",
+  "allowedRole": "costureira",
+  "suggestedDeadline": 7
 }
 
-### 2.4 Deletar Etapa
-DELETE {{baseUrl}}/flow/stages/{{stageId}}
-Authorization: Bearer {{token}}
+@stageId3 = COLE_O_STAGE_ID_3_AQUI
 
-# ==============================================================================
-# 3️⃣ GESTÃO DE ITENS (CARDS)
-# ==============================================================================
-
-### 3.1 Criar Item (Produto)
-# stageId: Opcional. Se não enviar, vai para a primeira etapa.
-POST {{baseUrl}}/flow/{{flowId}}/items
-Authorization: Bearer {{token}}
+### ====================================================
+### 🏷️ 6. CRIAR ETAPA 4 - ACABAMENTO
+### ====================================================
+POST {{baseUrl}}/flow/{{flowId}}/stages
+Authorization: Bearer {{authToken}}
 Content-Type: application/json
 
 {
-  "title": "Camisa Polo Algodão",
-  "productRef": "REF-2026-A",
-  "quantity": 100,
-  "priority": 1,
-  "description": "Utilizar linha 100% algodão.",
-  "stageId": "{{stageId}}" 
+  "name": "Acabamento",
+  "color": "#9b59b6",
+  "allowedRole": "acabador",
+  "suggestedDeadline": 2
 }
 
-### 3.2 Atualizar Item
-PUT {{baseUrl}}/flow/items/{{itemId}}
-Authorization: Bearer {{token}}
+@stageId4 = COLE_O_STAGE_ID_4_AQUI
+
+### ====================================================
+### 🏷️ 7. CRIAR ETAPA 5 - DISTRIBUIÇÃO
+### ====================================================
+POST {{baseUrl}}/flow/{{flowId}}/stages
+Authorization: Bearer {{authToken}}
 Content-Type: application/json
 
 {
-  "quantity": 150,
-  "description": "Atualização: Urgente."
+  "name": "Distribuição",
+  "color": "#1abc9c",
+  "allowedRole": "expedidor",
+  "suggestedDeadline": 1
 }
 
-### 3.3 Filtrar Itens
-# Ex: ?onlyOutsourced=true&startDate=2024-01-01&endDate=2024-12-31&dateField=createdAt
-GET {{baseUrl}}/flow/filter/items?onlyOutsourced=false
-Authorization: Bearer {{token}}
+@stageId5 = COLE_O_STAGE_ID_5_AQUI
 
-### 3.4 Deletar Item
-DELETE {{baseUrl}}/flow/items/{{itemId}}
-Authorization: Bearer {{token}}
-
-# ==============================================================================
-# 4️⃣ MOVIMENTAÇÃO (AÇÃO)
-# ==============================================================================
-
-### 4.1 Mover Item (Drag & Drop)
-# Simula o arrastar do card. O usuário logado deve ter o cargo da etapa de ORIGEM.
-# newStageId: ID da etapa de DESTINO.
-PUT {{baseUrl}}/flow/items/{{itemId}}/move
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-  "newStageId": "ID_DA_ETAPA_DE_DESTINO_AQUI"
-}
-
-### 4.2 Avançar Item (Botão Automático "Concluir")
-# Move para a próxima etapa na sequência numérica.
-# Requer permissão MANAGE_FLOW_ITEMS (Todos logados) + Cargo da Etapa.
-POST {{baseUrl}}/flow/items/{{itemId}}/advance
-Authorization: Bearer {{token}}
-
-# ==============================================================================
-# 5️⃣ TEMPLATES
-# ==============================================================================
-
-### 5.1 Salvar Fluxo Atual como Template
-POST {{baseUrl}}/flow/{{flowId}}/save-template
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-  "name": "Template Padrão Camisetas"
-}
-
-### 5.2 Listar Templates
-GET {{baseUrl}}/flow/templates
-Authorization: Bearer {{token}}
-
-### 5.3 Aplicar Template em um Fluxo
-POST {{baseUrl}}/flow/{{flowId}}/apply-template/{{templateId}}
-Authorization: Bearer {{token}}
-
-### 5.4 Deletar Template
-DELETE {{baseUrl}}/flow/templates/{{templateId}}
-Authorization: Bearer {{token}}
-
-# ==============================================================================
-# 6️⃣ MÍDIAS (UPLOAD)
-# ==============================================================================
-
-### 6.1 Upload de Imagem/Audio/Video
-# Nota: Para testar upload no VS Code REST Client, você precisa de um arquivo real.
-# Substitua o caminho do arquivo abaixo.
-# Types: image, audio, video
-POST {{baseUrl}}/flow/items/{{itemId}}/media/image
-Authorization: Bearer {{token}}
-Content-Type: multipart/form-data; boundary=----WebKitFormBoundary7MA4YWxkTrZu0gW
-
-------WebKitFormBoundary7MA4YWxkTrZu0gW
-Content-Disposition: form-data; name="file"; filename="teste.png"
-Content-Type: image/png
-
-< ./caminho/para/sua/imagem.png
-------WebKitFormBoundary7MA4YWxkTrZu0gW--
-
-### 6.2 Deletar Mídia
-DELETE {{baseUrl}}/flow/items/{{itemId}}/media/image/{{mediaId}}
-Authorization: Bearer {{token}}
-
-# ==============================================================================
-# 4️⃣ MOVIMENTAÇÃO (AÇÃO)
-# ==============================================================================
-
-### 4.1 Mover Item (Drag & Drop)
-# Simula o arrastar do card. O usuário logado deve ter o cargo da etapa de ORIGEM.
-# newStageId: ID da etapa de DESTINO.
-PUT {{baseUrl}}/flow/items/{{itemId}}/move
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-  "newStageId": "ID_DA_ETAPA_DE_DESTINO_AQUI"
-}
-
-### ============================================================================
-### 🔥 TESTES DE VALIDAÇÃO DE QUANTIDADE (ADICIONAR ABAIXO)
-### ============================================================================
-
-### 8.1 Buscar TODOS os fluxos da empresa
-GET {{baseUrl}}/flow
-Authorization: Bearer {{token}}
-
-### 7.1 Buscar todas as colunas de um fluxo específico
+### ====================================================
+### 📋 8. LISTAR ETAPAS DO FLUXO
+### ====================================================
 GET {{baseUrl}}/flow/{{flowId}}/stages
-Authorization: Bearer {{token}}
+Authorization: Bearer {{authToken}}
 
+### ====================================================
+### 📦 9. CRIAR ITEM COM PRAZOS
+### ====================================================
+POST {{baseUrl}}/flow/items/with-stages
+Authorization: Bearer {{authToken}}
+Content-Type: application/json
 
-### 9.1 Buscar TODOS os itens da empresa (sem filtros)
+{
+  "flowId": "{{flowId}}",
+  "title": "Camisa Social Azul",
+  "orderNumber": "PED-2025-001",
+  "productRef": "CAM-001",
+  "quantity": 50,
+  "priority": 3,
+  "dueDate": "2025-04-30T23:59:59.999Z",
+  "productionStartedAt": "2025-03-19T10:00:00.000Z",
+  "description": "Camisa social manga longa, tecido azul",
+  "stageId": "{{stageId1}}"
+}
+
+### APÓS CRIAR O ITEM, COPIE O ID E COLE NA LINHA ABAIXO
+@itemId1 = COLE_O_ITEM_ID_AQUI
+
+### ====================================================
+### 📦 10. CRIAR ITEM SIMPLES
+### ====================================================
+POST {{baseUrl}}/flow/items
+Authorization: Bearer {{authToken}}
+Content-Type: application/json
+
+{
+  "flowId": "{{flowId}}",
+  "title": "Calça Jeans",
+  "orderNumber": "PED-2025-002",
+  "productRef": "CAL-001",
+  "quantity": 30,
+  "priority": 2,
+  "dueDate": "2025-05-15T23:59:59.999Z",
+  "stageId": "{{stageId2}}"
+}
+
+@itemId2 = COLE_O_ITEM_ID_2_AQUI
+
+### ====================================================
+### 🔍 11. LISTAR TODOS OS ITENS
+### ====================================================
 GET {{baseUrl}}/flow/filter/items
-Authorization: Bearer {{token}}
+Authorization: Bearer {{authToken}}
 
-### 4.2 🔥 TESTE 1: Mover item com QUANTIDADE ZERO - DEVE BLOQUEAR
-PUT {{baseUrl}}/flow/items/{{itemId}}/move
-Authorization: Bearer {{token}}
+### ====================================================
+### 📊 12. VER KANBAN BOARD
+### ====================================================
+GET {{baseUrl}}/flow/{{flowId}}/board
+Authorization: Bearer {{authToken}}
+
+### ====================================================
+### ⏰ 13. BUSCAR PRAZOS DO ITEM
+### ====================================================
+GET {{baseUrl}}/flow/items/{{itemId1}}/stages
+Authorization: Bearer {{authToken}}
+
+### ====================================================
+### ⏰ 14. ATUALIZAR PRAZO DA ETAPA
+### ====================================================
+PATCH {{baseUrl}}/flow/items/{{itemId1}}/stages/{{stageId1}}
+Authorization: Bearer {{authToken}}
 Content-Type: application/json
 
 {
-  "newStageId": "6a58ca42-2095-47d3-abfe-750e1ed35a35",
-  "newQuantity": 0
+  "suggestedDeadline": "2025-03-25T23:59:59.999Z",
+  "actualDeadline": "2025-03-24T18:30:00.000Z",
+  "status": "CONCLUIDO",
+  "notes": "Modelagem concluída"
 }
 
-### 4.3 🔥 TESTE 2: Mover item com QUANTIDADE NEGATIVA - DEVE BLOQUEAR
-PUT {{baseUrl}}/flow/items/{{itemId}}/move
-Authorization: Bearer {{token}}
+### ====================================================
+### 🎯 15. MOVER ITEM
+### ====================================================
+POST {{baseUrl}}/flow/items/{{itemId1}}/move-with-deadline
+Authorization: Bearer {{authToken}}
 Content-Type: application/json
 
 {
-  "newStageId": "ID_DA_ETAPA_DE_DESTINO_AQUI",
-  "newQuantity": -5
+  "newStageId": "{{stageId2}}",
+  "newOrder": 0
 }
 
-### 4.4 🔥 TESTE 3: Mover item com QUANTIDADE VÁLIDA (>0) - DEVE PERMITIR
-PUT {{baseUrl}}/flow/items/{{itemId}}/move
-Authorization: Bearer {{token}}
-Content-Type: application/json
+### ====================================================
+### 📈 16. DASHBOARD DE PRAZOS
+### ====================================================
+GET {{baseUrl}}/flow/deadline-dashboard?flowId={{flowId}}
+Authorization: Bearer {{authToken}}
 
-{
-  "newStageId": "ID_DA_ETAPA_DE_DESTINO_AQUI",
-  "newQuantity": 10,
-  "selectedResponsibleId": "ID_DO_RESPONSAVEL_AQUI"
-}
-
-### 4.5 🔥 TESTE 4: Mover item SEM ALTERAR QUANTIDADE - DEVE PERMITIR
-PUT {{baseUrl}}/flow/items/{{itemId}}/move
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-  "newStageId": "ID_DA_ETAPA_DE_DESTINO_AQUI",
-  "selectedResponsibleId": "ID_DO_RESPONSAVEL_AQUI"
-}
-
-### 4.6 🔥 TESTE 5: Mover item para OFICINA com quantidade ZERO - DEVE BLOQUEAR
-PUT {{baseUrl}}/flow/items/{{itemId}}/move
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-  "newStageId": "ID_DA_ETAPA_OFICINA_AQUI",
-  "newQuantity": 0,
-  "selectedSupplierId": "ID_DA_OFICINA_AQUI"
-}
-
-### 4.7 🔥 TESTE 6: Mover item com ADMIN e quantidade ZERO - DEVE BLOQUEAR TAMBÉM
-PUT {{baseUrl}}/flow/items/{{itemId}}/move
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-  "newStageId": "ID_DA_ETAPA_DE_DESTINO_AQUI",
-  "newQuantity": 0,
-  "selectedResponsibleId": "ID_DO_RESPONSAVEL_AQUI"
-}
-
-### 4.8 🔥 TESTE 7: Mover item com quantidade MUITO ALTA - DEVE PERMITIR
-PUT {{baseUrl}}/flow/items/{{itemId}}/move
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-  "newStageId": "ID_DA_ETAPA_DE_DESTINO_AQUI",
-  "newQuantity": 999999,
-  "selectedResponsibleId": "ID_DO_RESPONSAVEL_AQUI"
-}
-
-### 4.9 Avançar Item (Botão Automático "Concluir")
-# Move para a próxima etapa na sequência numérica.
-# Requer permissão MANAGE_FLOW_ITEMS (Todos logados) + Cargo da Etapa.
-POST {{baseUrl}}/flow/items/{{itemId}}/advance
-Authorization: Bearer {{token}}
+### ====================================================
+### 🗑️ 17. DELETAR ITEM (OPCIONAL)
+### ====================================================
+DELETE {{baseUrl}}/flow/items/{{itemId1}}
+Authorization: Bearer {{authToken}}

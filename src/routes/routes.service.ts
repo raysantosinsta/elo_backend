@@ -26,7 +26,7 @@ export class RouteService {
   constructor(
     private prisma: PrismaService, // Conexão com o banco de dados
     @Inject(CACHE_MANAGER) private cacheManager: Cache, // Gerenciador de Cache (Redis/Memória)
-  ) { }
+  ) {}
 
   /**
    * Busca tarefas que possuem localização válida (Latitude e Longitude não nulas).
@@ -37,8 +37,24 @@ export class RouteService {
    */
   async getTasksWithLocation(
     companyId: string,
-    filters: { startDate?: string; endDate?: string; assignedToId?: string }
+    filters: { startDate?: string; endDate?: string; assignedToId?: string },
   ) {
+    // Log para ver todas as tarefas da empresa
+    const allTasks = await this.prisma.task.findMany({
+      where: { companyId },
+      include: { taskAddress: true },
+    });
+
+    this.logger.log(
+      `📊 [getTasksWithLocation] Total de tarefas na empresa: ${allTasks.length}`,
+    );
+
+    allTasks.forEach((task) => {
+      this.logger.log(
+        `   - ${task.id}: ${task.title} | hasAddress: ${!!task.taskAddress} | lat: ${task.taskAddress?.latitude} | lng: ${task.taskAddress?.longitude}`,
+      );
+    });
+
     // 1. Monta o objeto de filtro inicial (WHERE)
     const where: Prisma.TaskWhereInput = {
       companyId,
@@ -76,97 +92,159 @@ export class RouteService {
       },
     });
 
-    this.logger.log(`[getTasksWithLocation] Found ${tasks.length} tasks with location.`);
+    this.logger.log(
+      `[getTasksWithLocation] Found ${tasks.length} tasks with location.`,
+    );
     // Log detalhado (cuidado em produção com muitos dados)
     if (tasks.length > 0) {
-        this.logger.debug(`[getTasksWithLocation] Sample Task Address: ${JSON.stringify(tasks[0].taskAddress)}`);
+      this.logger.debug(
+        `[getTasksWithLocation] Sample Task Address: ${JSON.stringify(tasks[0].taskAddress)}`,
+      );
     }
 
     return tasks;
-
   }
+
+  // src/tasks/routes.service.ts
 
   /**
    * OTIMIZADOR DE ROTAS (O Coração da Logística).
    * Recebe uma lista de IDs de tarefas e a localização do motorista.
    * Retorna as tarefas ordenadas pela melhor sequência lógica.
-   * * @param dto - Dados contendo IDs das tarefas e localização inicial do motorista.
+   * @param dto - Dados contendo IDs das tarefas e localização inicial do motorista.
    */
   async optimizeRoute(dto: OptimizeRouteDto) {
+    this.logger.log('='.repeat(80));
+    this.logger.log('🚀 [optimizeRoute] INICIANDO OTIMIZAÇÃO DE ROTA');
+    this.logger.log('='.repeat(80));
+    this.logger.log(`📦 Quantidade de tarefas: ${dto.taskIds.length}`);
+    this.logger.log(
+      `📍 Localização motorista: lat=${dto.driverLatitude}, lng=${dto.driverLongitude}`,
+    );
+    this.logger.log(
+      `🎯 Tipo de ordenação: ${dto.orderBy || 'DISTANCE (padrão)'}`,
+    );
+    this.logger.log(`📋 IDs das tarefas: ${dto.taskIds.join(', ')}`);
+
     // 1. Busca todas as tarefas solicitadas no banco de dados
+    this.logger.log('🔍 [1/6] Buscando tarefas no banco de dados...');
+
     const tasks = await this.prisma.task.findMany({
       where: {
-        id: { in: dto.taskIds }, // Filtra pelos IDs recebidos
-        taskAddress: { // Garante novamente que têm coordenadas (segurança)
+        id: { in: dto.taskIds },
+        taskAddress: {
           latitude: { not: null },
           longitude: { not: null },
         },
       },
       include: {
         taskAddress: true,
-        column: { select: { id: true } }, // Traz o ID da coluna Kanban - manter esse campo em caso de conclusao eu mudar a tarefa para outra coluna
-        userAssigned: { select: { id: true, name: true } }
+        column: { select: { id: true } },
+        userAssigned: { select: { id: true, name: true } },
       },
     });
 
-    this.logger.log(`[optimizeRoute] Retrieved ${tasks.length} tasks from DB for optimization.`);
+    this.logger.log(
+      `✅ [1/6] Tarefas encontradas: ${tasks.length} de ${dto.taskIds.length} solicitadas`,
+    );
 
-    if (tasks.length === 0) {
-      this.logger.warn(`[optimizeRoute] No valid tasks found for IDs: ${dto.taskIds.join(', ')}`);
-      throw new NotFoundException('Nenhuma tarefa válida encontrada.');
+    // Log detalhado das tarefas encontradas
+    tasks.forEach((task, index) => {
+      this.logger.log(
+        `   ${index + 1}. ID: ${task.id} | Título: ${task.title}`,
+      );
+      this.logger.log(
+        `      Endereço: ${task.taskAddress?.endereco}, ${task.taskAddress?.numero} - ${task.taskAddress?.cidade}`,
+      );
+      this.logger.log(
+        `      Coordenadas: lat=${task.taskAddress?.latitude}, lng=${task.taskAddress?.longitude}`,
+      );
+    });
+
+    // Verificar tarefas que não foram encontradas
+    const foundIds = tasks.map((t) => t.id);
+    const missingIds = dto.taskIds.filter((id) => !foundIds.includes(id));
+    if (missingIds.length > 0) {
+      this.logger.warn(
+        `⚠️ Tarefas não encontradas (sem coordenadas válidas): ${missingIds.join(', ')}`,
+      );
     }
 
-    // Log para verificar coordenadas
-    tasks.forEach(t => {
-        this.logger.debug(`[optimizeRoute] Task ${t.id} coords: [${t.taskAddress?.latitude}, ${t.taskAddress?.longitude}]`);
-    });
+    if (tasks.length === 0) {
+      this.logger.error(`❌ [1/6] Nenhuma tarefa válida encontrada!`);
+      this.logger.error(`   IDs solicitados: ${dto.taskIds.join(', ')}`);
+      throw new NotFoundException(
+        'Nenhuma tarefa válida encontrada. Verifique se todas as tarefas têm endereço com coordenadas.',
+      );
+    }
 
     let optimizedOrder: typeof tasks = [];
 
     // --- CENÁRIO A: ORDENAÇÃO POR PRIORIDADE ---
-    // Simplesmente ordena do número menor (Alta prioridade) para o maior.
     if (dto.orderBy === RouteOrderType.PRIORITY) {
+      this.logger.log('🎯 [2/6] Usando ordenação por PRIORIDADE');
+
       optimizedOrder = tasks.sort((a, b) => {
-        const priorityA = a.priority ?? 999; // Se for nulo, joga pro final (999)
+        const priorityA = a.priority ?? 999;
         const priorityB = b.priority ?? 999;
         return priorityA - priorityB;
       });
+
+      this.logger.log('📊 Ordem por prioridade:');
+      optimizedOrder.forEach((task, idx) => {
+        this.logger.log(
+          `   ${idx + 1}. ${task.title} (prioridade: ${task.priority ?? 'N/A'})`,
+        );
+      });
     }
     // --- CENÁRIO B: ORDENAÇÃO POR PROXIMIDADE (Algoritmo Vizinho Mais Próximo) ---
-    // Lógica: "Estou aqui, qual a tarefa mais perto? Vou pra lá. Agora estou lá, qual a próxima mais perto?"
     else {
+      this.logger.log(
+        '🎯 [2/6] Usando ordenação por PROXIMIDADE (Vizinho Mais Próximo)',
+      );
+
       // Ponto de partida (Localização do Motorista)
       let currentLocation = {
         lat: Number(dto.driverLatitude),
         lng: Number(dto.driverLongitude),
       };
+      this.logger.log(
+        `📍 Ponto de partida: lat=${currentLocation.lat}, lng=${currentLocation.lng}`,
+      );
 
       // Cria uma cópia da lista para ir removendo as tarefas já visitadas
       const remainingTasks = [...tasks];
+      this.logger.log(`📋 Tarefas pendentes: ${remainingTasks.length}`);
 
-
+      let iteration = 0;
 
       // Enquanto houver tarefas na lista de pendentes...
       while (remainingTasks.length > 0) {
-        let nearestTaskIndex = -1; // Essa variável guarda o índice do item vencedor na lista, e começa em `-1` porque listas iniciam no índice `0`, então `-1` indica que ninguém foi escolhido ainda.
+        iteration++;
+        this.logger.log(
+          `\n🔄 [Iteração ${iteration}] Tarefas restantes: ${remainingTasks.length}`,
+        );
+        this.logger.log(
+          `📍 Posição atual: lat=${currentLocation.lat}, lng=${currentLocation.lng}`,
+        );
 
-        let minDistance = Infinity; // Você precisa de um valor inicial para comparação, pois se começasse com `minDistance = 0` nenhuma distância ganharia (nada é menor que zero), então usar `Infinity` garante que qualquer distância real seja menor e que o primeiro item da lista se torne o campeão inicial.
+        let nearestTaskIndex = -1;
+        let minDistance = Infinity;
+        // let minDistanceTaskName = '';
 
-
-        // Percorre todas as tarefas restantes para achar a mais próxima da currentLocation(motorista)
+        // Percorre todas as tarefas restantes para achar a mais próxima
         for (let i = 0; i < remainingTasks.length; i++) {
           const t = remainingTasks[i];
-
-          // Converte para Number para evitar erros matemáticos com strings
           const tLat = Number(t.taskAddress?.latitude);
           const tLng = Number(t.taskAddress?.longitude);
 
-          // Segurança: Se coordenadas forem inválidas, pula
           if (!t.taskAddress || isNaN(tLat) || isNaN(tLng)) {
-            continue; // volte para o for e verifique outra tarefa
+            this.logger.warn(
+              `   ⚠️ Tarefa ${t.id} (${t.title}) - coordenadas inválidas, ignorando`,
+            );
+            continue;
           }
 
-          // Calcula distância entre ONDE ESTOU e a TAREFA 't'
           const dist = this.calculateDistance(
             currentLocation.lat,
             currentLocation.lng,
@@ -174,43 +252,99 @@ export class RouteService {
             tLng,
           );
 
-          // Se essa distância for menor que a menor encontrada até agora, atualiza
+          this.logger.log(
+            `   📍 Tarefa: ${t.title} | Distância: ${dist.toFixed(2)} km`,
+          );
+
           if (dist < minDistance) {
             minDistance = dist;
             nearestTaskIndex = i;
+            // minDistanceTaskName = t.title;
           }
         }
 
-        // Se não achou ninguém (ex: sobrou item sem coordenada), sai do loop
         if (nearestTaskIndex === -1) {
-          optimizedOrder.push(...remainingTasks); // Adiciona o resto ao final
+          this.logger.warn(
+            `⚠️ Nenhuma tarefa válida encontrada na iteração ${iteration}`,
+          );
+          optimizedOrder.push(...remainingTasks);
           break;
         }
 
         // Adiciona a tarefa mais próxima na lista otimizada
         const nearestTask = remainingTasks[nearestTaskIndex];
         optimizedOrder.push(nearestTask);
+        this.logger.log(
+          `✅ Tarefa escolhida: ${nearestTask.title} (distância: ${minDistance.toFixed(2)} km)`,
+        );
 
-        // Atualiza a "localização atual" do motorista para a tarefa que ele acabou de "visitar"
+        // Atualiza a localização atual
         const nextLat = Number(nearestTask.taskAddress?.latitude);
         const nextLng = Number(nearestTask.taskAddress?.longitude);
 
         if (!isNaN(nextLat) && !isNaN(nextLng)) {
           currentLocation = { lat: nextLat, lng: nextLng };
+          this.logger.log(
+            `📍 Nova posição: ${nearestTask.taskAddress?.endereco}, ${nearestTask.taskAddress?.numero}`,
+          );
         }
 
-        // Remove a tarefa escolhida da lista de pendentes para não visitar de novo
+        // Remove a tarefa escolhida da lista de pendentes
         remainingTasks.splice(nearestTaskIndex, 1);
       }
+
+      this.logger.log(
+        `\n✅ [2/6] Ordenação por proximidade concluída em ${iteration} iterações`,
+      );
+      this.logger.log('📊 Ordem final da rota:');
+      optimizedOrder.forEach((task, idx) => {
+        this.logger.log(
+          `   ${idx + 1}. ${task.title} (${task.taskAddress?.cidade})`,
+        );
+      });
     }
 
-    // --- CÁLCULO DE ESTATÍSTICAS DA ROTA (Tempo/Distância) ---
+    // --- CÁLCULO DE ESTATÍSTICAS DA ROTA ---
+    this.logger.log('\n📊 [3/6] Calculando estatísticas da rota...');
+
     const stats = await this.calculateRouteStats(
       { lat: Number(dto.driverLatitude), lng: Number(dto.driverLongitude) },
       optimizedOrder,
     );
 
-    this.logger.log(`[optimizeRoute] Returning optimized route with ${optimizedOrder.length} stops.`);
+    this.logger.log(`✅ [3/6] Estatísticas calculadas:`);
+    this.logger.log(`   Tempo total: ${stats.formattedDuration}`);
+    this.logger.log(`   Distância total: ${stats.formattedDistance}`);
+    this.logger.log(`   Segundos: ${stats.totalDurationSeconds}`);
+    this.logger.log(`   Metros: ${stats.totalDistanceMeters}`);
+
+    // --- VALIDAÇÃO FINAL ---
+    this.logger.log('\n🔍 [4/6] Validando rota final...');
+
+    if (optimizedOrder.length !== tasks.length) {
+      this.logger.warn(
+        `⚠️ Aviso: ${optimizedOrder.length} tarefas otimizadas, mas ${tasks.length} foram encontradas`,
+      );
+    }
+
+    // Verificar se todas as tarefas originais estão na rota
+    const optimizedIds = optimizedOrder.map((t) => t.id);
+    const missingInOptimized = tasks.filter(
+      (t) => !optimizedIds.includes(t.id),
+    );
+    if (missingInOptimized.length > 0) {
+      this.logger.warn(
+        `⚠️ Tarefas não incluídas na rota: ${missingInOptimized.map((t) => t.title).join(', ')}`,
+      );
+    }
+
+    this.logger.log('\n' + '='.repeat(80));
+    this.logger.log(
+      `✅ [FINAL] Rota otimizada com ${optimizedOrder.length} paradas`,
+    );
+    this.logger.log(`   Tempo estimado: ${stats.formattedDuration}`);
+    this.logger.log(`   Distância: ${stats.formattedDistance}`);
+    this.logger.log('='.repeat(80) + '\n');
 
     return {
       route: optimizedOrder,
@@ -235,22 +369,39 @@ export class RouteService {
         return !isNaN(lat) && !isNaN(lng);
       });
 
-      // Monta string de coordenadas no formato que a API OSRM aceita: long,lat;long,lat
+      if (validTasks.length === 0) {
+        this.logger.warn(
+          '[calculateRouteStats] Nenhuma tarefa com coordenadas válidas',
+        );
+        return this.getFallbackStats(startPos, tasks);
+      }
+
+      // Monta string de coordenadas
       const coordinates = [
-        `${startPos.lng},${startPos.lat}`, // Ponto inicial
+        `${startPos.lng},${startPos.lat}`,
         ...validTasks.map(
-          (t: any) => `${Number(t.taskAddress.longitude)},${Number(t.taskAddress.latitude)}`,
+          (t: any) =>
+            `${Number(t.taskAddress.longitude)},${Number(t.taskAddress.latitude)}`,
         ),
       ].join(';');
 
-      // Chama a API pública do OSRM (Cuidado: não usar em produção pesada, tem limites)
       const url = `https://router.project-osrm.org/route/v1/driving/${coordinates}?overview=false`;
 
-      const response = await fetch(url);
+      this.logger.log(`[calculateRouteStats] Chamando OSRM: ${url}`);
+
+      // 🔥 ADICIONAR TIMEOUT DE 10 SEGUNDOS
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+      const response = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeoutId);
 
       if (response.ok) {
         const data = await response.json();
-        // Se a API retornou sucesso
+        this.logger.log(
+          `[calculateRouteStats] Resposta OSRM: ${JSON.stringify(data).substring(0, 200)}`,
+        );
+
         if (data.code === 'Ok' && data.routes && data.routes.length > 0) {
           const route = data.routes[0];
           return {
@@ -262,11 +413,23 @@ export class RouteService {
         }
       }
     } catch (error) {
-      this.logger.warn('Erro ao consultar OSRM, usando cálculo linear fallback.', error);
+      this.logger.warn(
+        'Erro ao consultar OSRM, usando cálculo linear fallback.',
+        error,
+      );
     }
 
     // --- FALLBACK (PLANO B) ---
-    // Se a API falhar, calcula somando distâncias em linha reta
+    return this.getFallbackStats(startPos, tasks);
+  }
+
+  // 🔥 MÉTODO SEPARADO PARA O FALLBACK
+  private getFallbackStats(
+    startPos: { lat: number; lng: number },
+    tasks: Task[],
+  ) {
+    this.logger.log('[calculateRouteStats] Usando fallback linear (Haversine)');
+
     let totalDistKm = 0;
     let current = startPos;
 
@@ -276,19 +439,22 @@ export class RouteService {
       const lng = Number(tAddr?.longitude);
 
       if (!isNaN(lat) && !isNaN(lng)) {
-        totalDistKm += this.calculateDistance(
-          current.lat,
-          current.lng,
-          lat,
-          lng,
+        const dist = this.calculateDistance(current.lat, current.lng, lat, lng);
+        this.logger.debug(
+          `Distância de (${current.lat},${current.lng}) para (${lat},${lng}): ${dist.toFixed(2)} km`,
         );
-        current = { lat, lng }; // Avança o ponteiro
+        totalDistKm += dist;
+        current = { lat, lng };
       }
     }
 
     // Estima o tempo assumindo uma velocidade média de 30km/h
     const averageSpeedKmH = 30;
     const estimatedSeconds = (totalDistKm / averageSpeedKmH) * 3600;
+
+    this.logger.log(
+      `[calculateRouteStats] Fallback: ${totalDistKm.toFixed(2)} km, ${estimatedSeconds.toFixed(0)} segundos`,
+    );
 
     return {
       totalDurationSeconds: estimatedSeconds,
@@ -357,26 +523,29 @@ export class RouteService {
     };
   }
 
-
-
   /**
-    * FÓRMULA DE HAVERSINE
-    * Calcula a distância em KM entre dois pontos no globo terrestre (Latitude/Longitude).
-    * É pura trigonometria esférica usada para calcular a "linha reta" na superfície curva da Terra.
-    *
-    * @param lat1 - Latitude do Ponto A (ex: -23.5505)
-    * @param lon1 - Longitude do Ponto A (ex: -46.6333)
-    * @param lat2 - Latitude do Ponto B (ex: -22.9068)
-    * @param lon2 - Longitude do Ponto B (ex: -43.1729)
-    * @returns A distância em Quilômetros (number).
-    *
-    * @example
-    * // Calculando distância entre São Paulo e Rio de Janeiro:
-    * const distancia = this.calculateDistance(-23.5505, -46.6333, -22.9068, -43.1729);
-    * // Resultado: ~366.4 km
-    * * @see https://www.linkedin.com/pulse/desvendando-f%25C3%25B3rmula-de-haversine-como-calcular-reais-na-santos-4fmae/?published=t
-    */
-  private calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+   * FÓRMULA DE HAVERSINE
+   * Calcula a distância em KM entre dois pontos no globo terrestre (Latitude/Longitude).
+   * É pura trigonometria esférica usada para calcular a "linha reta" na superfície curva da Terra.
+   *
+   * @param lat1 - Latitude do Ponto A (ex: -23.5505)
+   * @param lon1 - Longitude do Ponto A (ex: -46.6333)
+   * @param lat2 - Latitude do Ponto B (ex: -22.9068)
+   * @param lon2 - Longitude do Ponto B (ex: -43.1729)
+   * @returns A distância em Quilômetros (number).
+   *
+   * @example
+   * // Calculando distância entre São Paulo e Rio de Janeiro:
+   * const distancia = this.calculateDistance(-23.5505, -46.6333, -22.9068, -43.1729);
+   * // Resultado: ~366.4 km
+   * * @see https://www.linkedin.com/pulse/desvendando-f%25C3%25B3rmula-de-haversine-como-calcular-reais-na-santos-4fmae/?published=t
+   */
+  private calculateDistance(
+    lat1: number,
+    lon1: number,
+    lat2: number,
+    lon2: number,
+  ): number {
     const R = 6371; // Raio da Terra em KM
     const dLat = this.deg2rad(lat2 - lat1); // Diferença de latitudes em radianos
     const dLon = this.deg2rad(lon2 - lon1); // Diferença de longitudes em radianos
@@ -391,17 +560,17 @@ export class RouteService {
       // Calcula o seno ao quadrado da metade da diferença de latitude.
       // Representa o deslocamento vertical sobre a superfície da Terra.
       Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-
       // [PARTE 2]: Ajuste de Curvatura da Terra
       // A Terra não é um plano: ela "afunila" nos polos.
       // Por isso, a distância entre longitudes diminui conforme a latitude aumenta.
       // Multiplicamos pelos cossenos das latitudes para compensar esse efeito.
-      Math.cos(this.deg2rad(lat1)) * Math.cos(this.deg2rad(lat2)) *
-
-      // [PARTE 3]: Distância "Horizontal" (Leste–Oeste)
-      // Calcula o seno ao quadrado da metade da diferença de longitude.
-      // Representa o deslocamento horizontal corrigido pela curvatura da Terra.
-      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      Math.cos(this.deg2rad(lat1)) *
+        Math.cos(this.deg2rad(lat2)) *
+        // [PARTE 3]: Distância "Horizontal" (Leste–Oeste)
+        // Calcula o seno ao quadrado da metade da diferença de longitude.
+        // Representa o deslocamento horizontal corrigido pela curvatura da Terra.
+        Math.sin(dLon / 2) *
+        Math.sin(dLon / 2);
 
     // Cálculo do ângulo central entre os dois pontos na esfera (em radianos)
     //
@@ -436,7 +605,7 @@ export class RouteService {
     // c  -> ângulo central (em radianos)
     // R·c -> distância real sobre a superfície da Terra
     //
-    // Distância final em quilômetros: 
+    // Distância final em quilômetros:
     // RESUMO: o angulo "c" vezes o "raio" resulta na distancia entre dois pontos da terrA
     return R * c;
   }

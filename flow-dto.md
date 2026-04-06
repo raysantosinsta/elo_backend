@@ -1,6 +1,4 @@
 /* eslint-disable prettier/prettier */
-/* eslint-disable @typescript-eslint/no-unsafe-call */
-/* eslint-disable @typescript-eslint/no-unsafe-return */
 import {
   IsNotEmpty,
   IsString,
@@ -15,10 +13,9 @@ import {
   Min,
   Max,
   IsDate,
-  ValidateNested,
 } from 'class-validator';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Transform, Type } from 'class-transformer';
+import { ApiProperty } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 
 export enum DateFilterType {
   PRODUCTION_STARTED = 'productionStartedAt',
@@ -73,10 +70,18 @@ export class CreateStageDto {
   @IsString()
   allowedRole?: string;
 
+  @ApiProperty({
+    required: false,
+    description: 'Prazo sugerido em dias (template para novos itens)',
+    example: 3,
+    minimum: 0,
+    maximum: 365,
+  })
   @IsOptional()
-  @IsInt()
+  @IsNumber()
   @Min(0)
-  defaultDays?: number; // 🔥 NOVO CAMPO
+  @Max(365)
+  suggestedDeadline?: number;
 }
 
 export class UpdateStageDto {
@@ -159,34 +164,37 @@ export class UpdateItemStageDeadlineDto {
   notes?: string;
 }
 
+// ===========================================================================
+// 🔥 DTOs PARA GESTÃO DE PRAZOS POR ETAPA - ATUALIZADO
+// ===========================================================================
+
 export class BulkUpdateItemStageDto {
   @ApiProperty({
     description: 'ID da etapa',
     example: '550e8400-e29b-41d4-a716-446655440000',
   })
-  @IsUUID('4') // 🔥 ESPECIFIQUE A VERSÃO DO UUID
+  @IsUUID()
   @IsNotEmpty()
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-  @Transform(({ value }) => value?.trim()) // 🔥 LIMPA ESPAÇOS EM BRANCO
   stageId: string;
 
   @ApiProperty({
-    required: false,
     description: 'Prazo sugerido para a etapa',
-    example: '2025-12-31',
+    example: '2025-12-31T23:59:59.999Z',
   })
-  @IsOptional()
-  @IsDateString()
-  suggestedDeadline?: string;
+  @IsDate()
+  @Type(() => Date)
+  @IsNotEmpty()
+  suggestedDeadline: Date;
 
   @ApiProperty({
     required: false,
     description: 'Prazo real da etapa (quando foi concluída)',
-    example: '2025-12-31',
+    example: '2025-12-31T23:59:59.999Z',
   })
   @IsOptional()
-  @IsDateString()
-  actualDeadline?: string;
+  @IsDate()
+  @Type(() => Date)
+  actualDeadline?: Date;  // ✅ ADICIONADO
 
   @ApiProperty({
     required: false,
@@ -196,7 +204,7 @@ export class BulkUpdateItemStageDto {
   })
   @IsOptional()
   @IsString()
-  status?: string;
+  status?: string;  // ✅ ADICIONADO
 
   @ApiProperty({
     required: false,
@@ -214,8 +222,6 @@ export class BulkUpdateItemStagesDto {
   })
   @IsArray()
   @IsNotEmpty()
-  @ValidateNested({ each: true }) // 🔥 CRUCIAL: valida cada item do array
-  @Type(() => BulkUpdateItemStageDto) // 🔥 CRUCIAL: transforma para a classe correta
   updates: BulkUpdateItemStageDto[];
 }
 
@@ -365,9 +371,10 @@ export class CreateFlowItemDto {
   @IsString()
   productRef?: string;
 
-  @ApiProperty({ required: false, example: 5, minimum: 0 })
+  @ApiProperty({ required: false, example: 5, minimum: 1 })
   @IsOptional()
   @IsNumber()
+  @Min(1)
   quantity?: number;
 
   @ApiProperty({ required: false, example: 3, minimum: 1, maximum: 5 })
@@ -452,12 +459,12 @@ export class UpdateFlowItemDto {
     required: false,
     example: 5,
     description: 'Quantidade do item (mínimo 1)',
-    minimum: 0,
+    minimum: 1,
   })
   @IsOptional()
   @IsNumber()
   @IsInt()
-  @Min(0)
+  @Min(1)
   quantity?: number;
 
   @ApiProperty({ required: false, example: 3, minimum: 1, maximum: 5 })
@@ -524,11 +531,6 @@ export class UpdateFlowItemDto {
   @IsArray()
   @IsUUID('4', { each: true })
   removeAudioIds?: string[];
-
-  @ApiProperty({ required: false })
-  @IsOptional()
-  @IsUUID()
-  flowId?: string; // 🔥 ADICIONE ESTA LINHA
 }
 
 // ===========================================================================
@@ -555,14 +557,20 @@ export class FlowFilterDto {
   @IsEnum(DateFilterType)
   dateType?: DateFilterType;
 
-  @ApiPropertyOptional({ description: 'Filtrar itens atrasados' })
+  @ApiProperty({
+    required: false,
+    description: 'Filtrar itens atrasados (true/false)',
+  })
   @IsOptional()
-  @IsBooleanString() // 🔥 USAR IsBooleanString para aceitar "true"/"false" como string
+  @IsBooleanString()
   isOverdue?: string;
 
-  @ApiPropertyOptional({ description: 'Filtrar itens próximos' })
+  @ApiProperty({
+    required: false,
+    description: 'Filtrar itens com prazo nos próximos 7 dias (true/false)',
+  })
   @IsOptional()
-  @IsBooleanString() // 🔥 USAR IsBooleanString
+  @IsBooleanString()
   isUpcoming?: string;
 
   @ApiProperty({ required: false })

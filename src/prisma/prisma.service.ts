@@ -14,11 +14,6 @@ interface PrismaArgs {
   update?: Record<string, any>;
 }
 
-interface PrismaModelDelegate {
-  findFirst: (args: PrismaArgs) => Promise<unknown>;
-  findFirstOrThrow: (args: PrismaArgs) => Promise<unknown>;
-}
-
 @Injectable()
 export class PrismaService
   extends PrismaClient
@@ -79,18 +74,25 @@ export class PrismaService
     args: PrismaArgs,
     userId: string,
   ): void {
+    // Verificação de segurança: se não houver args ou data, não faz nada
+    if (!args || (!args.data && !args.create && !args.update)) return;
+
     if (operation === 'create') {
       args.data = { ...args.data, userCreateId: userId, userUpdateId: userId };
     } else if (['update', 'updateMany', 'upsert'].includes(operation)) {
       if (operation === 'upsert') {
-        args.create = {
-          ...args.create,
-          userCreateId: userId,
-          userUpdateId: userId,
-        };
-        args.update = { ...args.update, userUpdateId: userId };
+        if (args.create)
+          args.create = {
+            ...args.create,
+            userCreateId: userId,
+            userUpdateId: userId,
+          };
+        if (args.update) args.update = { ...args.update, userUpdateId: userId };
       } else {
-        if (args.data) args.data = { ...args.data, userUpdateId: userId };
+        // 🔥 IMPORTANTE: Se o data for nulo ou não for objeto, ignora
+        if (args.data && typeof args.data === 'object') {
+          args.data.userUpdateId = userId;
+        }
       }
     }
   }
@@ -119,7 +121,6 @@ export class PrismaService
     // --- PROTEÇÃO DE ESCRITA: Impede a troca de Tenant via Update ---
     if (['update', 'updateMany'].includes(operation) && args.data) {
       if (args.data.companyId) {
-        // Remove qualquer tentativa de sobrescrever o ID da empresa
         delete args.data.companyId;
         this.logger.warn(
           `Tentativa bloqueada de alterar companyId no modelo ${model} pelo usuário.`,
@@ -127,24 +128,20 @@ export class PrismaService
       }
     }
 
+    // 🔥 CORREÇÃO: Para operações em Company, não aplicar filtro de tenant
+    if (model === 'Company') {
+      // Para Company, não aplicamos filtro de tenant (empresas são entidades raiz)
+      return query(args);
+    }
+
     if (operationsWithWhere.includes(operation)) {
       args.where = args.where || {};
       args.where[model === 'Company' ? 'id' : 'companyId'] = tenantId;
 
+      // 🔥 CORREÇÃO: Para findUnique/findUniqueOrThrow, usamos query normal
       if (operation === 'findUnique' || operation === 'findUniqueOrThrow') {
-        const modelKey = model.charAt(0).toLowerCase() + model.slice(1);
-
-        if (!this.availableModels.has(modelKey)) {
-          throw new Error(`Model delegate ${modelKey} not found.`);
-        }
-
-        const delegate = this[
-          modelKey as keyof this
-        ] as unknown as PrismaModelDelegate;
-
-        return operation === 'findUnique'
-          ? delegate.findFirst(args)
-          : delegate.findFirstOrThrow(args);
+        // Não precisa converter para findFirst, apenas executa query normalmente
+        return query(args);
       }
     }
 
