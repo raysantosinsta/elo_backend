@@ -140,6 +140,7 @@ model Company {
   flowTemplates FlowTemplate[] @relation("CompanyFlowTemplates")
   suppliers     Supplier[]
   budgetGroups  BudgetGroup[]
+  routeStops RouteStop[]
 
   auditLogs  AuditLog[]
   itemStages FlowItemStage[] // ou flowItemStages, mas não ambos
@@ -453,6 +454,15 @@ model Route {
   title       String      @map("titulo") @db.VarChar(200)
   description String?     @map("descricao") @db.Text
   routeDate   DateTime?   @map("data_rota")
+  orderBy String? @default("DISTANCE") @map("tipo_ordenacao")
+
+   // NOVOS CAMPOS
+  totalDistanceMeters Float?   @map("distancia_total_metros")
+  totalDurationSeconds Int?    @map("duracao_total_segundos")
+  optimizedAt         DateTime? @map("otimizado_em")
+
+  // NOVO RELACIONAMENTO
+  stops RouteStop[]
 
   // Usuário Atribuído
   userAssigned   User?   @relation("RouteAssignedUser", fields: [userAssignedId], references: [id])
@@ -478,6 +488,47 @@ model Route {
   @@index([companyId, routeDate])
   @@index([userAssignedId, status])
   @@map("rotas")
+}
+
+// NOVO MODEL
+model RouteStop {
+  id        String   @id @default(uuid()) @map("id") @db.Uuid
+  
+  // Dados da parada
+  name        String? @map("nome") @db.VarChar(200)
+  address     String  @map("endereco") @db.VarChar(300)
+  complement  String? @map("complemento") @db.VarChar(100)
+  neighborhood String? @map("bairro") @db.VarChar(100)
+  city        String  @map("cidade") @db.VarChar(100)
+  state       String  @map("estado") @db.VarChar(2)
+  zipCode     String  @map("cep") @db.VarChar(9)
+  
+  // Coordenadas
+  latitude  Float @map("latitude")
+  longitude Float @map("longitude")
+  
+  // Ordem na rota
+  order     Int   @default(0) @map("ordem")
+  
+  // Metadados
+  notes     String? @map("observacoes") @db.Text
+  visitedAt DateTime? @map("visitado_em")
+  visited   Boolean  @default(false) @map("visitado")
+  
+  // Relacionamentos
+  routeId   String @map("rota_id") @db.Uuid
+  route     Route  @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  
+  companyId String  @map("empresa_id") @db.Uuid
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  
+  createdAt DateTime @default(now()) @map("criado_em")
+  updatedAt DateTime @updatedAt @map("atualizado_em")
+  
+  @@index([routeId])
+  @@index([order])
+  @@index([companyId])
+  @@map("paradas_rota")
 }
 
 model Notification {

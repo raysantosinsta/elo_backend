@@ -6,14 +6,60 @@ npx prisma migrate diff \
   --to-schema-datamodel prisma/schema.prisma \
   --script 
 
-  mkdir prisma/migrations/20260101_funcao_prazo_3 
+  mkdir prisma/migrations/20260101_add_ordenacao
 
-  npx prisma migrate resolve --applied 20260101_funcao_prazo_4 
-npx prisma migrate resolve --applied 20260101_remover_prazo_fixo_7
+  npx prisma migrate resolve --applied 20260101_add_ordenacao
 
    npx prisma generate
 
    ____ refazer caso nao seja certo
+
+   -- AlterTable
+ALTER TABLE "rotas" ADD COLUMN     "distancia_total_metros" DOUBLE PRECISION,
+ADD COLUMN     "duracao_total_segundos" INTEGER,
+ADD COLUMN     "otimizado_em" TIMESTAMP(3);
+
+-- CreateTable
+CREATE TABLE "paradas_rota" (
+    "id" UUID NOT NULL,
+    "nome" VARCHAR(200),
+    "endereco" VARCHAR(300) NOT NULL,
+    "complemento" VARCHAR(100),
+    "bairro" VARCHAR(100),
+    "cidade" VARCHAR(100) NOT NULL,
+    "estado" VARCHAR(2) NOT NULL,
+    "cep" VARCHAR(9) NOT NULL,
+    "latitude" DOUBLE PRECISION NOT NULL,
+    "longitude" DOUBLE PRECISION NOT NULL,
+    "ordem" INTEGER NOT NULL DEFAULT 0,
+    "observacoes" TEXT,
+    "visitado_em" TIMESTAMP(3),
+    "visitado" BOOLEAN NOT NULL DEFAULT false,
+    "rota_id" UUID NOT NULL,
+    "empresa_id" UUID NOT NULL,
+    "criado_em" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "atualizado_em" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "paradas_rota_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateIndex
+CREATE INDEX "paradas_rota_rota_id_idx" ON "paradas_rota"("rota_id");
+
+-- CreateIndex
+CREATE INDEX "paradas_rota_ordem_idx" ON "paradas_rota"("ordem");
+
+-- CreateIndex
+CREATE INDEX "paradas_rota_empresa_id_idx" ON "paradas_rota"("empresa_id");
+
+-- AddForeignKey
+ALTER TABLE "paradas_rota" ADD CONSTRAINT "paradas_rota_rota_id_fkey" FOREIGN KEY ("rota_id") REFERENCES "rotas"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "paradas_rota" ADD CONSTRAINT "paradas_rota_empresa_id_fkey" FOREIGN KEY ("empresa_id") REFERENCES "empresas"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+rota acima
+__________
 
    -- AlterTable
 ALTER TABLE "public"."etapas_fluxo" ADD COLUMN     "prazo_sugerido_dias" INTEGER DEFAULT 0;

@@ -1,9 +1,20 @@
 /* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
+/* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
+/* eslint-disable @typescript-eslint/no-unsafe-enum-comparison */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
-import { Injectable, NotFoundException, Logger, Inject } from '@nestjs/common';
-import { TaskStatus, type Prisma, type Task } from '@prisma/client';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  RouteStatus,
+  TaskStatus,
+  type Prisma,
+  type Task,
+} from '@prisma/client';
 import type { Cache } from 'cache-manager';
 
 import { PrismaService } from '../prisma/prisma.service';
@@ -12,6 +23,19 @@ import {
   OptimizeRouteDto,
   RouteOrderType,
 } from './dto/optimize-route.dto';
+import {
+  ConvertRouteToTasksDto,
+  CreateRouteDto,
+  RouteStopDto,
+  UpdateRouteDto,
+} from './dto/create-route.dto';
+
+interface RouteStats {
+  totalDurationSeconds: number;
+  totalDistanceMeters: number;
+  formattedDuration: string;
+  formattedDistance: string;
+}
 
 /**
  * Service responsável pela lógica de rotas e otimização logística.
@@ -31,14 +55,14 @@ export class RouteService {
   /**
    * Busca tarefas que possuem localização válida (Latitude e Longitude não nulas).
    * Aplica filtros de data e usuário responsável se fornecidos.
-   * * @param companyId - ID da empresa logada.
+   * @param companyId - ID da empresa logada.
    * @param filters - Objeto contendo data inicio/fim e ID do responsável.
    * @returns Lista de tarefas encontradas.
    */
   async getTasksWithLocation(
     companyId: string,
     filters: { startDate?: string; endDate?: string; assignedToId?: string },
-  ) {
+  ): Promise<Task[]> {
     // Log para ver todas as tarefas da empresa
     const allTasks = await this.prisma.task.findMany({
       where: { companyId },
@@ -104,8 +128,6 @@ export class RouteService {
 
     return tasks;
   }
-
-  // src/tasks/routes.service.ts
 
   /**
    * OTIMIZADOR DE ROTAS (O Coração da Logística).
@@ -230,7 +252,6 @@ export class RouteService {
 
         let nearestTaskIndex = -1;
         let minDistance = Infinity;
-        // let minDistanceTaskName = '';
 
         // Percorre todas as tarefas restantes para achar a mais próxima
         for (let i = 0; i < remainingTasks.length; i++) {
@@ -259,7 +280,6 @@ export class RouteService {
           if (dist < minDistance) {
             minDistance = dist;
             nearestTaskIndex = i;
-            // minDistanceTaskName = t.title;
           }
         }
 
@@ -360,7 +380,7 @@ export class RouteService {
   private async calculateRouteStats(
     startPos: { lat: number; lng: number },
     tasks: Task[],
-  ) {
+  ): Promise<RouteStats> {
     try {
       // Filtra tarefas válidas para a API
       const validTasks = tasks.filter((t: any) => {
@@ -389,7 +409,6 @@ export class RouteService {
 
       this.logger.log(`[calculateRouteStats] Chamando OSRM: ${url}`);
 
-      // 🔥 ADICIONAR TIMEOUT DE 10 SEGUNDOS
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000);
 
@@ -412,10 +431,9 @@ export class RouteService {
           };
         }
       }
-    } catch (error) {
+    } catch {
       this.logger.warn(
         'Erro ao consultar OSRM, usando cálculo linear fallback.',
-        error,
       );
     }
 
@@ -423,11 +441,10 @@ export class RouteService {
     return this.getFallbackStats(startPos, tasks);
   }
 
-  // 🔥 MÉTODO SEPARADO PARA O FALLBACK
   private getFallbackStats(
     startPos: { lat: number; lng: number },
     tasks: Task[],
-  ) {
+  ): RouteStats {
     this.logger.log('[calculateRouteStats] Usando fallback linear (Haversine)');
 
     let totalDistKm = 0;
@@ -464,20 +481,16 @@ export class RouteService {
     };
   }
 
-  // Auxiliar para formatar segundos em "2h 30min"
-  private formatDuration(seconds: number): string {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    if (h > 0) return `${h}h ${m}min`;
-    return `${m}min`;
-  }
-
   /**
    * Finaliza ou Reagenda uma tarefa na rota.
    * Se vier uma nova data (scheduledAt), muda status para PENDING (reagendado).
    * Se não, finaliza como COMPLETED ou FAILED.
    */
-  async concludeVisit(taskId: string, userId: string, dto: FinalizeTaskDto) {
+  async concludeVisit(
+    taskId: string,
+    userId: string,
+    dto: FinalizeTaskDto,
+  ): Promise<{ message: string; task: Task }> {
     const task = await this.prisma.task.findUnique({
       where: { id: taskId },
     });
@@ -486,7 +499,7 @@ export class RouteService {
 
     // Determina o novo status baseado na lógica de negócio
     const statusFinal = dto.scheduledAt
-      ? TaskStatus.PENDING // Se tem nova data, volta para pendente
+      ? TaskStatus.PENDING
       : dto.status === 'COMPLETED'
         ? TaskStatus.COMPLETED
         : TaskStatus.FAILED;
@@ -496,10 +509,8 @@ export class RouteService {
       data: {
         status: statusFinal,
         finalComment: dto.finalComment,
-        // Atualiza datas se for reagendamento
         scheduledDate: dto.scheduledAt ? new Date(dto.scheduledAt) : undefined,
         dueDate: dto.scheduledAt ? new Date(dto.scheduledAt) : undefined,
-        // Se concluiu, marca a data de hoje. Se reagendou, limpa a conclusão.
         completionDate: dto.scheduledAt ? null : new Date(),
         userCompletedId: userId,
       },
@@ -514,7 +525,7 @@ export class RouteService {
     };
   }
 
-  // Auxiliar para padronizar os INCLUDES do Prisma (evita repetição de código)
+  // Auxiliar para padronizar os INCLUDES do Prisma
   private getTaskIncludeDetails() {
     return {
       taskAddress: true,
@@ -523,22 +534,577 @@ export class RouteService {
     };
   }
 
+  // =============================================
+  // NOVOS MÉTODOS PARA ROTAS SEM TAREFAS
+  // =============================================
+
+  /**
+   * CRIA uma nova rota sem criar tarefas
+   * Apenas salva os pontos e otimiza a ordem
+   */
+  /**
+   * CRIA uma nova rota sem criar tarefas
+   * Apenas salva os pontos e otimiza a ordem (se solicitado)
+   * A localização do motorista será definida no momento da execução da rota
+   */
+  async createRoute(dto: CreateRouteDto, companyId: string, userId: string) {
+    this.logger.log(`🚀 [createRoute] Criando rota: ${dto.title}`);
+    this.logger.log(`📦 Quantidade de paradas: ${dto.stops.length}`);
+
+    let optimizedStops = [...dto.stops];
+    let stats: {
+      totalDurationSeconds: number;
+      totalDistanceMeters: number;
+    };
+
+    // Se for ordenação por distância, otimiza usando a primeira parada como referência
+    if (dto.orderBy !== RouteOrderType.PRIORITY && dto.stops.length > 0) {
+      // Usa a primeira parada como ponto de partida para otimização
+      // Na execução real, a rota será recalculada a partir da localização real do motorista
+      const startPos = {
+        lat: dto.stops[0].latitude,
+        lng: dto.stops[0].longitude,
+      };
+
+      this.logger.log(
+        `🎯 Otimizando rota por distância usando primeira parada como referência`,
+      );
+      optimizedStops = this.optimizeStopsByDistance(startPos, dto.stops);
+
+      // Calcula estatísticas com base na ordem otimizada
+      stats = await this.calculateRouteStatsFromStops(startPos, optimizedStops);
+    } else if (dto.stops.length > 0) {
+      // Para ordenação por prioridade, mantém a ordem original
+      // Calcula estatísticas usando a primeira parada como referência
+      const startPos = {
+        lat: dto.stops[0].latitude,
+        lng: dto.stops[0].longitude,
+      };
+      stats = await this.calculateRouteStatsFromStops(startPos, dto.stops);
+    } else {
+      // Sem paradas, estatísticas vazias
+      stats = {
+        totalDistanceMeters: 0,
+        totalDurationSeconds: 0,
+      };
+    }
+
+    // Cria a rota no banco de dados
+    const route = await this.prisma.route.create({
+      data: {
+        title: dto.title,
+        description: dto.description,
+        routeDate: dto.routeDate ? new Date(dto.routeDate) : null,
+        status: RouteStatus.SCHEDULED,
+        totalDistanceMeters: stats.totalDistanceMeters,
+        totalDurationSeconds: stats.totalDurationSeconds,
+        optimizedAt: new Date(),
+        companyId: companyId,
+        userCreateId: userId,
+        userAssignedId: dto.userAssignedId || null,
+        orderBy: dto.orderBy || 'DISTANCE',
+        stops: {
+          create: optimizedStops.map((stop, index) => ({
+            name: stop.name,
+            address: stop.address,
+            complement: stop.complement || '',
+            neighborhood: stop.neighborhood || '',
+            city: stop.city,
+            state: stop.state,
+            zipCode: stop.zipCode,
+            latitude: stop.latitude,
+            longitude: stop.longitude,
+            order: index + 1,
+            notes: stop.notes || '',
+            companyId: companyId,
+          })),
+        },
+      },
+      include: {
+        stops: {
+          orderBy: { order: 'asc' },
+        },
+        userAssigned: {
+          select: { id: true, name: true },
+        },
+      },
+    });
+
+    this.logger.log(`✅ [createRoute] Rota criada com ID: ${route.id}`);
+    this.logger.log(
+      `   Distância total: ${(stats.totalDistanceMeters / 1000).toFixed(1)} km`,
+    );
+    this.logger.log(
+      `   Duração estimada: ${this.formatDuration(stats.totalDurationSeconds)}`,
+    );
+    this.logger.log(
+      `   Ordem das paradas: ${optimizedStops.map((_, i) => i + 1).join(' → ')}`,
+    );
+
+    return {
+      ...route,
+      stats: {
+        totalDistanceMeters: stats.totalDistanceMeters,
+        totalDurationSeconds: stats.totalDurationSeconds,
+        formattedDistance: `${(stats.totalDistanceMeters / 1000).toFixed(1)} km`,
+        formattedDuration: this.formatDuration(stats.totalDurationSeconds),
+      },
+    };
+  }
+
+  /**
+   * Otimiza a ordem das paradas pelo algoritmo do vizinho mais próximo
+   */
+  private optimizeStopsByDistance(
+    startPos: { lat: number; lng: number },
+    stops: RouteStopDto[],
+  ): RouteStopDto[] {
+    this.logger.log(`🎯 Otimizando ${stops.length} paradas por proximidade`);
+
+    const optimized: RouteStopDto[] = [];
+    const remaining = [...stops];
+    let currentPos = { ...startPos };
+
+    while (remaining.length > 0) {
+      let nearestIndex = 0;
+      let minDistance = Infinity;
+
+      for (let i = 0; i < remaining.length; i++) {
+        const stop = remaining[i];
+        const distance = this.calculateDistance(
+          currentPos.lat,
+          currentPos.lng,
+          stop.latitude,
+          stop.longitude,
+        );
+
+        if (distance < minDistance) {
+          minDistance = distance;
+          nearestIndex = i;
+        }
+      }
+
+      const nearest = remaining[nearestIndex];
+      optimized.push(nearest);
+      currentPos = { lat: nearest.latitude, lng: nearest.longitude };
+      remaining.splice(nearestIndex, 1);
+    }
+
+    return optimized;
+  }
+
+  /**
+   * Calcula estatísticas da rota a partir das paradas (sem tarefas)
+   */
+  private async calculateRouteStatsFromStops(
+    startPos: { lat: number; lng: number },
+    stops: RouteStopDto[],
+  ) {
+    try {
+      // Monta string de coordenadas para OSRM
+      const coordinates = [
+        `${startPos.lng},${startPos.lat}`,
+        ...stops.map((stop) => `${stop.longitude},${stop.latitude}`),
+      ].join(';');
+
+      const url = `https://router.project-osrm.org/route/v1/driving/${coordinates}?overview=false`;
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+      const response = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeoutId);
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.code === 'Ok' && data.routes?.[0]) {
+          return {
+            totalDurationSeconds: data.routes[0].duration,
+            totalDistanceMeters: data.routes[0].distance,
+          };
+        }
+      }
+    } catch (error) {
+      this.logger.warn('Erro ao consultar OSRM, usando fallback');
+    }
+
+    // Fallback: cálculo linear
+    let totalDistKm = 0;
+    let current = startPos;
+
+    for (const stop of stops) {
+      const dist = this.calculateDistance(
+        current.lat,
+        current.lng,
+        stop.latitude,
+        stop.longitude,
+      );
+      totalDistKm += dist;
+      current = { lat: stop.latitude, lng: stop.longitude };
+    }
+
+    const avgSpeed = 30; // km/h
+    const estimatedSeconds = (totalDistKm / avgSpeed) * 3600;
+
+    return {
+      totalDurationSeconds: estimatedSeconds,
+      totalDistanceMeters: totalDistKm * 1000,
+    };
+  }
+
+  /**
+   * Busca todas as rotas salvas da empresa
+   */
+  async findAllRoutes(
+    companyId: string,
+    filters?: {
+      status?: RouteStatus;
+      startDate?: string;
+      endDate?: string;
+    },
+  ): Promise<any[]> {
+    const where: Prisma.RouteWhereInput = { companyId };
+
+    if (filters?.status) {
+      where.status = filters.status;
+    }
+
+    if (filters?.startDate || filters?.endDate) {
+      where.routeDate = {
+        ...(filters.startDate && { gte: new Date(filters.startDate) }),
+        ...(filters.endDate && { lte: new Date(filters.endDate) }),
+      };
+    }
+
+    const routes = await this.prisma.route.findMany({
+      where,
+      include: {
+        stops: {
+          orderBy: { order: 'asc' },
+        },
+        userAssigned: {
+          select: { id: true, name: true },
+        },
+        _count: {
+          select: { stops: true },
+        },
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+
+    return routes.map((route) => ({
+      ...route,
+      formattedDistance: route.totalDistanceMeters
+        ? `${(route.totalDistanceMeters / 1000).toFixed(1)} km`
+        : 'Não calculado',
+      formattedDuration: route.totalDurationSeconds
+        ? this.formatDuration(route.totalDurationSeconds)
+        : 'Não calculado',
+    }));
+  }
+
+  /**
+   * Busca uma rota específica com todos os detalhes
+   */
+  async findRouteById(routeId: string, companyId: string): Promise<any> {
+    const route = await this.prisma.route.findFirst({
+      where: {
+        id: routeId,
+        companyId,
+      },
+      include: {
+        stops: { orderBy: { order: 'asc' } },
+        userAssigned: { select: { id: true, name: true, contact: true } },
+        userCreate: { select: { id: true, name: true } },
+      },
+    });
+
+    if (!route) {
+      throw new NotFoundException('Rota não encontrada');
+    }
+
+    // 🔥 LOG DE DEBUG PARA VOCÊ VER NO TERMINAL DO NESTJS
+  this.logger.debug(`[DEBUG findRouteById] Rota encontrada:`, {
+    id: route.id,
+    userAssignedId: route.userAssignedId,
+    orderBy: route.orderBy, // Se este log vier undefined, a coluna orderBy está vazia no banco
+  });
+
+    return {
+      ...route,
+      formattedDistance: route.totalDistanceMeters
+        ? `${(route.totalDistanceMeters / 1000).toFixed(1)} km`
+        : 'Não calculado',
+      formattedDuration: route.totalDurationSeconds
+        ? this.formatDuration(route.totalDurationSeconds)
+        : 'Não calculado',
+    };
+  }
+
+  /**
+   * Atualiza uma rota existente e suas paradas.
+   * Se orderBy for 'DISTANCE', as paradas são reordenadas antes de salvar.
+   */
+  async updateRoute(
+    routeId: string,
+    dto: UpdateRouteDto,
+    companyId: string,
+    userId: string,
+  ): Promise<any> {
+    // 1. Validar existência da rota
+    const existingRoute = await this.prisma.route.findFirst({
+      where: { id: routeId, companyId },
+    });
+
+    if (!existingRoute) {
+      throw new NotFoundException('Rota não encontrada');
+    }
+
+    let stats: {
+      totalDurationSeconds: number;
+      totalDistanceMeters: number;
+    } | null = null;
+
+    // Inicializa stopsToSave com o que veio no DTO ou array vazio
+    let stopsToSave = dto.stops || [];
+
+    // 2. Lógica de Ordenação e Cálculo de Estatísticas
+    if (stopsToSave.length > 0) {
+      // Se o usuário pediu otimização por distância
+      if (dto.orderBy === RouteOrderType.DISTANCE) {
+        // Usa a primeira parada enviada como ponto de partida (âncora)
+        const startPos = {
+          lat: stopsToSave[0].latitude,
+          lng: stopsToSave[0].longitude,
+        };
+        stopsToSave = this.optimizeStopsByDistance(startPos, stopsToSave);
+      }
+
+      // Calcula KM e Tempo Real baseado na ordem final (seja manual ou otimizada)
+      const statsRefPos = {
+        lat: stopsToSave[0].latitude,
+        lng: stopsToSave[0].longitude,
+      };
+      stats = await this.calculateRouteStatsFromStops(statsRefPos, stopsToSave);
+    }
+
+    // 3. Persistência no Prisma
+    const updatedRoute = await this.prisma.route.update({
+      where: { id: routeId },
+      data: {
+        title: dto.title,
+        description: dto.description,
+        routeDate: dto.routeDate ? new Date(dto.routeDate) : undefined,
+        status: dto.status,
+        userAssignedId: dto.userAssignedId,
+        orderBy: dto.orderBy, // ADICIONE ESTA LINHA PARA SALVAR NO BANCO
+        totalDistanceMeters: stats?.totalDistanceMeters,
+        totalDurationSeconds: stats?.totalDurationSeconds,
+        optimizedAt: stats ? new Date() : undefined,
+        userUpdateId: userId,
+
+        // Substituição atômica de paradas
+        ...(dto.stops && {
+          stops: {
+            deleteMany: {}, // Limpa as antigas
+            create: stopsToSave.map((stop, index) => ({
+              name: stop.name,
+              address: stop.address,
+              complement: stop.complement || '',
+              neighborhood: stop.neighborhood || '',
+              city: stop.city,
+              state: stop.state,
+              zipCode: stop.zipCode,
+              latitude: stop.latitude,
+              longitude: stop.longitude,
+              order: index + 1, // Grava a ordem 1, 2, 3...
+              notes: stop.notes || '',
+              companyId,
+            })),
+          },
+        }),
+      },
+      include: {
+        // Inclui paradas ordenadas para o retorno do frontend
+        stops: {
+          orderBy: { order: 'asc' },
+        },
+        userAssigned: {
+          select: { id: true, name: true, contact: true },
+        },
+      },
+    });
+
+    // 4. Retorno formatado para o Frontend
+    return {
+      ...updatedRoute,
+      formattedDistance: updatedRoute.totalDistanceMeters
+        ? `${(updatedRoute.totalDistanceMeters / 1000).toFixed(1)} km`
+        : 'Não calculado',
+      formattedDuration: updatedRoute.totalDurationSeconds
+        ? this.formatDuration(updatedRoute.totalDurationSeconds)
+        : 'Não calculado',
+    };
+  }
+
+  /**
+   * Remove uma rota
+   */
+  async deleteRoute(
+    routeId: string,
+    companyId: string,
+  ): Promise<{ message: string }> {
+    const route = await this.prisma.route.findFirst({
+      where: { id: routeId, companyId },
+    });
+
+    if (!route) {
+      throw new NotFoundException('Rota não encontrada');
+    }
+
+    await this.prisma.route.delete({
+      where: { id: routeId },
+    });
+
+    return { message: 'Rota removida com sucesso' };
+  }
+
+  /**
+   * Marca uma parada como visitada
+   */
+  async markStopAsVisited(
+    routeId: string,
+    stopId: string,
+    companyId: string,
+    notes?: string,
+  ): Promise<any> {
+    const stop = await this.prisma.routeStop.findFirst({
+      where: {
+        id: stopId,
+        routeId,
+        companyId,
+      },
+    });
+
+    if (!stop) {
+      throw new NotFoundException('Parada não encontrada');
+    }
+
+    const updatedStop = await this.prisma.routeStop.update({
+      where: { id: stopId },
+      data: {
+        visited: true,
+        visitedAt: new Date(),
+        notes: notes || stop.notes,
+      },
+    });
+
+    const allStops = await this.prisma.routeStop.findMany({
+      where: { routeId },
+    });
+
+    const allVisited = allStops.every((s) => s.visited);
+
+    if (allVisited) {
+      await this.prisma.route.update({
+        where: { id: routeId },
+        data: { status: RouteStatus.FINISHED },
+      });
+    }
+
+    return updatedStop;
+  }
+
+  /**
+   * Converte uma rota salva em tarefas reais
+   */
+  async convertRouteToTasks(
+    routeId: string,
+    companyId: string,
+    userId: string,
+    dto: ConvertRouteToTasksDto,
+  ): Promise<{ message: string; tasks: Task[] }> {
+    const route = await this.prisma.route.findFirst({
+      where: { id: routeId, companyId },
+      include: {
+        stops: {
+          orderBy: { order: 'asc' },
+        },
+      },
+    });
+
+    if (!route) {
+      throw new NotFoundException('Rota não encontrada');
+    }
+
+    let columnId = dto.columnId;
+    if (!columnId) {
+      const defaultColumn = await this.prisma.kanbanColumn.findFirst({
+        where: {
+          companyId,
+          title: 'Pendentes',
+        },
+      });
+
+      if (!defaultColumn) {
+        throw new NotFoundException(
+          'Coluna padrão "Pendentes" não encontrada. Crie uma ou especifique uma columnId.',
+        );
+      }
+      columnId = defaultColumn.id;
+    }
+
+    const tasks = await this.prisma.$transaction(
+      route.stops.map((stop, index) =>
+        this.prisma.task.create({
+          data: {
+            title: stop.name || `Parada ${index + 1} - ${route.title}`,
+            description: `Rota: ${route.title}\nEndereço: ${stop.address}\nObservações: ${stop.notes || 'N/A'}`,
+            status: TaskStatus.PENDING,
+            scheduledDate: route.routeDate || new Date(),
+            companyId,
+            userCreateId: userId,
+            userAssignedId: dto.userAssignedId || route.userAssignedId,
+            columnId: columnId!,
+            routeId: route.id,
+            taskAddress: {
+              create: {
+                endereco: stop.address,
+                numero: '',
+                bairro: stop.neighborhood || '',
+                cidade: stop.city,
+                estado: stop.state,
+                cep: stop.zipCode,
+                complemento: stop.complement,
+                latitude: stop.latitude,
+                longitude: stop.longitude,
+                companyId,
+              },
+            },
+          },
+        }),
+      ),
+    );
+
+    return {
+      message: `Rota convertida em ${tasks.length} tarefas com sucesso`,
+      tasks,
+    };
+  }
+
+  // Auxiliar para formatar segundos em "2h 30min"
+  private formatDuration(seconds: number): string {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    if (h > 0) return `${h}h ${m}min`;
+    return `${m}min`;
+  }
+
   /**
    * FÓRMULA DE HAVERSINE
    * Calcula a distância em KM entre dois pontos no globo terrestre (Latitude/Longitude).
-   * É pura trigonometria esférica usada para calcular a "linha reta" na superfície curva da Terra.
-   *
-   * @param lat1 - Latitude do Ponto A (ex: -23.5505)
-   * @param lon1 - Longitude do Ponto A (ex: -46.6333)
-   * @param lat2 - Latitude do Ponto B (ex: -22.9068)
-   * @param lon2 - Longitude do Ponto B (ex: -43.1729)
-   * @returns A distância em Quilômetros (number).
-   *
-   * @example
-   * // Calculando distância entre São Paulo e Rio de Janeiro:
-   * const distancia = this.calculateDistance(-23.5505, -46.6333, -22.9068, -43.1729);
-   * // Resultado: ~366.4 km
-   * * @see https://www.linkedin.com/pulse/desvendando-f%25C3%25B3rmula-de-haversine-como-calcular-reais-na-santos-4fmae/?published=t
    */
   private calculateDistance(
     lat1: number,
@@ -546,71 +1112,23 @@ export class RouteService {
     lat2: number,
     lon2: number,
   ): number {
-    const R = 6371; // Raio da Terra em KM
-    const dLat = this.deg2rad(lat2 - lat1); // Diferença de latitudes em radianos
-    const dLon = this.deg2rad(lon2 - lon1); // Diferença de longitudes em radianos
+    const R = 6371;
+    const dLat = this.deg2rad(lat2 - lat1);
+    const dLon = this.deg2rad(lon2 - lon1);
 
-    // Cálculo do valor 'a' (Fórmula de Haversine)
-    //
-    // Importante: o valor "a" NÃO é a distância.
-    // Ele é apenas um valor intermediário da trigonometria esférica,
-    // usado para chegar ao ângulo real entre os dois pontos.
     const a =
-      // [PARTE 1]: Distância "Vertical" (Norte–Sul)
-      // Calcula o seno ao quadrado da metade da diferença de latitude.
-      // Representa o deslocamento vertical sobre a superfície da Terra.
       Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      // [PARTE 2]: Ajuste de Curvatura da Terra
-      // A Terra não é um plano: ela "afunila" nos polos.
-      // Por isso, a distância entre longitudes diminui conforme a latitude aumenta.
-      // Multiplicamos pelos cossenos das latitudes para compensar esse efeito.
       Math.cos(this.deg2rad(lat1)) *
         Math.cos(this.deg2rad(lat2)) *
-        // [PARTE 3]: Distância "Horizontal" (Leste–Oeste)
-        // Calcula o seno ao quadrado da metade da diferença de longitude.
-        // Representa o deslocamento horizontal corrigido pela curvatura da Terra.
         Math.sin(dLon / 2) *
         Math.sin(dLon / 2);
 
-    // Cálculo do ângulo central entre os dois pontos na esfera (em radianos)
-    //
-    // Aqui transformamos o valor intermediário "a" no ângulo real "c",
-    // que representa o menor arco possível sobre a superfície da Terra.
-    //
-    // Fórmula matemática equivalente:
-    // c = 2 · atan2( √a , √(1 − a) )
-    //
-    // Por que isso funciona?
-    // - O valor "a" representa uma relação trigonométrica ligada
-    //   à corda interna (linha reta dentro da esfera) que conecta os dois pontos.
-    // - A função atan2(y, x) é usada em vez de atan(y / x) porque:
-    //     • é numericamente mais estável
-    //     • evita erros quando os pontos estão muito próximos
-    //     • lida corretamente com valores extremos (a ≈ 0 ou a ≈ 1)
-    //
-    // O resultado "c":
-    // - é a distância angular entre os pontos
-    // - está em radianos
-    // - representa o ângulo no centro da Terra entre as duas coordenadas
-    //
-    // Esse ângulo, quando multiplicado pelo raio da Terra (R),
-    // resulta na distância real sobre a superfície:
-    // a
-    // distância = R · c
-    //
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
-    // Resumo conceitual:
-    // a  -> valor trigonométrico intermediário
-    // c  -> ângulo central (em radianos)
-    // R·c -> distância real sobre a superfície da Terra
-    //
-    // Distância final em quilômetros:
-    // RESUMO: o angulo "c" vezes o "raio" resulta na distancia entre dois pontos da terrA
     return R * c;
   }
 
-  // Converte Graus para Radianos (necessário para funções Math.sin/cos)
+  // Converte Graus para Radianos
   private deg2rad(deg: number): number {
     return deg * (Math.PI / 180);
   }
