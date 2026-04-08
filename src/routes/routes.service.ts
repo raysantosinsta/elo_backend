@@ -534,14 +534,6 @@ export class RouteService {
     };
   }
 
-  // =============================================
-  // NOVOS MÉTODOS PARA ROTAS SEM TAREFAS
-  // =============================================
-
-  /**
-   * CRIA uma nova rota sem criar tarefas
-   * Apenas salva os pontos e otimiza a ordem
-   */
   /**
    * CRIA uma nova rota sem criar tarefas
    * Apenas salva os pontos e otimiza a ordem (se solicitado)
@@ -550,6 +542,7 @@ export class RouteService {
   async createRoute(dto: CreateRouteDto, companyId: string, userId: string) {
     this.logger.log(`🚀 [createRoute] Criando rota: ${dto.title}`);
     this.logger.log(`📦 Quantidade de paradas: ${dto.stops.length}`);
+    this.logger.log(`🎯 Tipo de ordenação: ${dto.orderBy || 'DISTANCE'}`);
 
     let optimizedStops = [...dto.stops];
     let stats: {
@@ -557,32 +550,42 @@ export class RouteService {
       totalDistanceMeters: number;
     };
 
-    // Se for ordenação por distância, otimiza usando a primeira parada como referência
-    if (dto.orderBy !== RouteOrderType.PRIORITY && dto.stops.length > 0) {
-      // Usa a primeira parada como ponto de partida para otimização
-      // Na execução real, a rota será recalculada a partir da localização real do motorista
+    // Se for ordenação por DISTÂNCIA, otimiza usando a primeira parada como referência
+    // A otimização REAL será feita no frontend com a localização atual do motorista
+    if (dto.orderBy === RouteOrderType.DISTANCE && dto.stops.length > 0) {
+      // Usa a primeira parada como ponto de partida para otimização inicial
+      // Isso é apenas para calcular estatísticas aproximadas
       const startPos = {
         lat: dto.stops[0].latitude,
         lng: dto.stops[0].longitude,
       };
 
       this.logger.log(
-        `🎯 Otimizando rota por distância usando primeira parada como referência`,
+        `🎯 Otimizando rota por DISTÂNCIA usando primeira parada como referência`,
       );
+      this.logger.log(
+        `   ⚠️ A otimização REAL será feita na execução da rota com a localização do motorista`,
+      );
+
       optimizedStops = this.optimizeStopsByDistance(startPos, dto.stops);
 
       // Calcula estatísticas com base na ordem otimizada
       stats = await this.calculateRouteStatsFromStops(startPos, optimizedStops);
-    } else if (dto.stops.length > 0) {
-      // Para ordenação por prioridade, mantém a ordem original
+    }
+    // Se for ordenação por PRIORIDADE, mantém a ordem original
+    else if (dto.orderBy === RouteOrderType.PRIORITY && dto.stops.length > 0) {
+      this.logger.log(`🎯 Mantendo ordem original por PRIORIDADE`);
+
       // Calcula estatísticas usando a primeira parada como referência
       const startPos = {
         lat: dto.stops[0].latitude,
         lng: dto.stops[0].longitude,
       };
       stats = await this.calculateRouteStatsFromStops(startPos, dto.stops);
-    } else {
-      // Sem paradas, estatísticas vazias
+    }
+    // Caso padrão (sem paradas ou ordem não especificada)
+    else {
+      this.logger.log(`📋 Nenhuma otimização aplicada`);
       stats = {
         totalDistanceMeters: 0,
         totalDurationSeconds: 0,
@@ -640,6 +643,7 @@ export class RouteService {
     this.logger.log(
       `   Ordem das paradas: ${optimizedStops.map((_, i) => i + 1).join(' → ')}`,
     );
+    this.logger.log(`   Tipo de ordenação salvo: ${route.orderBy}`);
 
     return {
       ...route,
@@ -805,41 +809,41 @@ export class RouteService {
     }));
   }
 
- /**
- * Busca uma rota específica com todos os detalhes
- */
-async findRouteById(routeId: string, companyId: string): Promise<any> {
-  const route = await this.prisma.route.findFirst({
-    where: {
-      id: routeId,
-      companyId,
-    },
-    include: {
-      stops: {
-        orderBy: { order: 'asc' },
+  /**
+   * Busca uma rota específica com todos os detalhes
+   */
+  async findRouteById(routeId: string, companyId: string): Promise<any> {
+    const route = await this.prisma.route.findFirst({
+      where: {
+        id: routeId,
+        companyId,
       },
-      userAssigned: { select: { id: true, name: true, contact: true } },
-      userCreate: { select: { id: true, name: true } },
-    },
-  });
+      include: {
+        stops: {
+          orderBy: { order: 'asc' },
+        },
+        userAssigned: { select: { id: true, name: true, contact: true } },
+        userCreate: { select: { id: true, name: true } },
+      },
+    });
 
-  if (!route) {
-    throw new NotFoundException('Rota não encontrada');
+    if (!route) {
+      throw new NotFoundException('Rota não encontrada');
+    }
+
+    // O campo 'notes' já está incluído automaticamente no include de stops
+    // Não precisa de select adicional
+
+    return {
+      ...route,
+      formattedDistance: route.totalDistanceMeters
+        ? `${(route.totalDistanceMeters / 1000).toFixed(1)} km`
+        : 'Não calculado',
+      formattedDuration: route.totalDurationSeconds
+        ? this.formatDuration(route.totalDurationSeconds)
+        : 'Não calculado',
+    };
   }
-
-  // O campo 'notes' já está incluído automaticamente no include de stops
-  // Não precisa de select adicional
-
-  return {
-    ...route,
-    formattedDistance: route.totalDistanceMeters
-      ? `${(route.totalDistanceMeters / 1000).toFixed(1)} km`
-      : 'Não calculado',
-    formattedDuration: route.totalDurationSeconds
-      ? this.formatDuration(route.totalDurationSeconds)
-      : 'Não calculado',
-  };
-}
 
   /**
    * Atualiza uma rota existente e suas paradas.
