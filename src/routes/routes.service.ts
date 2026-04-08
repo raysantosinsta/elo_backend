@@ -805,43 +805,41 @@ export class RouteService {
     }));
   }
 
-  /**
-   * Busca uma rota específica com todos os detalhes
-   */
-  async findRouteById(routeId: string, companyId: string): Promise<any> {
-    const route = await this.prisma.route.findFirst({
-      where: {
-        id: routeId,
-        companyId,
+ /**
+ * Busca uma rota específica com todos os detalhes
+ */
+async findRouteById(routeId: string, companyId: string): Promise<any> {
+  const route = await this.prisma.route.findFirst({
+    where: {
+      id: routeId,
+      companyId,
+    },
+    include: {
+      stops: {
+        orderBy: { order: 'asc' },
       },
-      include: {
-        stops: { orderBy: { order: 'asc' } },
-        userAssigned: { select: { id: true, name: true, contact: true } },
-        userCreate: { select: { id: true, name: true } },
-      },
-    });
-
-    if (!route) {
-      throw new NotFoundException('Rota não encontrada');
-    }
-
-    // 🔥 LOG DE DEBUG PARA VOCÊ VER NO TERMINAL DO NESTJS
-  this.logger.debug(`[DEBUG findRouteById] Rota encontrada:`, {
-    id: route.id,
-    userAssignedId: route.userAssignedId,
-    orderBy: route.orderBy, // Se este log vier undefined, a coluna orderBy está vazia no banco
+      userAssigned: { select: { id: true, name: true, contact: true } },
+      userCreate: { select: { id: true, name: true } },
+    },
   });
 
-    return {
-      ...route,
-      formattedDistance: route.totalDistanceMeters
-        ? `${(route.totalDistanceMeters / 1000).toFixed(1)} km`
-        : 'Não calculado',
-      formattedDuration: route.totalDurationSeconds
-        ? this.formatDuration(route.totalDurationSeconds)
-        : 'Não calculado',
-    };
+  if (!route) {
+    throw new NotFoundException('Rota não encontrada');
   }
+
+  // O campo 'notes' já está incluído automaticamente no include de stops
+  // Não precisa de select adicional
+
+  return {
+    ...route,
+    formattedDistance: route.totalDistanceMeters
+      ? `${(route.totalDistanceMeters / 1000).toFixed(1)} km`
+      : 'Não calculado',
+    formattedDuration: route.totalDurationSeconds
+      ? this.formatDuration(route.totalDurationSeconds)
+      : 'Não calculado',
+  };
+}
 
   /**
    * Atualiza uma rota existente e suas paradas.

@@ -346,63 +346,76 @@ export class RouteController {
   }
 
   /**
-   * 12. POST /routes/:id/duplicate
-   * Duplica uma rota existente (útil para rotas recorrentes)
-   *
-   * @example
-   * POST /routes/abc-123-def/duplicate
-   * {
-   *   "title": "Cópia - Visitas Zona Sul",
-   *   "routeDate": "2026-05-01T08:00:00Z"
-   * }
-   */
-  @Post(':id/duplicate')
-  async duplicateRoute(
-    @Param('id') routeId: string,
-    @Body() body: { title?: string; routeDate?: string },
-    @Req() req: any,
-  ) {
-    const companyId = req.user?.companyId;
-    const userId = req.user?.id;
+ * 12. POST /routes/:id/duplicate
+ * Duplica uma rota existente (útil para rotas recorrentes)
+ * 
+ * IMPORTANTE: As observações (notes) das paradas NÃO são copiadas para a nova rota.
+ * A nova rota começa com histórico limpo, preservando o histórico apenas na rota original.
+ *
+ * @example
+ * POST /routes/abc-123-def/duplicate
+ * {
+ *   "title": "Reagendamento - Visitas Zona Sul",
+ *   "routeDate": "2026-05-01T08:00:00Z",
+ *   "description": "Observações gerais do reagendamento"
+ * }
+ */
+@Post(':id/duplicate')
+async duplicateRoute(
+  @Param('id') routeId: string,
+  @Body() body: { title?: string; routeDate?: string; description?: string },
+  @Req() req: any,
+) {
+  const companyId = req.user?.companyId;
+  const userId = req.user?.id;
 
-    this.logger.log(`[POST] Duplicando rota ${routeId}`);
+  this.logger.log(`[POST] Duplicando rota ${routeId}`);
 
-    // Busca a rota original
-    const originalRoute = await this.routeService.findRouteById(
-      routeId,
-      companyId,
-    );
+  // Busca a rota original com todas as paradas
+  const originalRoute = await this.routeService.findRouteById(
+    routeId,
+    companyId,
+  );
 
-    // Prepara os dados para a nova rota
-    const createDto: CreateRouteDto = {
-      title: body.title || `${originalRoute.title} (Cópia)`,
-      description: originalRoute.description,
-      routeDate: body.routeDate || originalRoute.routeDate?.toISOString(),
-      userAssignedId: originalRoute.userAssignedId,
-      stops: originalRoute.stops.map((stop) => ({
-        name: stop.name,
-        address: stop.address,
-        complement: stop.complement || undefined,
-        neighborhood: stop.neighborhood || undefined,
-        city: stop.city,
-        state: stop.state,
-        zipCode: stop.zipCode,
-        latitude: stop.latitude,
-        longitude: stop.longitude,
-        notes: stop.notes || undefined,
-      })),
-    };
-
-    const newRoute = await this.routeService.createRoute(
-      createDto,
-      companyId,
-      userId,
-    );
-
-    return {
-      message: 'Rota duplicada com sucesso',
-      originalRouteId: routeId,
-      newRoute: newRoute,
-    };
+  // Prepara a descrição mesclando com as observações do motorista (se houver)
+  let finalDescription = originalRoute.description || '';
+  if (body.description) {
+    finalDescription = finalDescription 
+      ? `${finalDescription}\n\n📝 Observações do reagendamento: ${body.description}`
+      : `📝 Observações do reagendamento: ${body.description}`;
   }
+
+  // Prepara os dados para a nova rota
+  // IMPORTANTE: notes: undefined - NÃO copia as observações das paradas
+  const createDto: CreateRouteDto = {
+    title: body.title || `${originalRoute.title} (Reagendada)`,
+    description: finalDescription,
+    routeDate: body.routeDate || originalRoute.routeDate?.toISOString(),
+    userAssignedId: originalRoute.userAssignedId,
+    stops: originalRoute.stops.map((stop) => ({
+      name: stop.name,
+      address: stop.address,
+      complement: stop.complement || undefined,
+      neighborhood: stop.neighborhood || undefined,
+      city: stop.city,
+      state: stop.state,
+      zipCode: stop.zipCode,
+      latitude: stop.latitude,
+      longitude: stop.longitude,
+      notes: undefined, // ← NÃO copia as observações da parada original
+    })),
+  };
+
+  const newRoute = await this.routeService.createRoute(
+    createDto,
+    companyId,
+    userId,
+  );
+
+  return {
+    message: 'Rota reagendada com sucesso',
+    originalRouteId: routeId,
+    newRoute: newRoute,
+  };
+}
 }
