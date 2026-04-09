@@ -345,20 +345,9 @@ export class RouteController {
     return summary;
   }
 
-  /**
+ /**
  * 12. POST /routes/:id/duplicate
- * Duplica uma rota existente (útil para rotas recorrentes)
- * 
- * IMPORTANTE: As observações (notes) das paradas NÃO são copiadas para a nova rota.
- * A nova rota começa com histórico limpo, preservando o histórico apenas na rota original.
- *
- * @example
- * POST /routes/abc-123-def/duplicate
- * {
- *   "title": "Reagendamento - Visitas Zona Sul",
- *   "routeDate": "2026-05-01T08:00:00Z",
- *   "description": "Observações gerais do reagendamento"
- * }
+ * Duplica uma rota existente e cria NOVAS tarefas (tasks) clonadas
  */
 @Post(':id/duplicate')
 async duplicateRoute(
@@ -369,53 +358,15 @@ async duplicateRoute(
   const companyId = req.user?.companyId;
   const userId = req.user?.id;
 
-  this.logger.log(`[POST] Duplicando rota ${routeId}`);
+  this.logger.log(`[POST] Duplicando rota ${routeId} com criação de novas tasks`);
 
-  // Busca a rota original com todas as paradas
-  const originalRoute = await this.routeService.findRouteById(
+  const result = await this.routeService.duplicateRouteWithTasks(
     routeId,
     companyId,
-  );
-
-  // Prepara a descrição mesclando com as observações do motorista (se houver)
-  let finalDescription = originalRoute.description || '';
-  if (body.description) {
-    finalDescription = finalDescription 
-      ? `${finalDescription}\n\n📝 Observações do reagendamento: ${body.description}`
-      : `📝 Observações do reagendamento: ${body.description}`;
-  }
-
-  // Prepara os dados para a nova rota
-  // IMPORTANTE: notes: undefined - NÃO copia as observações das paradas
-  const createDto: CreateRouteDto = {
-    title: body.title || `${originalRoute.title} (Reagendada)`,
-    description: finalDescription,
-    routeDate: body.routeDate || originalRoute.routeDate?.toISOString(),
-    userAssignedId: originalRoute.userAssignedId,
-    stops: originalRoute.stops.map((stop) => ({
-      name: stop.name,
-      address: stop.address,
-      complement: stop.complement || undefined,
-      neighborhood: stop.neighborhood || undefined,
-      city: stop.city,
-      state: stop.state,
-      zipCode: stop.zipCode,
-      latitude: stop.latitude,
-      longitude: stop.longitude,
-      notes: undefined, // ← NÃO copia as observações da parada original
-    })),
-  };
-
-  const newRoute = await this.routeService.createRoute(
-    createDto,
-    companyId,
     userId,
+    body,
   );
 
-  return {
-    message: 'Rota reagendada com sucesso',
-    originalRouteId: routeId,
-    newRoute: newRoute,
-  };
+  return result;
 }
 }
