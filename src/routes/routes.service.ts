@@ -797,58 +797,237 @@ async createRoute(dto: CreateRouteDto, companyId: string, userId: string) {
     };
   }
 
-  /**
-   * Busca todas as rotas salvas da empresa
-   */
-  async findAllRoutes(
-    companyId: string,
-    filters?: {
-      status?: RouteStatus;
-      startDate?: string;
-      endDate?: string;
-    },
-  ): Promise<any[]> {
-    const where: Prisma.RouteWhereInput = { companyId };
+/**
+ * Busca todas as rotas salvas da empresa com suporte a múltiplos filtros
+ */
+async findAllRoutes(
+  companyId: string,
+  filters?: {
+    // Filtros de Data
+    startDate?: string;           // Data da rota inicial
+    endDate?: string;             // Data da rota final
+    createdStartDate?: string;    // Data de criação inicial
+    createdEndDate?: string;      // Data de criação final
+    
+    // Filtros de Status e Ordenação
+    status?: RouteStatus;         // Status da rota
+    orderBy?: string;             // DISTANCE | PRIORITY
+    userAssignedId?: string;      // ID do motorista ou 'none'
+    search?: string;              // Busca por título
+    
+    // Filtros de Métricas
+    minStops?: number;            // Mínimo de paradas
+    maxStops?: number;            // Máximo de paradas
+    minDistance?: number;         // Distância mínima (km)
+    maxDistance?: number;         // Distância máxima (km)
+    minDuration?: number;         // Duração mínima (minutos)
+    maxDuration?: number;         // Duração máxima (minutos)
+    
+    // Filtros Especiais
+    isOverdue?: boolean;          // Rotas atrasadas
+    isUpcoming?: boolean;         // Rotas próximas (próximos 7 dias)
+  },
+): Promise<any[]> {
+  this.logger.log(`📊 [findAllRoutes] Buscando rotas para empresa ${companyId}`);
+  this.logger.log(`📊 Filtros aplicados:`, filters);
 
-    if (filters?.status) {
-      where.status = filters.status;
-    }
+  const where: Prisma.RouteWhereInput = { companyId };
 
-    if (filters?.startDate || filters?.endDate) {
-      where.routeDate = {
-        ...(filters.startDate && { gte: new Date(filters.startDate) }),
-        ...(filters.endDate && { lte: new Date(filters.endDate) }),
-      };
-    }
-
-    const routes = await this.prisma.route.findMany({
-      where,
-      include: {
-        stops: {
-          orderBy: { order: 'asc' },
-        },
-        userAssigned: {
-          select: { id: true, name: true },
-        },
-        _count: {
-          select: { stops: true },
-        },
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
-    });
-
-    return routes.map((route) => ({
-      ...route,
-      formattedDistance: route.totalDistanceMeters
-        ? `${(route.totalDistanceMeters / 1000).toFixed(1)} km`
-        : 'Não calculado',
-      formattedDuration: route.totalDurationSeconds
-        ? this.formatDuration(route.totalDurationSeconds)
-        : 'Não calculado',
-    }));
+  // ============================================
+  // 1. Filtro por Status
+  // ============================================
+  if (filters?.status) {
+    where.status = filters.status;
+    this.logger.log(`   - Status: ${filters.status}`);
   }
+
+  // ============================================
+  // 2. Filtros por Data da Rota (routeDate)
+  // ============================================
+  if (filters?.startDate || filters?.endDate) {
+    where.routeDate = {};
+    if (filters.startDate) {
+      const start = new Date(filters.startDate);
+      start.setHours(0, 0, 0, 0);
+      where.routeDate.gte = start;
+      this.logger.log(`   - Data inicial da rota: ${filters.startDate}`);
+    }
+    if (filters.endDate) {
+      const end = new Date(filters.endDate);
+      end.setHours(23, 59, 59, 999);
+      where.routeDate.lte = end;
+      this.logger.log(`   - Data final da rota: ${filters.endDate}`);
+    }
+  }
+
+  // ============================================
+  // 3. Filtro por Data de Criação (createdAt)
+  // ============================================
+  if (filters?.createdStartDate || filters?.createdEndDate) {
+    where.createdAt = {};
+    if (filters.createdStartDate) {
+      const createdStart = new Date(filters.createdStartDate);
+      createdStart.setHours(0, 0, 0, 0);
+      where.createdAt.gte = createdStart;
+      this.logger.log(`   - Criado a partir de: ${filters.createdStartDate}`);
+    }
+    if (filters.createdEndDate) {
+      const createdEnd = new Date(filters.createdEndDate);
+      createdEnd.setHours(23, 59, 59, 999);
+      where.createdAt.lte = createdEnd;
+      this.logger.log(`   - Criado até: ${filters.createdEndDate}`);
+    }
+  }
+
+  // ============================================
+  // 4. Filtro por Motorista Responsável
+  // ============================================
+  if (filters?.userAssignedId) {
+    if (filters.userAssignedId === 'none') {
+      where.userAssignedId = null;
+      this.logger.log(`   - Motorista: Não atribuído`);
+    } else {
+      where.userAssignedId = filters.userAssignedId;
+      this.logger.log(`   - Motorista ID: ${filters.userAssignedId}`);
+    }
+  }
+
+  // ============================================
+  // 5. Filtro por Tipo de Ordenação
+  // ============================================
+  if (filters?.orderBy && filters.orderBy !== 'all') {
+    where.orderBy = filters.orderBy;
+    this.logger.log(`   - Tipo ordenação: ${filters.orderBy}`);
+  }
+
+  // ============================================
+  // 6. Filtro por Busca textual (título)
+  // ============================================
+  if (filters?.search && filters.search.trim() !== '') {
+    where.title = {
+      contains: filters.search.trim(),
+      mode: 'insensitive',
+    };
+    this.logger.log(`   - Busca: ${filters.search}`);
+  }
+
+  // ============================================
+  // 7. Filtro por Distância Total (km)
+  // ============================================
+  if (filters?.minDistance !== undefined || filters?.maxDistance !== undefined) {
+    where.totalDistanceMeters = {};
+    if (filters.minDistance !== undefined) {
+      where.totalDistanceMeters.gte = filters.minDistance * 1000;
+      this.logger.log(`   - Distância mínima: ${filters.minDistance} km`);
+    }
+    if (filters.maxDistance !== undefined) {
+      where.totalDistanceMeters.lte = filters.maxDistance * 1000;
+      this.logger.log(`   - Distância máxima: ${filters.maxDistance} km`);
+    }
+  }
+
+  // ============================================
+  // 8. Filtro por Duração Estimada (minutos)
+  // ============================================
+  if (filters?.minDuration !== undefined || filters?.maxDuration !== undefined) {
+    where.totalDurationSeconds = {};
+    if (filters.minDuration !== undefined) {
+      where.totalDurationSeconds.gte = filters.minDuration * 60;
+      this.logger.log(`   - Duração mínima: ${filters.minDuration} min`);
+    }
+    if (filters.maxDuration !== undefined) {
+      where.totalDurationSeconds.lte = filters.maxDuration * 60;
+      this.logger.log(`   - Duração máxima: ${filters.maxDuration} min`);
+    }
+  }
+
+  // ============================================
+  // 9. Filtro por Rotas Atrasadas
+  // ============================================
+  if (filters?.isOverdue === true) {
+    where.routeDate = {
+      lt: new Date(),
+    };
+    where.status = {
+      not: RouteStatus.FINISHED,
+    };
+    this.logger.log(`   - Apenas rotas atrasadas`);
+  }
+
+  // ============================================
+  // 10. Filtro por Rotas Próximas (próximos 7 dias)
+  // ============================================
+  if (filters?.isUpcoming === true) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const nextWeek = new Date();
+    nextWeek.setDate(nextWeek.getDate() + 7);
+    nextWeek.setHours(23, 59, 59, 999);
+    
+    where.routeDate = {
+      gte: today,
+      lte: nextWeek,
+    };
+    where.status = {
+      not: RouteStatus.FINISHED,
+    };
+    this.logger.log(`   - Apenas rotas próximas (próximos 7 dias)`);
+  }
+
+  // Executa a busca no banco
+  const routes = await this.prisma.route.findMany({
+    where,
+    include: {
+      stops: {
+        orderBy: { order: 'asc' },
+      },
+      userAssigned: {
+        select: { id: true, name: true, contact: true },
+      },
+      _count: {
+        select: { stops: true },
+      },
+    },
+    orderBy: {
+      createdAt: 'desc',
+    },
+  });
+
+  this.logger.log(`✅ [findAllRoutes] ${routes.length} rotas encontradas (pré-filtro)`);
+
+  // ============================================
+  // 11. Filtro por Quantidade de Paradas (pós-processamento)
+  // ============================================
+  let filteredRoutes = routes;
+  
+  if (filters?.minStops !== undefined || filters?.maxStops !== undefined) {
+    filteredRoutes = routes.filter((route) => {
+      const stopsCount = route._count?.stops || 0;
+      let matches = true;
+      if (filters.minStops !== undefined && stopsCount < filters.minStops) {
+        matches = false;
+      }
+      if (filters.maxStops !== undefined && stopsCount > filters.maxStops) {
+        matches = false;
+      }
+      return matches;
+    });
+    this.logger.log(`   - Após filtro de paradas: ${filteredRoutes.length} rotas (min=${filters.minStops}, max=${filters.maxStops})`);
+  }
+
+  // Formata o retorno
+  return filteredRoutes.map((route) => ({
+    ...route,
+    formattedDistance: route.totalDistanceMeters
+      ? `${(route.totalDistanceMeters / 1000).toFixed(1)} km`
+      : 'Não calculado',
+    formattedDuration: route.totalDurationSeconds
+      ? this.formatDuration(route.totalDurationSeconds)
+      : 'Não calculado',
+    orderBy: route.orderBy || 'DISTANCE',
+    stopsCount: route._count?.stops || 0,
+  }));
+}
 
   /**
    * Busca uma rota específica com todos os detalhes
