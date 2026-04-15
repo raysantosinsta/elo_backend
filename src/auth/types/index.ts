@@ -25,6 +25,8 @@ export interface JwtPayload {
   email: string;
   role: UserRole;
   companyId: string | null;
+    professionalRole?: string; // 🔥 ADICIONAR
+  professionalRoleId?: string; // 🔥 OPCIONAL
 }
 
 export interface UserTokens {

@@ -1,18 +1,21 @@
+-- AlterTable
+ALTER TABLE "usuarios" ADD COLUMN     "cargo_empresa_id" UUID;
 
-prisma: https://www.linkedin.com/pulse/guia-definitivo-hotfix-de-migrations-prisma-em-produ%C3%A7%C3%A3o-santos-rbkte/?trackingId=yQLnT1LxaOZfymhsw6LaMw%3D%3D
+-- CreateTable
+CREATE TABLE "cargos_empresa" (
+    "id" UUID NOT NULL,
+    "status" "SimpleStatus" NOT NULL DEFAULT 'ACTIVE',
+    "nome" VARCHAR(100) NOT NULL,
+    "descricao" TEXT,
+    "nivel" INTEGER NOT NULL DEFAULT 1,
+    "empresa_id" UUID NOT NULL,
+    "user_create_id" UUID,
+    "criado_em" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "user_update_id" UUID,
+    "atualizado_em" TIMESTAMP(3) NOT NULL,
 
-npx prisma migrate diff \
-  --from-url "postgresql://postgres.myyysbvhhicrdrmqmgqp:TjxEcRyrxpGmBSNL@aws-1-us-east-2.pooler.supabase.com:5432/postgres" \
-  --to-schema-datamodel prisma/schema.prisma \
-  --script 
-
-  mkdir prisma/migrations/20260101_add_cargo_name
-
-  npx prisma migrate resolve --applied 20260101_add_cargo_name
-
-   npx prisma generate
-
-   ____ refazer caso nao seja certo
+    CONSTRAINT "cargos_empresa_pkey" PRIMARY KEY ("id")
+);
 
 -- CreateIndex
 CREATE INDEX "cargos_empresa_empresa_id_idx" ON "cargos_empresa"("empresa_id");
@@ -38,16 +41,3 @@ ALTER TABLE "cargos_empresa" ADD CONSTRAINT "cargos_empresa_user_create_id_fkey"
 
 -- AddForeignKey
 ALTER TABLE "cargos_empresa" ADD CONSTRAINT "cargos_empresa_user_update_id_fkey" FOREIGN KEY ("user_update_id") REFERENCES "usuarios"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
-apliquei isso
-
--- AlterTable
-ALTER TABLE "usuarios" DROP COLUMN "cargo_profissional",
-ADD COLUMN     "cargo_profissional_id" UUID;
-
--- AddForeignKey
-ALTER TABLE "usuarios" ADD CONSTRAINT "usuarios_cargo_profissional_id_fkey" FOREIGN KEY ("cargo_profissional_id") REFERENCES "cargos_empresa"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
-
-
-rodar seed no nestjs -> npx prisma db seed

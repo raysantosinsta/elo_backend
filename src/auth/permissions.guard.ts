@@ -26,13 +26,10 @@ export class PermissionsGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    // 1. Descobrir quais permissões a Rota exige
-    const requiredPermissions = this.reflector.getAllAndOverride<AppPermission[]>(
-      PERMISSIONS_KEY,
-      [context.getHandler(), context.getClass()],
-    );
+    const requiredPermissions = this.reflector.getAllAndOverride<
+      AppPermission[]
+    >(PERMISSIONS_KEY, [context.getHandler(), context.getClass()]);
 
-    // Se a rota não exige @RequirePermissions, qualquer um autenticado passa
     if (!requiredPermissions || requiredPermissions.length === 0) {
       return true;
     }
@@ -44,26 +41,31 @@ export class PermissionsGuard implements CanActivate {
       throw new UnauthorizedException('Usuário não autenticado.');
     }
 
-    // 2. Buscar dados do usuário
+    // 🔥 Buscar usuário com o relacionamento professionalRole
     const user = await this.prisma.user.findUnique({
       where: { id: userJwt.id },
-      select: { role: true, professionalRole: true },
+      select: {
+        role: true,
+        professionalRole: {
+          select: { name: true },
+        },
+      },
     });
 
     if (!user) throw new UnauthorizedException('Usuário não encontrado.');
 
-    // 3. Superusuários ignoram as travas administrativas
     if (user.role === UserRole.MASTER || user.role === UserRole.ADMIN) {
       return true;
     }
 
-    // 4. Mapear permissões administrativas do usuário
+    // 🔥 Pegar o nome do cargo profissional do relacionamento
+    const professionalRoleName = user.professionalRole?.name || null;
+
     const userPermissions = this.mapRoleAndProfessionalRoleToPermissions(
       user.role,
-      user.professionalRole,
+      professionalRoleName,
     );
 
-    // 5. Validar acesso
     const hasPermission = requiredPermissions.every((permission) =>
       userPermissions.includes(permission),
     );
@@ -78,10 +80,6 @@ export class PermissionsGuard implements CanActivate {
     return true;
   }
 
-  /**
-   * Mapeia apenas as permissões de GESTÃO (Sturcture).
-   * As permissões operacionais não entram aqui pois são livres.
-   */
   private mapRoleAndProfessionalRoleToPermissions(
     role: UserRole,
     professionalRole?: string | null,
@@ -89,22 +87,23 @@ export class PermissionsGuard implements CanActivate {
     const permissions: AppPermission[] = [];
     const profRole = professionalRole?.trim().toLowerCase() || '';
 
-    // Cargos de gestão que permitem configurar o fluxo (mesmo sendo EMPLOYER)
     const managementProfRoles = [
       'gerente',
       'gerente de produção',
       'gestao de producao',
-      'diretor'
+      'diretor',
     ];
 
     const isManagerByTitle = managementProfRoles.includes(profRole);
 
-    // Se for ADMIN ou um EMPLOYER gestor, ganha acesso às ferramentas de estrutura
-    if (role === UserRole.ADMIN || (role === UserRole.EMPLOYER && isManagerByTitle)) {
+    if (
+      role === UserRole.ADMIN ||
+      (role === UserRole.EMPLOYER && isManagerByTitle)
+    ) {
       permissions.push(
         AppPermission.MANAGE_FLOW,
         AppPermission.MANAGE_STAGE,
-        AppPermission.MANAGE_KANBAN_COLUMNS
+        AppPermission.MANAGE_KANBAN_COLUMNS,
       );
     }
 

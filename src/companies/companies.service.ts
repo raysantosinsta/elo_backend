@@ -436,61 +436,57 @@ export class CompaniesService {
    * 🔥 MÉTODO DE VALIDAÇÃO CORRIGIDO - USANDO CLS
    */
   private async validateCompanyAccess(companyId: string): Promise<void> {
-    // 🔥 Pega os dados do CLS (configurados pelo TenantInterceptor)
-    const userRole = this.cls.get<string>('userRole') as UserRole;
-    const userTenantId = this.cls.get<string>('tenantId');
-    const isMaster = this.cls.get<boolean>('isMaster');
-    const userId = this.cls.get<string>('userId');
+  const userRole = this.cls.get<string>('userRole') as UserRole;
+  const userTenantId = this.cls.get<string>('tenantId');
+  const isMaster = this.cls.get<boolean>('isMaster');
+  const userId = this.cls.get<string>('userId');
 
-    // Log para debug
-    console.log('🔍 [validateCompanyAccess]', {
-      companyId,
-      userRole,
-      userTenantId,
-      isMaster,
-      userId,
-    });
+  console.log('🔍 [validateCompanyAccess]', {
+    companyId,
+    userRole,
+    userTenantId,
+    isMaster,
+    userId,
+  });
 
-    // MASTER pode acessar qualquer empresa
-    if (userRole === UserRole.MASTER || isMaster) {
-      console.log('✅ MASTER - acesso permitido');
-      return;
-    }
-
-    // ADMIN só pode acessar sua própria empresa
-    if (userRole === UserRole.ADMIN) {
-      if (userTenantId !== companyId) {
-        console.log('❌ ADMIN - empresa diferente', {
-          userTenantId,
-          requestedCompanyId: companyId,
-        });
-        throw new ForbiddenException(
-          'Você não tem permissão para acessar os dados desta empresa',
-        );
-      }
-      console.log('✅ ADMIN - acesso permitido (própria empresa)');
-      return;
-    }
-
-    // 🔥 EMPLOYER: Permite apenas leitura da própria empresa
-    if (userRole === UserRole.EMPLOYER) {
-      if (userTenantId !== companyId) {
-        console.log('❌ EMPLOYER - empresa diferente', {
-          userTenantId,
-          requestedCompanyId: companyId,
-        });
-        throw new ForbiddenException(
-          'Você não tem permissão para acessar os dados desta empresa',
-        );
-      }
-      // Outros roles não têm acesso
-      console.log('❌ Role não autorizado:', userRole);
-      // 🔥 IMPORTANTE: RETORNAR AQUI, NÃO JOGAR ERRO!
-      return;
-    }
-
-    // Outros roles não têm acesso
-    console.log('❌ Role não autorizado:', userRole);
-    throw new ForbiddenException('Acesso negado');
+  // MASTER pode acessar qualquer empresa
+  if (userRole === UserRole.MASTER || isMaster) {
+    console.log('✅ MASTER - acesso permitido');
+    return;
   }
+
+  // ADMIN só pode acessar sua própria empresa
+  if (userRole === UserRole.ADMIN) {
+    if (userTenantId !== companyId) {
+      console.log('❌ ADMIN - empresa diferente', {
+        userTenantId,
+        requestedCompanyId: companyId,
+      });
+      throw new ForbiddenException(
+        'Você não tem permissão para acessar os dados desta empresa',
+      );
+    }
+    console.log('✅ ADMIN - acesso permitido (própria empresa)');
+    return;
+  }
+
+  // 🔥 CORREÇÃO: EMPLOYER pode acessar sua própria empresa
+  if (userRole === UserRole.EMPLOYER) {
+    if (userTenantId !== companyId) {
+      console.log('❌ EMPLOYER - empresa diferente', {
+        userTenantId,
+        requestedCompanyId: companyId,
+      });
+      throw new ForbiddenException(
+        'Você não tem permissão para acessar os dados desta empresa',
+      );
+    }
+    console.log('✅ EMPLOYER - acesso permitido (própria empresa)');
+    return;
+  }
+
+  // Outros roles não têm acesso
+  console.log('❌ Role não autorizado:', userRole);
+  throw new ForbiddenException('Acesso negado');
+}
 }

@@ -106,7 +106,7 @@ model Company {
   cep           String  @map("cep") @db.VarChar(9)
   ramoAtividade String? @map("ramo_atividade") @db.VarChar(100)
 
-   notificationDays Int @default(7) @map("dias_antecedencia_notificacao")
+  notificationDays Int @default(7) @map("dias_antecedencia_notificacao")
 
   // Controle de Criação/Atualização
   userCreate   User?    @relation("CompanyCreatedBy", fields: [userCreateId], references: [id])
@@ -140,10 +140,11 @@ model Company {
   flowTemplates FlowTemplate[] @relation("CompanyFlowTemplates")
   suppliers     Supplier[]
   budgetGroups  BudgetGroup[]
-  routeStops RouteStop[]
+  routeStops    RouteStop[]
 
-  auditLogs  AuditLog[]
-  itemStages FlowItemStage[] // ou flowItemStages, mas não ambos
+  auditLogs    AuditLog[]
+  itemStages   FlowItemStage[] // ou flowItemStages, mas não ambos
+  companyRoles CompanyRole[]
 
   @@index([cnpj])
   @@index([status])
@@ -155,6 +156,7 @@ model User {
   id     String       @id @default(uuid()) @map("id") @db.Uuid
   status SimpleStatus @default(ACTIVE) @map("status")
   role   UserRole     @map("perfil")
+  
 
   name     String  @map("nome") @db.VarChar(150)
   email    String  @unique @map("email") @db.VarChar(255)
@@ -162,7 +164,11 @@ model User {
   contact  String  @map("contato") @db.VarChar(20)
   password String  @map("senha") @db.VarChar(255)
 
-  professionalRole String? @map("cargo_profissional") @db.VarChar(100)
+  professionalRoleId String?      @map("cargo_profissional_id") @db.Uuid
+  professionalRole   CompanyRole? @relation("UserProfessionalRole", fields: [professionalRoleId], references: [id])
+
+   // 🔥 NOVO CAMPO: Armazenar o nome do cargo profissional
+  professionalRoleName String? @map("cargo_profissional_nome") @db.VarChar(100)
 
   resetTokens PasswordResetToken[]
 
@@ -232,7 +238,13 @@ model User {
   flowAudios FlowAudio[]
   flowVideos FlowVideo[]
 
-  auditLogs AuditLog[]
+  auditLogs           AuditLog[]
+  createdCompanyRoles CompanyRole[] @relation("CompanyRoleCreatedBy")
+  updatedCompanyRoles CompanyRole[] @relation("CompanyRoleUpdatedBy")
+
+  // 🔥 APENAS ESTA DECLARAÇÃO (mantenha esta e remova a outra no final)
+  companyRoleId String?      @map("cargo_empresa_id") @db.Uuid
+  companyRole   CompanyRole? @relation("UserCompanyRole", fields: [companyRoleId], references: [id])
 
   @@index([companyId])
   @@index([email])
@@ -240,6 +252,39 @@ model User {
   @@index([status])
   @@index([createdAt])
   @@map("usuarios")
+}
+
+model CompanyRole {
+  id          String       @id @default(uuid()) @map("id") @db.Uuid
+  status      SimpleStatus @default(ACTIVE) @map("status")
+  name        String       @map("nome") @db.VarChar(100)
+  description String?      @map("descricao") @db.Text
+  level       Int          @default(1) @map("nivel") // Para ordenação/hierarquia
+
+  // Relacionamento com Empresa (MULTI-TENANT)
+  companyId String  @map("empresa_id") @db.Uuid
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  // Controle de Criação/Atualização
+  userCreateId String?  @map("user_create_id") @db.Uuid
+  userCreate   User?    @relation("CompanyRoleCreatedBy", fields: [userCreateId], references: [id])
+  createdAt    DateTime @default(now()) @map("criado_em")
+
+  userUpdateId String?  @map("user_update_id") @db.Uuid
+  userUpdate   User?    @relation("CompanyRoleUpdatedBy", fields: [userUpdateId], references: [id])
+  updatedAt    DateTime @updatedAt @map("atualizado_em")
+
+  // 🔥 RELACIONAMENTO 1: Usuários que têm este cargo como "professionalRole"
+  professionalRoleUsers User[] @relation("UserProfessionalRole")
+
+  // 🔥 RELACIONAMENTO 2: Usuários que têm este cargo como "companyRole"
+  companyRoleUsers User[] @relation("UserCompanyRole")
+
+  @@unique([companyId, name])
+  @@index([companyId])
+  @@index([status])
+  @@index([level])
+  @@map("cargos_empresa")
 }
 
 model PasswordResetToken {
@@ -454,12 +499,12 @@ model Route {
   title       String      @map("titulo") @db.VarChar(200)
   description String?     @map("descricao") @db.Text
   routeDate   DateTime?   @map("data_rota")
-  orderBy String? @default("DISTANCE") @map("tipo_ordenacao")
+  orderBy     String?     @default("DISTANCE") @map("tipo_ordenacao")
 
-   // NOVOS CAMPOS
-  totalDistanceMeters Float?   @map("distancia_total_metros")
-  totalDurationSeconds Int?    @map("duracao_total_segundos")
-  optimizedAt         DateTime? @map("otimizado_em")
+  // NOVOS CAMPOS
+  totalDistanceMeters  Float?    @map("distancia_total_metros")
+  totalDurationSeconds Int?      @map("duracao_total_segundos")
+  optimizedAt          DateTime? @map("otimizado_em")
 
   // NOVO RELACIONAMENTO
   stops RouteStop[]
@@ -492,39 +537,39 @@ model Route {
 
 // NOVO MODEL
 model RouteStop {
-  id        String   @id @default(uuid()) @map("id") @db.Uuid
-  
+  id String @id @default(uuid()) @map("id") @db.Uuid
+
   // Dados da parada
-  name        String? @map("nome") @db.VarChar(200)
-  address     String  @map("endereco") @db.VarChar(300)
-  complement  String? @map("complemento") @db.VarChar(100)
+  name         String? @map("nome") @db.VarChar(200)
+  address      String  @map("endereco") @db.VarChar(300)
+  complement   String? @map("complemento") @db.VarChar(100)
   neighborhood String? @map("bairro") @db.VarChar(100)
-  city        String  @map("cidade") @db.VarChar(100)
-  state       String  @map("estado") @db.VarChar(2)
-  zipCode     String  @map("cep") @db.VarChar(9)
-  
+  city         String  @map("cidade") @db.VarChar(100)
+  state        String  @map("estado") @db.VarChar(2)
+  zipCode      String  @map("cep") @db.VarChar(9)
+
   // Coordenadas
   latitude  Float @map("latitude")
   longitude Float @map("longitude")
-  
+
   // Ordem na rota
-  order     Int   @default(0) @map("ordem")
-  
+  order Int @default(0) @map("ordem")
+
   // Metadados
-  notes     String? @map("observacoes") @db.Text
+  notes     String?   @map("observacoes") @db.Text
   visitedAt DateTime? @map("visitado_em")
-  visited   Boolean  @default(false) @map("visitado")
-  
+  visited   Boolean   @default(false) @map("visitado")
+
   // Relacionamentos
-  routeId   String @map("rota_id") @db.Uuid
-  route     Route  @relation(fields: [routeId], references: [id], onDelete: Cascade)
-  
+  routeId String @map("rota_id") @db.Uuid
+  route   Route  @relation(fields: [routeId], references: [id], onDelete: Cascade)
+
   companyId String  @map("empresa_id") @db.Uuid
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  
+
   createdAt DateTime @default(now()) @map("criado_em")
   updatedAt DateTime @updatedAt @map("atualizado_em")
-  
+
   @@index([routeId])
   @@index([order])
   @@index([companyId])
