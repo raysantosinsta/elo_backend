@@ -401,7 +401,7 @@ export class TasksService {
     }
 
     if (dto.status) {
-        console.log('📝 Atualizando status para:', dto.status);
+      console.log('📝 Atualizando status para:', dto.status);
 
       data.status = dto.status;
       if (dto.status === TaskStatus.COMPLETED) {
@@ -630,7 +630,8 @@ export class TasksService {
       hasLocation,
       dateType,
       isOverdue,
-    } = params; // <--- isOverdue AQUI
+      excludeCompleted = false,
+    } = params;
     const skip = (page - 1) * limit;
 
     // 1. MAPEAMENTO DE DATA
@@ -655,7 +656,10 @@ export class TasksService {
     const where: Prisma.TaskWhereInput = {
       companyId: tenantId,
       ...(columnId && { columnId }),
-      // --- CORREÇÃO AQUI: BUSCA POR NOME DA PESSOA ---
+      ...(excludeCompleted && {
+        status: { not: TaskStatus.COMPLETED },
+      }), // Filtro para excluir tarefas concluídas
+      // --- BUSCA POR NOME DA PESSOA ---
       ...(search && {
         OR: [
           { title: { contains: search, mode: 'insensitive' } },

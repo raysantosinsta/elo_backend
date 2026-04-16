@@ -535,167 +535,202 @@ export class RouteService {
     };
   }
 
- /**
- * CRIA uma nova rota sem criar tarefas
- * Apenas salva os pontos e otimiza a ordem (se solicitado)
- * A localização do motorista será definida no momento da execução da rota
- */
-async createRoute(dto: CreateRouteDto, companyId: string, userId: string) {
-  this.logger.log(`🚀 [createRoute] Criando rota: ${dto.title}`);
-  this.logger.log(`📦 Quantidade de paradas: ${dto.stops.length}`);
-  this.logger.log(`🎯 Tipo de ordenação: ${dto.orderBy || 'DISTANCE'}`);
+  /**
+   * CRIA uma nova rota sem criar tarefas
+   * Vincula tarefas existentes com base no título das paradas
+   */
+  async createRoute(dto: CreateRouteDto, companyId: string, userId: string) {
+    this.logger.log('='.repeat(80));
+    this.logger.log(`🚀 [createRoute] INICIANDO CRIAÇÃO DE ROTA`);
+    this.logger.log(`📝 Título: ${dto.title}`);
+    this.logger.log(`📦 Quantidade de paradas: ${dto.stops.length}`);
+    this.logger.log(`🎯 Tipo de ordenação: ${dto.orderBy || 'DISTANCE'}`);
 
-  let optimizedStops = [...dto.stops];
-  let stats: {
-    totalDurationSeconds: number;
-    totalDistanceMeters: number;
-  };
+    let optimizedStops = [...dto.stops];
+    let totalDistanceMeters = 0;
+    let totalDurationSeconds = 0;
 
-  // Se for ordenação por DISTÂNCIA, otimiza usando a primeira parada como referência
-  // A otimização REAL será feita no frontend com a localização atual do motorista
-  if (dto.orderBy === RouteOrderType.DISTANCE && dto.stops.length > 0) {
-    // Usa a primeira parada como ponto de partida para otimização inicial
-    // Isso é apenas para calcular estatísticas aproximadas
-    const startPos = {
-      lat: dto.stops[0].latitude,
-      lng: dto.stops[0].longitude,
-    };
+    // Calcular estatísticas para todas as paradas
+    if (dto.stops.length > 0) {
+      if (dto.stops.length === 1) {
+        this.logger.log(`📋 Rota com 1 parada - distância será 0`);
+        totalDistanceMeters = 0;
+        totalDurationSeconds = 0;
+        optimizedStops = dto.stops;
+      } else {
+        const startPos = {
+          lat: dto.stops[0].latitude,
+          lng: dto.stops[0].longitude,
+        };
+
+        if (dto.orderBy === RouteOrderType.DISTANCE) {
+          this.logger.log(
+            `🎯 Otimizando rota por DISTÂNCIA com ${dto.stops.length} paradas`,
+          );
+          optimizedStops = this.optimizeStopsByDistance(startPos, dto.stops);
+        } else {
+          this.logger.log(
+            `📋 Mantendo ordem original (${dto.stops.length} parada(s))`,
+          );
+          optimizedStops = dto.stops;
+        }
+
+        const stats = this.calculateRouteStatsFromStops(
+          startPos,
+          optimizedStops,
+        );
+        totalDistanceMeters = stats.totalDistanceMeters;
+        totalDurationSeconds = stats.totalDurationSeconds;
+      }
+
+      this.logger.log(`📊 Estatísticas calculadas:`);
+      this.logger.log(
+        `   Distância: ${totalDistanceMeters} metros (${(totalDistanceMeters / 1000).toFixed(2)} km)`,
+      );
+      this.logger.log(
+        `   Duração: ${totalDurationSeconds} segundos (${this.formatDuration(totalDurationSeconds)})`,
+      );
+    }
+
+    // 🔥 BUSCAR TAREFAS EXISTENTES PELOS TÍTULOS DAS PARADAS
+    const stopTitles = dto.stops
+      .map((stop) => stop.name)
+      .filter(
+        (name): name is string =>
+          name !== null && name !== undefined && name !== '',
+      );
 
     this.logger.log(
-      `🎯 Otimizando rota por DISTÂNCIA usando primeira parada como referência`,
-    );
-    this.logger.log(
-      `   ⚠️ A otimização REAL será feita na execução da rota com a localização do motorista`,
+      `🔍 Buscando tasks existentes com títulos: ${stopTitles.join(', ')}`,
     );
 
-    optimizedStops = this.optimizeStopsByDistance(startPos, dto.stops);
+    let existingTasks: any[] = [];
+    if (stopTitles.length > 0) {
+      existingTasks = await this.prisma.task.findMany({
+        where: {
+          companyId: companyId,
+          title: { in: stopTitles },
+        },
+      });
+    }
 
-    // Calcula estatísticas com base na ordem otimizada
-    stats = await this.calculateRouteStatsFromStops(startPos, optimizedStops);
-  }
-  // Se for ordenação por PRIORIDADE, mantém a ordem original
-  else if (dto.orderBy === RouteOrderType.PRIORITY && dto.stops.length > 0) {
-    this.logger.log(`🎯 Mantendo ordem original por PRIORIDADE`);
+    this.logger.log(`📊 Tasks encontradas: ${existingTasks.length}`);
+    existingTasks.forEach((task) => {
+      this.logger.log(
+        `   - ${task.title} (ID: ${task.id}, status: ${task.status})`,
+      );
+    });
 
-    // Calcula estatísticas usando a primeira parada como referência
-    const startPos = {
-      lat: dto.stops[0].latitude,
-      lng: dto.stops[0].longitude,
-    };
-    stats = await this.calculateRouteStatsFromStops(startPos, dto.stops);
-  }
-  // Caso padrão (sem paradas ou ordem não especificada)
-  else {
-    this.logger.log(`📋 Nenhuma otimização aplicada`);
-    stats = {
-      totalDistanceMeters: 0,
-      totalDurationSeconds: 0,
-    };
-  }
+    // 🔥 CRIAR UM MAPA PARA RÁPIDA CONSULTA DE TASK POR TÍTULO
+    const taskByTitle = new Map();
+    existingTasks.forEach((task) => {
+      taskByTitle.set(task.title, task);
+    });
 
-  // 🔥 BUSCAR TASKS EXISTENTES PELOS TÍTULOS DAS PARADAS
-  // 🔥 CORREÇÃO: Filtrar valores undefined
-  const stopTitles = dto.stops
-    .map(stop => stop.name)
-    .filter((name): name is string => name !== null && name !== undefined && name !== '');
-  
-  this.logger.log(`🔍 Buscando tasks existentes com títulos: ${stopTitles.join(', ')}`);
-  
-  let existingTasks: any[] = [];
-  if (stopTitles.length > 0) {
-    existingTasks = await this.prisma.task.findMany({
-      where: {
+    // 🔥 CRIAR A ROTA NO BANCO DE DADOS COM taskId NAS PARADAS
+    const route = await this.prisma.route.create({
+      data: {
+        title: dto.title,
+        description: dto.description || '',
+        routeDate: dto.routeDate ? new Date(dto.routeDate) : null,
+        status: RouteStatus.SCHEDULED,
+        totalDistanceMeters: totalDistanceMeters,
+        totalDurationSeconds: totalDurationSeconds,
+        optimizedAt: new Date(),
         companyId: companyId,
-        title: { in: stopTitles },
+        userCreateId: userId,
+        userAssignedId: dto.userAssignedId || null,
+        orderBy: dto.orderBy || 'DISTANCE',
+        stops: {
+          create: optimizedStops.map((stop, index) => {
+            const existingTask = taskByTitle.get(stop.name);
+            return {
+              name: stop.name,
+              address: stop.address,
+              complement: stop.complement || '',
+              neighborhood: stop.neighborhood || '',
+              city: stop.city,
+              state: stop.state,
+              zipCode: stop.zipCode || '',
+              latitude: stop.latitude,
+              longitude: stop.longitude,
+              order: index + 1,
+              notes: stop.notes || '',
+              companyId: companyId,
+              taskId: existingTask?.id || null,
+            };
+          }),
+        },
+      },
+      include: {
+        stops: {
+          orderBy: { order: 'asc' },
+        },
       },
     });
-  }
-  
-  this.logger.log(`📊 Tasks encontradas: ${existingTasks.length}`);
-  existingTasks.forEach(task => {
-    this.logger.log(`   - ${task.title} (ID: ${task.id}, status: ${task.status})`);
-  });
 
-  // Cria a rota no banco de dados
-  const route = await this.prisma.route.create({
-    data: {
-      title: dto.title,
-      description: dto.description,
-      routeDate: dto.routeDate ? new Date(dto.routeDate) : null,
-      status: RouteStatus.SCHEDULED,
-      totalDistanceMeters: stats.totalDistanceMeters,
-      totalDurationSeconds: stats.totalDurationSeconds,
-      optimizedAt: new Date(),
-      companyId: companyId,
-      userCreateId: userId,
-      userAssignedId: dto.userAssignedId || null,
-      orderBy: dto.orderBy || 'DISTANCE',
-      stops: {
-        create: optimizedStops.map((stop, index) => ({
-          name: stop.name,
-          address: stop.address,
-          complement: stop.complement || '',
-          neighborhood: stop.neighborhood || '',
-          city: stop.city,
-          state: stop.state,
-          zipCode: stop.zipCode,
-          latitude: stop.latitude,
-          longitude: stop.longitude,
-          order: index + 1,
-          notes: stop.notes || '',
-          companyId: companyId,
-        })),
-      },
-    },
-    include: {
-      stops: {
-        orderBy: { order: 'asc' },
-      },
-    },
-  });
+    this.logger.log(`✅ [createRoute] Rota criada com ID: ${route.id}`);
+    this.logger.log(
+      `   Distância total salva: ${route.totalDistanceMeters} metros`,
+    );
+    this.logger.log(
+      `   Duração total salva: ${route.totalDurationSeconds} segundos`,
+    );
 
-  this.logger.log(`✅ [createRoute] Rota criada com ID: ${route.id}`);
+    // 🔥 VINCULAR AS TAREFAS EXISTENTES À ROTA
+    if (existingTasks.length > 0) {
+      this.logger.log(
+        `🔄 Vinculando ${existingTasks.length} tasks à rota ${route.id}`,
+      );
 
-  // 🔥 VINCULAR TASKS EXISTENTES À ROTA
-  if (existingTasks.length > 0) {
-    this.logger.log(`🔄 Vinculando ${existingTasks.length} tasks à rota ${route.id}`);
-    
-    for (const task of existingTasks) {
-      await this.prisma.task.update({
-        where: { id: task.id },
-        data: { routeId: route.id },
-      });
-      this.logger.log(`   ✅ Task "${task.title}" (${task.id}) vinculada à rota`);
+      for (const task of existingTasks) {
+        await this.prisma.task.update({
+          where: { id: task.id },
+          data: { routeId: route.id },
+        });
+        this.logger.log(
+          `   ✅ Task "${task.title}" (${task.id}) vinculada à rota`,
+        );
+      }
+    } else {
+      this.logger.log(`⚠️ Nenhuma task encontrada para vincular à rota`);
     }
-  } else {
-    this.logger.log(`⚠️ Nenhuma task encontrada para vincular à rota`);
+
+    // Buscar a rota completa com usuário atribuído
+    const completeRoute = await this.prisma.route.findUnique({
+      where: { id: route.id },
+      include: {
+        stops: { orderBy: { order: 'asc' } },
+        userAssigned: { select: { id: true, name: true, contact: true } },
+      },
+    });
+
+    const formattedDistance =
+      totalDistanceMeters > 0
+        ? `${(totalDistanceMeters / 1000).toFixed(1)} km`
+        : dto.stops.length === 1
+          ? '0 km'
+          : 'Distância não calculada';
+
+    const formattedDuration =
+      totalDurationSeconds > 0
+        ? this.formatDuration(totalDurationSeconds)
+        : dto.stops.length === 1
+          ? '0 min'
+          : 'Duração não calculada';
+
+    this.logger.log(`📤 Retorno formatado:`);
+    this.logger.log(`   formattedDistance: ${formattedDistance}`);
+    this.logger.log(`   formattedDuration: ${formattedDuration}`);
+
+    return {
+      ...completeRoute,
+      formattedDistance,
+      formattedDuration,
+      totalDistanceMeters,
+      totalDurationSeconds,
+    };
   }
-
-  this.logger.log(`   Distância total: ${(stats.totalDistanceMeters / 1000).toFixed(1)} km`);
-  this.logger.log(`   Duração estimada: ${this.formatDuration(stats.totalDurationSeconds)}`);
-  this.logger.log(`   Ordem das paradas: ${optimizedStops.map((_, i) => i + 1).join(' → ')}`);
-  this.logger.log(`   Tipo de ordenação salvo: ${route.orderBy}`);
-
-  // Buscar a rota completa com as tasks vinculadas
-  const completeRoute = await this.prisma.route.findUnique({
-    where: { id: route.id },
-    include: {
-      stops: { orderBy: { order: 'asc' } },
-      tasks: true,
-      userAssigned: { select: { id: true, name: true } },
-    },
-  });
-
-  return {
-    ...completeRoute,
-    stats: {
-      totalDistanceMeters: stats.totalDistanceMeters,
-      totalDurationSeconds: stats.totalDurationSeconds,
-      formattedDistance: `${(stats.totalDistanceMeters / 1000).toFixed(1)} km`,
-      formattedDuration: this.formatDuration(stats.totalDurationSeconds),
-    },
-  };
-}
 
   /**
    * Otimiza a ordem das paradas pelo algoritmo do vizinho mais próximo
@@ -740,299 +775,343 @@ async createRoute(dto: CreateRouteDto, companyId: string, userId: string) {
 
   /**
    * Calcula estatísticas da rota a partir das paradas (sem tarefas)
+   * Suporta rotas com 1 ou mais paradas
    */
-  private async calculateRouteStatsFromStops(
+  private calculateRouteStatsFromStops(
     startPos: { lat: number; lng: number },
     stops: RouteStopDto[],
-  ) {
-    try {
-      // Monta string de coordenadas para OSRM
-      const coordinates = [
-        `${startPos.lng},${startPos.lat}`,
-        ...stops.map((stop) => `${stop.longitude},${stop.latitude}`),
-      ].join(';');
+  ): {
+    totalDurationSeconds: number;
+    totalDistanceMeters: number;
+  } {
+    this.logger.log(
+      `[calculateRouteStatsFromStops] Iniciando cálculo para ${stops.length} parada(s)`,
+    );
 
-      const url = `https://router.project-osrm.org/route/v1/driving/${coordinates}?overview=false`;
-
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-      const response = await fetch(url, { signal: controller.signal });
-      clearTimeout(timeoutId);
-
-      if (response.ok) {
-        const data = await response.json();
-        if (data.code === 'Ok' && data.routes?.[0]) {
-          return {
-            totalDurationSeconds: data.routes[0].duration,
-            totalDistanceMeters: data.routes[0].distance,
-          };
-        }
-      }
-    } catch (error) {
-      this.logger.warn('Erro ao consultar OSRM, usando fallback');
+    // Se não há paradas, retorna zero
+    if (stops.length === 0) {
+      this.logger.log(
+        `[calculateRouteStatsFromStops] Nenhuma parada - retornando zero`,
+      );
+      return {
+        totalDurationSeconds: 0,
+        totalDistanceMeters: 0,
+      };
     }
 
-    // Fallback: cálculo linear
-    let totalDistKm = 0;
-    let current = startPos;
+    this.logger.log(
+      `[calculateRouteStatsFromStops] Usando Haversine para ${stops.length} parada(s)`,
+    );
 
-    for (const stop of stops) {
+    let totalDistKm = 0;
+    let current = { ...startPos };
+
+    for (let i = 0; i < stops.length; i++) {
+      const stop = stops[i];
       const dist = this.calculateDistance(
         current.lat,
         current.lng,
         stop.latitude,
         stop.longitude,
       );
+
+      this.logger.log(
+        `[calculateRouteStatsFromStops] Trecho ${i + 1}: ${dist.toFixed(2)}km`,
+      );
+
       totalDistKm += dist;
       current = { lat: stop.latitude, lng: stop.longitude };
     }
 
-    const avgSpeed = 30; // km/h
-    const estimatedSeconds = (totalDistKm / avgSpeed) * 3600;
+    // Velocidade média estimada: 30 km/h (para cálculo aproximado)
+    const averageSpeedKmH = 30;
+    const estimatedSeconds = (totalDistKm / averageSpeedKmH) * 3600;
 
-    return {
-      totalDurationSeconds: estimatedSeconds,
-      totalDistanceMeters: totalDistKm * 1000,
+    const result = {
+      totalDurationSeconds: Math.round(estimatedSeconds),
+      totalDistanceMeters: Math.round(totalDistKm * 1000),
     };
+
+    this.logger.log(
+      `[calculateRouteStatsFromStops] 📊 Resultado: ${totalDistKm.toFixed(2)}km, ${Math.round(estimatedSeconds / 60)}min`,
+    );
+    this.logger.log(`   Distance meters: ${result.totalDistanceMeters}`);
+    this.logger.log(`   Duration seconds: ${result.totalDurationSeconds}`);
+
+    return result;
   }
 
-/**
- * Busca todas as rotas salvas da empresa com suporte a múltiplos filtros
- */
-async findAllRoutes(
-  companyId: string,
-  filters?: {
-    // Filtros de Data
-    startDate?: string;           // Data da rota inicial
-    endDate?: string;             // Data da rota final
-    createdStartDate?: string;    // Data de criação inicial
-    createdEndDate?: string;      // Data de criação final
-    
-    // Filtros de Status e Ordenação
-    status?: RouteStatus;         // Status da rota
-    orderBy?: string;             // DISTANCE | PRIORITY
-    userAssignedId?: string;      // ID do motorista ou 'none'
-    search?: string;              // Busca por título
-    
-    // Filtros de Métricas
-    minStops?: number;            // Mínimo de paradas
-    maxStops?: number;            // Máximo de paradas
-    minDistance?: number;         // Distância mínima (km)
-    maxDistance?: number;         // Distância máxima (km)
-    minDuration?: number;         // Duração mínima (minutos)
-    maxDuration?: number;         // Duração máxima (minutos)
-    
-    // Filtros Especiais
-    isOverdue?: boolean;          // Rotas atrasadas
-    isUpcoming?: boolean;         // Rotas próximas (próximos 7 dias)
-  },
-): Promise<any[]> {
-  this.logger.log(`📊 [findAllRoutes] Buscando rotas para empresa ${companyId}`);
-  this.logger.log(`📊 Filtros aplicados:`, filters);
+  /**
+   * Busca todas as rotas salvas da empresa com suporte a múltiplos filtros
+   */
+  async findAllRoutes(
+    companyId: string,
+    filters?: {
+      // Filtros de Data
+      startDate?: string; // Data da rota inicial
+      endDate?: string; // Data da rota final
+      createdStartDate?: string; // Data de criação inicial
+      createdEndDate?: string; // Data de criação final
 
-  const where: Prisma.RouteWhereInput = { companyId };
+      // Filtros de Status e Ordenação
+      status?: RouteStatus; // Status da rota
+      orderBy?: string; // DISTANCE | PRIORITY
+      userAssignedId?: string; // ID do motorista ou 'none'
+      search?: string; // Busca por título
 
-  // ============================================
-  // 1. Filtro por Status
-  // ============================================
-  if (filters?.status) {
-    where.status = filters.status;
-    this.logger.log(`   - Status: ${filters.status}`);
-  }
+      // Filtros de Métricas
+      minStops?: number; // Mínimo de paradas
+      maxStops?: number; // Máximo de paradas
+      minDistance?: number; // Distância mínima (km)
+      maxDistance?: number; // Distância máxima (km)
+      minDuration?: number; // Duração mínima (minutos)
+      maxDuration?: number; // Duração máxima (minutos)
 
-  // ============================================
-  // 2. Filtros por Data da Rota (routeDate)
-  // ============================================
-  if (filters?.startDate || filters?.endDate) {
-    where.routeDate = {};
-    if (filters.startDate) {
-      const start = new Date(filters.startDate);
-      start.setHours(0, 0, 0, 0);
-      where.routeDate.gte = start;
-      this.logger.log(`   - Data inicial da rota: ${filters.startDate}`);
-    }
-    if (filters.endDate) {
-      const end = new Date(filters.endDate);
-      end.setHours(23, 59, 59, 999);
-      where.routeDate.lte = end;
-      this.logger.log(`   - Data final da rota: ${filters.endDate}`);
-    }
-  }
-
-  // ============================================
-  // 3. Filtro por Data de Criação (createdAt)
-  // ============================================
-  if (filters?.createdStartDate || filters?.createdEndDate) {
-    where.createdAt = {};
-    if (filters.createdStartDate) {
-      const createdStart = new Date(filters.createdStartDate);
-      createdStart.setHours(0, 0, 0, 0);
-      where.createdAt.gte = createdStart;
-      this.logger.log(`   - Criado a partir de: ${filters.createdStartDate}`);
-    }
-    if (filters.createdEndDate) {
-      const createdEnd = new Date(filters.createdEndDate);
-      createdEnd.setHours(23, 59, 59, 999);
-      where.createdAt.lte = createdEnd;
-      this.logger.log(`   - Criado até: ${filters.createdEndDate}`);
-    }
-  }
-
-  // ============================================
-  // 4. Filtro por Motorista Responsável
-  // ============================================
-  if (filters?.userAssignedId) {
-    if (filters.userAssignedId === 'none') {
-      where.userAssignedId = null;
-      this.logger.log(`   - Motorista: Não atribuído`);
-    } else {
-      where.userAssignedId = filters.userAssignedId;
-      this.logger.log(`   - Motorista ID: ${filters.userAssignedId}`);
-    }
-  }
-
-  // ============================================
-  // 5. Filtro por Tipo de Ordenação
-  // ============================================
-  if (filters?.orderBy && filters.orderBy !== 'all') {
-    where.orderBy = filters.orderBy;
-    this.logger.log(`   - Tipo ordenação: ${filters.orderBy}`);
-  }
-
-  // ============================================
-  // 6. Filtro por Busca textual (título)
-  // ============================================
-  if (filters?.search && filters.search.trim() !== '') {
-    where.title = {
-      contains: filters.search.trim(),
-      mode: 'insensitive',
-    };
-    this.logger.log(`   - Busca: ${filters.search}`);
-  }
-
-  // ============================================
-  // 7. Filtro por Distância Total (km)
-  // ============================================
-  if (filters?.minDistance !== undefined || filters?.maxDistance !== undefined) {
-    where.totalDistanceMeters = {};
-    if (filters.minDistance !== undefined) {
-      where.totalDistanceMeters.gte = filters.minDistance * 1000;
-      this.logger.log(`   - Distância mínima: ${filters.minDistance} km`);
-    }
-    if (filters.maxDistance !== undefined) {
-      where.totalDistanceMeters.lte = filters.maxDistance * 1000;
-      this.logger.log(`   - Distância máxima: ${filters.maxDistance} km`);
-    }
-  }
-
-  // ============================================
-  // 8. Filtro por Duração Estimada (minutos)
-  // ============================================
-  if (filters?.minDuration !== undefined || filters?.maxDuration !== undefined) {
-    where.totalDurationSeconds = {};
-    if (filters.minDuration !== undefined) {
-      where.totalDurationSeconds.gte = filters.minDuration * 60;
-      this.logger.log(`   - Duração mínima: ${filters.minDuration} min`);
-    }
-    if (filters.maxDuration !== undefined) {
-      where.totalDurationSeconds.lte = filters.maxDuration * 60;
-      this.logger.log(`   - Duração máxima: ${filters.maxDuration} min`);
-    }
-  }
-
-  // ============================================
-  // 9. Filtro por Rotas Atrasadas
-  // ============================================
-  if (filters?.isOverdue === true) {
-    where.routeDate = {
-      lt: new Date(),
-    };
-    where.status = {
-      not: RouteStatus.FINISHED,
-    };
-    this.logger.log(`   - Apenas rotas atrasadas`);
-  }
-
-  // ============================================
-  // 10. Filtro por Rotas Próximas (próximos 7 dias)
-  // ============================================
-  if (filters?.isUpcoming === true) {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const nextWeek = new Date();
-    nextWeek.setDate(nextWeek.getDate() + 7);
-    nextWeek.setHours(23, 59, 59, 999);
-    
-    where.routeDate = {
-      gte: today,
-      lte: nextWeek,
-    };
-    where.status = {
-      not: RouteStatus.FINISHED,
-    };
-    this.logger.log(`   - Apenas rotas próximas (próximos 7 dias)`);
-  }
-
-  // Executa a busca no banco
-  const routes = await this.prisma.route.findMany({
-    where,
-    include: {
-      stops: {
-        orderBy: { order: 'asc' },
-      },
-      userAssigned: {
-        select: { id: true, name: true, contact: true },
-      },
-      _count: {
-        select: { stops: true },
-      },
+      // Filtros Especiais
+      isOverdue?: boolean; // Rotas atrasadas
+      isUpcoming?: boolean; // Rotas próximas (próximos 7 dias)
     },
-    orderBy: {
-      createdAt: 'desc',
-    },
-  });
+  ): Promise<any[]> {
+    this.logger.log(
+      `📊 [findAllRoutes] Buscando rotas para empresa ${companyId}`,
+    );
+    this.logger.log(`📊 Filtros aplicados:`, filters);
 
-  this.logger.log(`✅ [findAllRoutes] ${routes.length} rotas encontradas (pré-filtro)`);
+    const where: Prisma.RouteWhereInput = { companyId };
 
-  // ============================================
-  // 11. Filtro por Quantidade de Paradas (pós-processamento)
-  // ============================================
-  let filteredRoutes = routes;
-  
-  if (filters?.minStops !== undefined || filters?.maxStops !== undefined) {
-    filteredRoutes = routes.filter((route) => {
-      const stopsCount = route._count?.stops || 0;
-      let matches = true;
-      if (filters.minStops !== undefined && stopsCount < filters.minStops) {
-        matches = false;
+    // ============================================
+    // 1. Filtro por Status
+    // ============================================
+    if (filters?.status) {
+      where.status = filters.status;
+      this.logger.log(`   - Status: ${filters.status}`);
+    }
+
+    // ============================================
+    // 2. Filtros por Data da Rota (routeDate)
+    // ============================================
+    if (filters?.startDate || filters?.endDate) {
+      where.routeDate = {};
+      if (filters.startDate) {
+        const start = new Date(filters.startDate);
+        start.setHours(0, 0, 0, 0);
+        where.routeDate.gte = start;
+        this.logger.log(`   - Data inicial da rota: ${filters.startDate}`);
       }
-      if (filters.maxStops !== undefined && stopsCount > filters.maxStops) {
-        matches = false;
+      if (filters.endDate) {
+        const end = new Date(filters.endDate);
+        end.setHours(23, 59, 59, 999);
+        where.routeDate.lte = end;
+        this.logger.log(`   - Data final da rota: ${filters.endDate}`);
       }
-      return matches;
+    }
+
+    // ============================================
+    // 3. Filtro por Data de Criação (createdAt)
+    // ============================================
+    if (filters?.createdStartDate || filters?.createdEndDate) {
+      where.createdAt = {};
+      if (filters.createdStartDate) {
+        const createdStart = new Date(filters.createdStartDate);
+        createdStart.setHours(0, 0, 0, 0);
+        where.createdAt.gte = createdStart;
+        this.logger.log(`   - Criado a partir de: ${filters.createdStartDate}`);
+      }
+      if (filters.createdEndDate) {
+        const createdEnd = new Date(filters.createdEndDate);
+        createdEnd.setHours(23, 59, 59, 999);
+        where.createdAt.lte = createdEnd;
+        this.logger.log(`   - Criado até: ${filters.createdEndDate}`);
+      }
+    }
+
+    // ============================================
+    // 4. Filtro por Motorista Responsável
+    // ============================================
+    if (filters?.userAssignedId) {
+      if (filters.userAssignedId === 'none') {
+        where.userAssignedId = null;
+        this.logger.log(`   - Motorista: Não atribuído`);
+      } else {
+        where.userAssignedId = filters.userAssignedId;
+        this.logger.log(`   - Motorista ID: ${filters.userAssignedId}`);
+      }
+    }
+
+    // ============================================
+    // 5. Filtro por Tipo de Ordenação
+    // ============================================
+    if (filters?.orderBy && filters.orderBy !== 'all') {
+      where.orderBy = filters.orderBy;
+      this.logger.log(`   - Tipo ordenação: ${filters.orderBy}`);
+    }
+
+    // ============================================
+    // 6. Filtro por Busca textual (título)
+    // ============================================
+    if (filters?.search && filters.search.trim() !== '') {
+      where.title = {
+        contains: filters.search.trim(),
+        mode: 'insensitive',
+      };
+      this.logger.log(`   - Busca: ${filters.search}`);
+    }
+
+    // ============================================
+    // 7. Filtro por Distância Total (km)
+    // ============================================
+    if (
+      filters?.minDistance !== undefined ||
+      filters?.maxDistance !== undefined
+    ) {
+      where.totalDistanceMeters = {};
+      if (filters.minDistance !== undefined) {
+        where.totalDistanceMeters.gte = filters.minDistance * 1000;
+        this.logger.log(`   - Distância mínima: ${filters.minDistance} km`);
+      }
+      if (filters.maxDistance !== undefined) {
+        where.totalDistanceMeters.lte = filters.maxDistance * 1000;
+        this.logger.log(`   - Distância máxima: ${filters.maxDistance} km`);
+      }
+    }
+
+    // ============================================
+    // 8. Filtro por Duração Estimada (minutos)
+    // ============================================
+    if (
+      filters?.minDuration !== undefined ||
+      filters?.maxDuration !== undefined
+    ) {
+      where.totalDurationSeconds = {};
+      if (filters.minDuration !== undefined) {
+        where.totalDurationSeconds.gte = filters.minDuration * 60;
+        this.logger.log(`   - Duração mínima: ${filters.minDuration} min`);
+      }
+      if (filters.maxDuration !== undefined) {
+        where.totalDurationSeconds.lte = filters.maxDuration * 60;
+        this.logger.log(`   - Duração máxima: ${filters.maxDuration} min`);
+      }
+    }
+
+    // ============================================
+    // 9. Filtro por Rotas Atrasadas
+    // ============================================
+    if (filters?.isOverdue === true) {
+      where.routeDate = {
+        lt: new Date(),
+      };
+      where.status = {
+        not: RouteStatus.FINISHED,
+      };
+      this.logger.log(`   - Apenas rotas atrasadas`);
+    }
+
+    // ============================================
+    // 10. Filtro por Rotas Próximas (próximos 7 dias)
+    // ============================================
+    if (filters?.isUpcoming === true) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const nextWeek = new Date();
+      nextWeek.setDate(nextWeek.getDate() + 7);
+      nextWeek.setHours(23, 59, 59, 999);
+
+      where.routeDate = {
+        gte: today,
+        lte: nextWeek,
+      };
+      where.status = {
+        not: RouteStatus.FINISHED,
+      };
+      this.logger.log(`   - Apenas rotas próximas (próximos 7 dias)`);
+    }
+
+    // Executa a busca no banco
+    const routes = await this.prisma.route.findMany({
+      where,
+      include: {
+        stops: {
+          orderBy: { order: 'asc' },
+        },
+        userAssigned: {
+          select: { id: true, name: true, contact: true },
+        },
+        _count: {
+          select: { stops: true },
+        },
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
     });
-    this.logger.log(`   - Após filtro de paradas: ${filteredRoutes.length} rotas (min=${filters.minStops}, max=${filters.maxStops})`);
-  }
 
-  // Formata o retorno
-  return filteredRoutes.map((route) => ({
-    ...route,
-    formattedDistance: route.totalDistanceMeters
-      ? `${(route.totalDistanceMeters / 1000).toFixed(1)} km`
-      : 'Não calculado',
-    formattedDuration: route.totalDurationSeconds
-      ? this.formatDuration(route.totalDurationSeconds)
-      : 'Não calculado',
-    orderBy: route.orderBy || 'DISTANCE',
-    stopsCount: route._count?.stops || 0,
-  }));
-}
+    this.logger.log(
+      `✅ [findAllRoutes] ${routes.length} rotas encontradas (pré-filtro)`,
+    );
+
+    // ============================================
+    // 11. Filtro por Quantidade de Paradas (pós-processamento)
+    // ============================================
+    let filteredRoutes = routes;
+
+    if (filters?.minStops !== undefined || filters?.maxStops !== undefined) {
+      filteredRoutes = routes.filter((route) => {
+        const stopsCount = route._count?.stops || 0;
+        let matches = true;
+        if (filters.minStops !== undefined && stopsCount < filters.minStops) {
+          matches = false;
+        }
+        if (filters.maxStops !== undefined && stopsCount > filters.maxStops) {
+          matches = false;
+        }
+        return matches;
+      });
+      this.logger.log(
+        `   - Após filtro de paradas: ${filteredRoutes.length} rotas (min=${filters.minStops}, max=${filters.maxStops})`,
+      );
+    }
+
+    // No método findAllRoutes, na formatação do retorno
+    return filteredRoutes.map((route) => {
+      const stopsCount = route._count?.stops || route.stops?.length || 0;
+      const totalDistanceMeters = route.totalDistanceMeters || 0;
+      const totalDurationSeconds = route.totalDurationSeconds || 0;
+
+      let formattedDistance: string;
+      let formattedDuration: string;
+
+      // Para rotas com apenas 1 parada
+      if (stopsCount === 1) {
+        formattedDistance = 'Distância variável';
+        formattedDuration = 'Calcular na execução';
+      }
+      // Para rotas com mais de 1 parada
+      else if (totalDistanceMeters > 0) {
+        formattedDistance = `${(totalDistanceMeters / 1000).toFixed(1)} km`;
+        formattedDuration = this.formatDuration(totalDurationSeconds);
+      } else {
+        formattedDistance = 'Distância não calculada';
+        formattedDuration = 'Duração não calculada';
+      }
+
+      return {
+        ...route,
+        formattedDistance,
+        formattedDuration,
+        orderBy: route.orderBy || 'DISTANCE',
+        stopsCount,
+      };
+    });
+  }
 
   /**
    * Busca uma rota específica com todos os detalhes
    */
   async findRouteById(routeId: string, companyId: string): Promise<any> {
+    this.logger.log(
+      `🔍 [findRouteById] Buscando rota ${routeId} para empresa ${companyId}`,
+    );
+
     const route = await this.prisma.route.findFirst({
       where: {
         id: routeId,
@@ -1051,17 +1130,38 @@ async findAllRoutes(
       throw new NotFoundException('Rota não encontrada');
     }
 
-    // O campo 'notes' já está incluído automaticamente no include de stops
-    // Não precisa de select adicional
+    const stopsCount = route.stops?.length || 0;
+    const totalDistanceMeters = route.totalDistanceMeters || 0;
+    const totalDurationSeconds = route.totalDurationSeconds || 0;
+
+    let formattedDistance: string;
+    let formattedDuration: string;
+
+    // Para rotas com apenas 1 parada
+    if (stopsCount === 1) {
+      formattedDistance = 'Distância variável';
+      formattedDuration = 'Calcular na execução';
+    }
+    // Para rotas com mais de 1 parada
+    else if (totalDistanceMeters > 0) {
+      formattedDistance = `${(totalDistanceMeters / 1000).toFixed(1)} km`;
+      formattedDuration = this.formatDuration(totalDurationSeconds);
+    } else {
+      formattedDistance = 'Distância não calculada';
+      formattedDuration = 'Duração não calculada';
+    }
+
+    this.logger.log(`📤 [findRouteById] Retornando rota com:`);
+    this.logger.log(`   stopsCount: ${stopsCount}`);
+    this.logger.log(`   formattedDistance: ${formattedDistance}`);
+    this.logger.log(`   formattedDuration: ${formattedDuration}`);
 
     return {
       ...route,
-      formattedDistance: route.totalDistanceMeters
-        ? `${(route.totalDistanceMeters / 1000).toFixed(1)} km`
-        : 'Não calculado',
-      formattedDuration: route.totalDurationSeconds
-        ? this.formatDuration(route.totalDurationSeconds)
-        : 'Não calculado',
+      formattedDistance,
+      formattedDuration,
+      totalDistanceMeters,
+      totalDurationSeconds,
     };
   }
 
@@ -1109,7 +1209,7 @@ async findAllRoutes(
         lat: stopsToSave[0].latitude,
         lng: stopsToSave[0].longitude,
       };
-      stats = await this.calculateRouteStatsFromStops(statsRefPos, stopsToSave);
+      stats = this.calculateRouteStatsFromStops(statsRefPos, stopsToSave);
     }
 
     // 3. Persistência no Prisma
@@ -1194,7 +1294,7 @@ async findAllRoutes(
   }
 
   /**
-   * Marca uma parada como visitada
+   * Marca uma parada como visitada e atualiza a tarefa associada
    */
   async markStopAsVisited(
     routeId: string,
@@ -1202,6 +1302,11 @@ async findAllRoutes(
     companyId: string,
     notes?: string,
   ): Promise<any> {
+    this.logger.log(
+      `[markStopAsVisited] Marcando parada ${stopId} como visitada`,
+    );
+    this.logger.log(`   Observações: ${notes || 'N/A'}`);
+
     const stop = await this.prisma.routeStop.findFirst({
       where: {
         id: stopId,
@@ -1214,6 +1319,142 @@ async findAllRoutes(
       throw new NotFoundException('Parada não encontrada');
     }
 
+    // 🔥 DETERMINAR O STATUS DA TAREFA BASEADO NAS OBSERVAÇÕES
+    let taskStatus: TaskStatus = TaskStatus.COMPLETED;
+
+    if (notes && notes.includes('❌ ERRO NA VISITA')) {
+      taskStatus = TaskStatus.FAILED;
+      this.logger.log(
+        `   ⚠️ Visita com erro detectada - status da tarefa: FAILED`,
+      );
+    } else {
+      this.logger.log(
+        `   ✅ Visita concluída com sucesso - status da tarefa: COMPLETED`,
+      );
+    }
+
+    // 🔥 BUSCAR A TAREFA ASSOCIADA - PRIORIDADE: taskId salvo na parada
+    let task: any = null;
+
+    // 1. Tenta buscar pelo taskId salvo na parada (mais preciso)
+    if (stop.taskId) {
+      task = await this.prisma.task.findFirst({
+        where: {
+          id: stop.taskId,
+          companyId,
+        },
+      });
+
+      if (task) {
+        this.logger.log(
+          `   📋 Tarefa encontrada pelo taskId: ${task.id} - ${task.title}`,
+        );
+      }
+    }
+
+    // 2. Se não encontrou, tenta pela rota e título
+    if (!task && stop.name) {
+      task = await this.prisma.task.findFirst({
+        where: {
+          companyId,
+          routeId: routeId,
+          title: stop.name,
+        },
+      });
+
+      if (task) {
+        this.logger.log(
+          `   📋 Tarefa encontrada pela rota e título: ${task.id} - ${task.title}`,
+        );
+      }
+    }
+
+    // 3. Se ainda não encontrou, tenta apenas pelo título
+    if (!task && stop.name) {
+      task = await this.prisma.task.findFirst({
+        where: {
+          companyId,
+          title: stop.name,
+        },
+      });
+
+      if (task) {
+        this.logger.log(
+          `   📋 Tarefa encontrada apenas pelo título: ${task.id} - ${task.title}`,
+        );
+        this.logger.warn(`   ⚠️ Tarefa não está vinculada à rota ${routeId}`);
+      }
+    }
+
+    // 🔥 Se encontrou a tarefa, atualiza o status
+    if (task) {
+      const updatedTask = await this.prisma.task.update({
+        where: { id: task.id },
+        data: {
+          status: taskStatus,
+          completionDate:
+            taskStatus === TaskStatus.COMPLETED ? new Date() : null,
+          finalComment: notes
+            ? task.finalComment
+              ? `${task.finalComment}\n\n${notes}`
+              : notes
+            : task.finalComment,
+          routeId: task.routeId || routeId,
+        },
+      });
+
+      this.logger.log(
+        `   ✅ Tarefa ${task.id} atualizada para status: ${taskStatus}`,
+      );
+      task = updatedTask;
+    } else {
+      this.logger.warn(
+        `   ⚠️ Nenhuma tarefa encontrada para a parada: "${stop.name}" (ID: ${stopId})`,
+      );
+
+      // 🔥 LOG PARA DEBUG - Listar todas as tarefas da empresa com título similar
+      const similarTasks = await this.prisma.task.findMany({
+        where: {
+          companyId,
+          title: {
+            contains: stop.name || '',
+            mode: 'insensitive',
+          },
+        },
+        select: { id: true, title: true, status: true, routeId: true },
+      });
+
+      if (similarTasks.length > 0) {
+        this.logger.log(`   📋 Tarefas com títulos similares encontradas:`);
+        similarTasks.forEach((t) => {
+          this.logger.log(
+            `      - "${t.title}" (ID: ${t.id}, status: ${t.status}, routeId: ${t.routeId || 'nenhuma'})`,
+          );
+        });
+      }
+
+      // Listar todas as tarefas vinculadas à rota
+      const tasksInRoute = await this.prisma.task.findMany({
+        where: {
+          companyId,
+          routeId: routeId,
+        },
+        select: { id: true, title: true, status: true },
+      });
+
+      if (tasksInRoute.length > 0) {
+        this.logger.log(`   📋 Tarefas vinculadas à rota ${routeId}:`);
+        tasksInRoute.forEach((t) => {
+          this.logger.log(
+            `      - ${t.title} (ID: ${t.id}, status: ${t.status})`,
+          );
+        });
+      } else {
+        this.logger.log(`   📋 Nenhuma tarefa vinculada à rota ${routeId}`);
+      }
+    }
+
+    // 🔥 ATUALIZAR A PARADA COMO VISITADA
     const updatedStop = await this.prisma.routeStop.update({
       where: { id: stopId },
       data: {
@@ -1223,6 +1464,7 @@ async findAllRoutes(
       },
     });
 
+    // Verificar se todas as paradas foram visitadas
     const allStops = await this.prisma.routeStop.findMany({
       where: { routeId },
     });
@@ -1234,9 +1476,15 @@ async findAllRoutes(
         where: { id: routeId },
         data: { status: RouteStatus.FINISHED },
       });
+      this.logger.log(`   🎉 Rota ${routeId} finalizada!`);
     }
 
-    return updatedStop;
+    return {
+      ...updatedStop,
+      taskUpdated: !!task,
+      taskStatus: task ? taskStatus : null,
+      taskId: task?.id || null,
+    };
   }
 
   /**

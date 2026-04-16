@@ -6,9 +6,9 @@ npx prisma migrate diff \
   --to-schema-datamodel prisma/schema.prisma \
   --script 
 
-  mkdir prisma/migrations/20260101_add_cargo_name
+  mkdir prisma/migrations/20260101_rota_task_relacao
 
-  npx prisma migrate resolve --applied 20260101_add_cargo_name
+  npx prisma migrate resolve --applied 20260101_rota_task_relacao
 
    npx prisma generate
 

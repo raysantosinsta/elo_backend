@@ -358,6 +358,9 @@ model Task {
   routeId String? @map("rota_id") @db.Uuid
   route   Route?  @relation(fields: [routeId], references: [id])
 
+   // 🔥 NOVO RELACIONAMENTO COM ROUTESTOP
+  routeStops RouteStop[]  // <--- ADICIONE ESTA LINHA
+
   // Empresa
   companyId String  @map("empresa_id") @db.Uuid
   company   Company @relation("CompanyTasks", fields: [companyId], references: [id], onDelete: Cascade)
@@ -538,6 +541,10 @@ model Route {
 // NOVO MODEL
 model RouteStop {
   id String @id @default(uuid()) @map("id") @db.Uuid
+
+   // 🔥 NOVO CAMPO: Referência à tarefa
+  taskId String? @map("task_id") @db.Uuid
+  task   Task?   @relation(fields: [taskId], references: [id], onDelete: SetNull)
 
   // Dados da parada
   name         String? @map("nome") @db.VarChar(200)
