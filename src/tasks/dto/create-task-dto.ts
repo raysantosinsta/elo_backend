@@ -95,61 +95,142 @@ export class CreateTaskDto {
   @IsOptional() createdById?: string;
 }
 
-export class UpdateTaskDto {
-  @IsOptional() @IsString() title?: string;
-  @IsOptional() @IsString() description?: string;
-  @IsOptional() @IsUUID() columnId?: string;
-  @IsOptional() @IsDateString() dueDate?: string | Date;
-  @IsOptional() @IsDateString() scheduledAt?: string | Date;
-  @IsOptional() @IsInt() @Type(() => Number) priority?: number;
-  @IsOptional() @IsInt() @Type(() => Number) columnOrder?: number;
-  @IsOptional() @IsUUID() assignedToId?: string | null;
-  @IsOptional() @IsUUID() routeId?: string;
-  @IsOptional() @IsEnum(TaskStatus) status?: TaskStatus;
-  @IsOptional() @IsString() finalComment?: string;
-  @IsOptional() @IsUUID() completedById?: string;
 
-  // 🔥 CORREÇÃO: Address com transform e validação
+export class UpdateTaskDto {
+  @IsOptional()
+  @IsString()
+  title?: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsOptional()
+  @IsUUID()
+  columnId?: string;
+
+  @IsOptional()
+  @IsDateString()
+  dueDate?: string | Date;
+
+  @IsOptional()
+  @IsDateString()
+  scheduledAt?: string | Date;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  priority?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  columnOrder?: number;
+
+  @IsOptional()
+  @IsUUID()
+  assignedToId?: string | null;
+
+  @IsOptional()
+  @IsUUID()
+  routeId?: string;
+
+  @IsOptional()
+  @IsEnum(TaskStatus)
+  status?: TaskStatus;
+
+  @IsOptional()
+  @IsString()
+  finalComment?: string;
+
+  @IsOptional()
+  @IsUUID()
+  completedById?: string;
+
+  // 🔥 CORREÇÃO: Aceitar tanto string quanto objeto
   @IsOptional()
   @Transform(({ value }) => {
-    if (!value) return undefined;
+    console.log('🔍 Transformando address - valor original:', value);
+    console.log('🔍 Tipo do valor:', typeof value);
+    
+    if (!value) {
+      console.log('❌ Address é null ou undefined');
+      return undefined;
+    }
+    
+    // Se for string, tenta fazer parse
+    if (typeof value === 'string') {
+      try {
+        const parsed = JSON.parse(value);
+        console.log('✅ Address parseado com sucesso de string:', parsed);
+        return parsed;
+      } catch (e) {
+        console.error('❌ Erro ao parsear address:', e.message);
+        return undefined;
+      }
+    }
+    
+    // Se já for objeto, retorna diretamente
+    if (typeof value === 'object') {
+      console.log('✅ Address já é objeto, retornando diretamente:', value);
+      return value;
+    }
+    
+    console.log('❌ Address não é string nem objeto, retornando undefined');
+    return undefined;
+  })
+  address?: any; // 🔥 Mudar para any temporariamente para debug
+
+  @IsOptional()
+  @IsArray()
+  @Transform(({ value }) => {
     if (typeof value === 'string') {
       try {
         return JSON.parse(value);
-      } catch (e) {
-        return undefined;
+      } catch {
+        return [];
       }
     }
     return value;
   })
-  @ValidateNested()
-  @Type(() => CreateTaskAddressDto)
-  address?: CreateTaskAddressDto;
-
-  @IsOptional()
-  @IsArray()
-  @Transform(({ value }) =>
-    typeof value === 'string' ? JSON.parse(value) : value,
-  )
   removeImageIds?: string[];
 
   @IsOptional()
   @IsArray()
-  @Transform(({ value }) =>
-    typeof value === 'string' ? JSON.parse(value) : value,
-  )
+  @Transform(({ value }) => {
+    if (typeof value === 'string') {
+      try {
+        return JSON.parse(value);
+      } catch {
+        return [];
+      }
+    }
+    return value;
+  })
   removeAudioIds?: string[];
 
   @IsOptional()
   @IsArray()
-  @Transform(({ value }) =>
-    typeof value === 'string' ? JSON.parse(value) : value,
-  )
+  @Transform(({ value }) => {
+    if (typeof value === 'string') {
+      try {
+        return JSON.parse(value);
+      } catch {
+        return [];
+      }
+    }
+    return value;
+  })
   removeVideoIds?: string[];
 
-  @IsOptional() images?: any;
-  @IsOptional() audios?: any;
-  @IsOptional() videos?: any;
+  @IsOptional()
+  images?: any;
+
+  @IsOptional()
+  audios?: any;
+
+  @IsOptional()
+  videos?: any;
 }
 
 export class FinalizeTaskDto {
