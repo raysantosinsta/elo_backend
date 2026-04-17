@@ -487,6 +487,8 @@ export class RouteService {
    * Se vier uma nova data (scheduledAt), muda status para PENDING (reagendado).
    * Se não, finaliza como COMPLETED ou FAILED.
    */
+  // No tasks.service.ts - Modificar a função concludeVisit
+
   async concludeVisit(
     taskId: string,
     userId: string,
@@ -498,12 +500,29 @@ export class RouteService {
 
     if (!task) throw new NotFoundException('Tarefa não encontrada');
 
-    // Determina o novo status baseado na lógica de negócio
-    const statusFinal = dto.scheduledAt
-      ? TaskStatus.PENDING
-      : dto.status === 'COMPLETED'
-        ? TaskStatus.COMPLETED
-        : TaskStatus.FAILED;
+    // 🔥 CORREÇÃO: Determinar o status baseado no DTO e observações
+    let statusFinal: TaskStatus;
+
+    if (dto.status === 'FAILED') {
+      // Se veio explicitamente FAILED
+      statusFinal = TaskStatus.FAILED;
+    } else if (dto.status === 'COMPLETED') {
+      statusFinal = TaskStatus.COMPLETED;
+    } else {
+      // Fallback: verificar nas observações
+      const notes = dto.finalComment || '';
+      if (
+        notes.includes('FALHA') ||
+        notes.includes('FAILED') ||
+        notes.includes('❌')
+      ) {
+        statusFinal = TaskStatus.FAILED;
+      } else {
+        statusFinal = TaskStatus.COMPLETED;
+      }
+    }
+
+    this.logger.log(`[concludeVisit] Task ${taskId} -> status: ${statusFinal}`);
 
     const updatedTask = await this.prisma.task.update({
       where: { id: taskId },
@@ -512,16 +531,18 @@ export class RouteService {
         finalComment: dto.finalComment,
         scheduledDate: dto.scheduledAt ? new Date(dto.scheduledAt) : undefined,
         dueDate: dto.scheduledAt ? new Date(dto.scheduledAt) : undefined,
-        completionDate: dto.scheduledAt ? null : new Date(),
-        userCompletedId: userId,
+        completionDate:
+          statusFinal === TaskStatus.COMPLETED ? new Date() : null,
+        userCompletedId: statusFinal === TaskStatus.COMPLETED ? userId : null,
       },
       include: this.getTaskIncludeDetails(),
     });
 
     return {
-      message: dto.scheduledAt
-        ? 'Tarefa reagendada com sucesso'
-        : 'Tarefa finalizada com sucesso',
+      message:
+        statusFinal === TaskStatus.FAILED
+          ? 'Tarefa marcada como falha'
+          : 'Tarefa finalizada com sucesso',
       task: updatedTask,
     };
   }
@@ -543,9 +564,55 @@ export class RouteService {
     this.logger.log('='.repeat(80));
     this.logger.log(`🚀 [createRoute] INICIANDO CRIAÇÃO DE ROTA`);
     this.logger.log(`📝 Título: ${dto.title}`);
+    this.logger.log(`📅 Data recebida (raw): ${dto.routeDate}`);
     this.logger.log(`📦 Quantidade de paradas: ${dto.stops.length}`);
     this.logger.log(`🎯 Tipo de ordenação: ${dto.orderBy || 'DISTANCE'}`);
 
+    // 🔥 CORREÇÃO DE TIMEZONE: Processar a data corretamente
+    let routeDate: Date | null = null;
+
+    if (dto.routeDate) {
+      // Se veio como string no formato YYYY-MM-DD (do input date)
+      if (
+        typeof dto.routeDate === 'string' &&
+        dto.routeDate.match(/^\d{4}-\d{2}-\d{2}$/)
+      ) {
+        const [year, month, day] = dto.routeDate.split('-');
+        // Criar data no UTC com horário 12:00 (meio-dia) para evitar deslocamento de dia
+        // Isso garante que a data salva seja exatamente o dia que o usuário selecionou
+        routeDate = new Date(
+          Date.UTC(
+            parseInt(year),
+            parseInt(month) - 1,
+            parseInt(day),
+            12,
+            0,
+            0,
+          ),
+        );
+        this.logger.log(
+          `   Data convertida para UTC (meio-dia): ${routeDate.toISOString()}`,
+        );
+        this.logger.log(
+          `   Data original selecionada: ${day}/${month}/${year}`,
+        );
+      }
+      // Se for string ISO completa ou outro formato
+      else if (typeof dto.routeDate === 'string') {
+        routeDate = new Date(dto.routeDate);
+        this.logger.log(`   Data como string ISO: ${routeDate.toISOString()}`);
+      }
+      // Se já for objeto Date
+      else if ((dto.routeDate as any) instanceof Date) {
+        routeDate = dto.routeDate;
+        this.logger.log(`   Data como Date object: ${routeDate}`);
+      }
+    }
+
+    this.logger.log(
+      `📅 Data final para salvar no banco: ${routeDate?.toISOString() || 'null'}`,
+    );
+    const finalRouteDate = routeDate;
     let optimizedStops = [...dto.stops];
     let totalDistanceMeters = 0;
     let totalDurationSeconds = 0;
@@ -632,7 +699,7 @@ export class RouteService {
       data: {
         title: dto.title,
         description: dto.description || '',
-        routeDate: dto.routeDate ? new Date(dto.routeDate) : null,
+        routeDate: finalRouteDate, // 🔥 Usar a data processada
         status: RouteStatus.SCHEDULED,
         totalDistanceMeters: totalDistanceMeters,
         totalDurationSeconds: totalDurationSeconds,
@@ -670,6 +737,9 @@ export class RouteService {
     });
 
     this.logger.log(`✅ [createRoute] Rota criada com ID: ${route.id}`);
+    this.logger.log(
+      `   Data salva no banco: ${route.routeDate?.toISOString() || 'null'}`,
+    );
     this.logger.log(
       `   Distância total salva: ${route.totalDistanceMeters} metros`,
     );
@@ -1184,6 +1254,43 @@ export class RouteService {
       throw new NotFoundException('Rota não encontrada');
     }
 
+    // 🔥 CORREÇÃO DE TIMEZONE: Processar a data corretamente
+    let routeDate: Date | null | undefined = undefined;
+
+    if (dto.routeDate) {
+      // Se veio como string no formato YYYY-MM-DD (do input date)
+      if (
+        typeof dto.routeDate === 'string' &&
+        dto.routeDate.match(/^\d{4}-\d{2}-\d{2}$/)
+      ) {
+        const [year, month, day] = dto.routeDate.split('-');
+        // Criar data no UTC com horário 12:00 (meio-dia) para evitar deslocamento de dia
+        routeDate = new Date(
+          Date.UTC(
+            parseInt(year),
+            parseInt(month) - 1,
+            parseInt(day),
+            12,
+            0,
+            0,
+          ),
+        );
+        this.logger.log(
+          `   Data convertida para UTC (meio-dia): ${routeDate.toISOString()}`,
+        );
+      }
+      // Se for string ISO completa ou outro formato
+      else if (typeof dto.routeDate === 'string') {
+        routeDate = new Date(dto.routeDate);
+        this.logger.log(`   Data como string ISO: ${routeDate.toISOString()}`);
+      }
+      // Se já for objeto Date
+      else if ((dto.routeDate as any) instanceof Date) {
+        routeDate = dto.routeDate;
+        this.logger.log(`   Data como Date object: ${routeDate}`);
+      }
+    }
+
     let stats: {
       totalDurationSeconds: number;
       totalDistanceMeters: number;
@@ -1218,10 +1325,10 @@ export class RouteService {
       data: {
         title: dto.title,
         description: dto.description,
-        routeDate: dto.routeDate ? new Date(dto.routeDate) : undefined,
+        routeDate: routeDate !== undefined ? routeDate : undefined, // 🔥 Usar a data processada
         status: dto.status,
         userAssignedId: dto.userAssignedId,
-        orderBy: dto.orderBy, // ADICIONE ESTA LINHA PARA SALVAR NO BANCO
+        orderBy: dto.orderBy,
         totalDistanceMeters: stats?.totalDistanceMeters,
         totalDurationSeconds: stats?.totalDurationSeconds,
         optimizedAt: stats ? new Date() : undefined,
@@ -1296,6 +1403,8 @@ export class RouteService {
   /**
    * Marca uma parada como visitada e atualiza a tarefa associada
    */
+  // No route.service.ts - SUBSTITUIR a função existente
+
   async markStopAsVisited(
     routeId: string,
     stopId: string,
@@ -1319,24 +1428,30 @@ export class RouteService {
       throw new NotFoundException('Parada não encontrada');
     }
 
-    // 🔥 DETERMINAR O STATUS DA TAREFA BASEADO NAS OBSERVAÇÕES
+    // 🔥 CORREÇÃO: Determinar o status baseado nas observações
     let taskStatus: TaskStatus = TaskStatus.COMPLETED;
 
-    if (notes && notes.includes('❌ ERRO NA VISITA')) {
+    // Verificar se é FALHA (FAILED)
+    if (
+      notes &&
+      (notes.includes('❌ ERRO NA VISITA') ||
+        notes.includes('FALHA') ||
+        notes.includes('FAILED') ||
+        notes.includes('❌ VISITA COM FALHA'))
+    ) {
       taskStatus = TaskStatus.FAILED;
-      this.logger.log(
-        `   ⚠️ Visita com erro detectada - status da tarefa: FAILED`,
-      );
-    } else {
-      this.logger.log(
-        `   ✅ Visita concluída com sucesso - status da tarefa: COMPLETED`,
-      );
+      this.logger.log(`   ⚠️ Falha detectada - status da tarefa: FAILED`);
+    }
+    // Caso contrário, sucesso
+    else {
+      taskStatus = TaskStatus.COMPLETED;
+      this.logger.log(`   ✅ Sucesso - status da tarefa: COMPLETED`);
     }
 
-    // 🔥 BUSCAR A TAREFA ASSOCIADA - PRIORIDADE: taskId salvo na parada
+    // 🔥 BUSCAR A TAREFA ASSOCIADA
     let task: any = null;
 
-    // 1. Tenta buscar pelo taskId salvo na parada (mais preciso)
+    // 1. Tenta buscar pelo taskId salvo na parada
     if (stop.taskId) {
       task = await this.prisma.task.findFirst({
         where: {
@@ -1382,25 +1497,33 @@ export class RouteService {
         this.logger.log(
           `   📋 Tarefa encontrada apenas pelo título: ${task.id} - ${task.title}`,
         );
-        this.logger.warn(`   ⚠️ Tarefa não está vinculada à rota ${routeId}`);
       }
     }
 
-    // 🔥 Se encontrou a tarefa, atualiza o status
+    // 🔥 ATUALIZAR A TAREFA COM O STATUS CORRETO
     if (task) {
+      const updateData: any = {
+        status: taskStatus,
+        finalComment: notes
+          ? task.finalComment
+            ? `${task.finalComment}\n\n${notes}`
+            : notes
+          : task.finalComment,
+        routeId: task.routeId || routeId,
+      };
+
+      // Se for COMPLETED, registrar data de conclusão
+      if (taskStatus === TaskStatus.COMPLETED) {
+        updateData.completionDate = new Date();
+      }
+      // Se for FAILED, NÃO registrar data de conclusão
+      else if (taskStatus === TaskStatus.FAILED) {
+        updateData.completionDate = null;
+      }
+
       const updatedTask = await this.prisma.task.update({
         where: { id: task.id },
-        data: {
-          status: taskStatus,
-          completionDate:
-            taskStatus === TaskStatus.COMPLETED ? new Date() : null,
-          finalComment: notes
-            ? task.finalComment
-              ? `${task.finalComment}\n\n${notes}`
-              : notes
-            : task.finalComment,
-          routeId: task.routeId || routeId,
-        },
+        data: updateData,
       });
 
       this.logger.log(
@@ -1409,49 +1532,8 @@ export class RouteService {
       task = updatedTask;
     } else {
       this.logger.warn(
-        `   ⚠️ Nenhuma tarefa encontrada para a parada: "${stop.name}" (ID: ${stopId})`,
+        `   ⚠️ Nenhuma tarefa encontrada para a parada: "${stop.name}"`,
       );
-
-      // 🔥 LOG PARA DEBUG - Listar todas as tarefas da empresa com título similar
-      const similarTasks = await this.prisma.task.findMany({
-        where: {
-          companyId,
-          title: {
-            contains: stop.name || '',
-            mode: 'insensitive',
-          },
-        },
-        select: { id: true, title: true, status: true, routeId: true },
-      });
-
-      if (similarTasks.length > 0) {
-        this.logger.log(`   📋 Tarefas com títulos similares encontradas:`);
-        similarTasks.forEach((t) => {
-          this.logger.log(
-            `      - "${t.title}" (ID: ${t.id}, status: ${t.status}, routeId: ${t.routeId || 'nenhuma'})`,
-          );
-        });
-      }
-
-      // Listar todas as tarefas vinculadas à rota
-      const tasksInRoute = await this.prisma.task.findMany({
-        where: {
-          companyId,
-          routeId: routeId,
-        },
-        select: { id: true, title: true, status: true },
-      });
-
-      if (tasksInRoute.length > 0) {
-        this.logger.log(`   📋 Tarefas vinculadas à rota ${routeId}:`);
-        tasksInRoute.forEach((t) => {
-          this.logger.log(
-            `      - ${t.title} (ID: ${t.id}, status: ${t.status})`,
-          );
-        });
-      } else {
-        this.logger.log(`   📋 Nenhuma tarefa vinculada à rota ${routeId}`);
-      }
     }
 
     // 🔥 ATUALIZAR A PARADA COMO VISITADA
