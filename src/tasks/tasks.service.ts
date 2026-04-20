@@ -248,6 +248,7 @@ export class TasksService {
           finalComment: dto.finalComment,
           dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
           scheduledDate: dto.scheduledAt ? new Date(dto.scheduledAt) : null,
+          intervalTime: dto.intervalTime ?? null, // 🔥 ADICIONE ESTA LINHA
 
           // 🔥 CRIAÇÃO DO ENDEREÇO - Verifica se parsedAddress existe
           taskAddress:
@@ -484,6 +485,7 @@ export class TasksService {
     if (dto.finalComment !== undefined) data.finalComment = dto.finalComment;
     if (dto.dueDate) data.dueDate = new Date(dto.dueDate);
     if (dto.scheduledAt) data.scheduledDate = new Date(dto.scheduledAt);
+    if (dto.intervalTime !== undefined) data.intervalTime = dto.intervalTime; // 🔥 ADICIONE ESTA LINHA
 
     if (dto.assignedToId !== undefined) {
       data.userAssigned = dto.assignedToId
@@ -805,6 +807,16 @@ export class TasksService {
       this.prisma.task.count({ where }),
     ]);
 
+    // 🔥 LOG PARA VERIFICAR SE O intervalTime ESTÁ VINDO
+    if (tasks.length > 0) {
+      console.log('🔍 Primeira task retornada:', {
+        id: tasks[0].id,
+        title: tasks[0].title,
+        intervalTime: tasks[0].intervalTime,
+        hasIntervalTime: 'intervalTime' in tasks[0],
+      });
+    }
+
     return {
       data: tasks,
       meta: { total, page, limit, lastPage: Math.ceil(total / limit) },
@@ -849,6 +861,9 @@ export class TasksService {
 
   async remove(id: string) {
     const tenantId = this.cls.get<string>('tenantId');
+
+    await this.cacheManager.del(`tasks_list_${tenantId}`);
+
     const t = await this.prisma.task.findUnique({
       where: { id },
       include: { taskImages: true, taskAudios: true, taskVideos: true },

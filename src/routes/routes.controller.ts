@@ -1,4 +1,5 @@
 /* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/require-await */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
@@ -143,82 +144,92 @@ export class RouteController {
     return this.routeService.createRoute(dto, companyId, userId);
   }
 
-/**
- * 5. GET /routes
- * Lista todas as rotas salvas da empresa com suporte a múltiplos filtros
- *
- * @example
- * GET /routes?status=SCHEDULED&startDate=2026-04-01&endDate=2026-04-30
- * GET /routes?userAssignedId=uuid&orderBy=DISTANCE
- * GET /routes?search=entrega&minStops=2&maxStops=5
- * GET /routes?isOverdue=true
- * GET /routes?isUpcoming=true
- * GET /routes?minDistance=10&maxDistance=50
- * GET /routes?minDuration=30&maxDuration=120
- * GET /routes?createdStartDate=2026-04-01&createdEndDate=2026-04-30
- */
-@Get()
-async findAllRoutes(
-  @Req() req: any,
-  // Filtros de Data
-  @Query('startDate') startDate?: string,
-  @Query('endDate') endDate?: string,
-  @Query('createdStartDate') createdStartDate?: string,
-  @Query('createdEndDate') createdEndDate?: string,
-  
-  // Filtros de Status e Ordenação
-  @Query('status') status?: RouteStatus,
-  @Query('orderBy') orderBy?: string,
-  @Query('userAssignedId') userAssignedId?: string,
-  @Query('search') search?: string,
-  
-  // Filtros de Métricas
-  @Query('minStops') minStops?: string,
-  @Query('maxStops') maxStops?: string,
-  @Query('minDistance') minDistance?: string,
-  @Query('maxDistance') maxDistance?: string,
-  @Query('minDuration') minDuration?: string,
-  @Query('maxDuration') maxDuration?: string,
-  
-  // Filtros Especiais
-  @Query('isOverdue') isOverdue?: string,
-  @Query('isUpcoming') isUpcoming?: string,
-) {
-  const companyId = req.user?.companyId;
-
-  this.logger.log(`[GET /routes] Buscando rotas da empresa`);
-  this.logger.log(`   📅 Filtros de data: startDate=${startDate}, endDate=${endDate}, createdStartDate=${createdStartDate}, createdEndDate=${createdEndDate}`);
-  this.logger.log(`   👤 Filtros de usuário: userAssignedId=${userAssignedId}, search=${search}`);
-  this.logger.log(`   🎯 Filtros de rota: status=${status}, orderBy=${orderBy}`);
-  this.logger.log(`   📊 Filtros de métricas: minStops=${minStops}, maxStops=${maxStops}, minDistance=${minDistance}, maxDistance=${maxDistance}, minDuration=${minDuration}, maxDuration=${maxDuration}`);
-  this.logger.log(`   ⚠️ Filtros especiais: isOverdue=${isOverdue}, isUpcoming=${isUpcoming}`);
-
-  return this.routeService.findAllRoutes(companyId, {
+  /**
+   * 5. GET /routes
+   * Lista todas as rotas salvas da empresa com suporte a múltiplos filtros
+   *
+   * @example
+   * GET /routes?status=SCHEDULED&startDate=2026-04-01&endDate=2026-04-30
+   * GET /routes?userAssignedId=uuid&orderBy=DISTANCE
+   * GET /routes?search=entrega&minStops=2&maxStops=5
+   * GET /routes?isOverdue=true
+   * GET /routes?isUpcoming=true
+   * GET /routes?minDistance=10&maxDistance=50
+   * GET /routes?minDuration=30&maxDuration=120
+   * GET /routes?createdStartDate=2026-04-01&createdEndDate=2026-04-30
+   */
+  @Get()
+  async findAllRoutes(
+    @Req() req: any,
     // Filtros de Data
-    startDate,
-    endDate,
-    createdStartDate,
-    createdEndDate,
-    
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Query('createdStartDate') createdStartDate?: string,
+    @Query('createdEndDate') createdEndDate?: string,
+
     // Filtros de Status e Ordenação
-    status,
-    orderBy: orderBy === 'all' ? undefined : orderBy,
-    userAssignedId: userAssignedId === 'none' ? 'none' : userAssignedId,
-    search,
-    
+    @Query('status') status?: RouteStatus,
+    @Query('orderBy') orderBy?: string,
+    @Query('userAssignedId') userAssignedId?: string,
+    @Query('search') search?: string,
+
     // Filtros de Métricas
-    minStops: minStops ? parseInt(minStops) : undefined,
-    maxStops: maxStops ? parseInt(maxStops) : undefined,
-    minDistance: minDistance ? parseFloat(minDistance) : undefined,
-    maxDistance: maxDistance ? parseFloat(maxDistance) : undefined,
-    minDuration: minDuration ? parseInt(minDuration) : undefined,
-    maxDuration: maxDuration ? parseInt(maxDuration) : undefined,
-    
+    @Query('minStops') minStops?: string,
+    @Query('maxStops') maxStops?: string,
+    @Query('minDistance') minDistance?: string,
+    @Query('maxDistance') maxDistance?: string,
+    @Query('minDuration') minDuration?: string,
+    @Query('maxDuration') maxDuration?: string,
+
     // Filtros Especiais
-    isOverdue: isOverdue === 'true',
-    isUpcoming: isUpcoming === 'true',
-  });
-}
+    @Query('isOverdue') isOverdue?: string,
+    @Query('isUpcoming') isUpcoming?: string,
+  ) {
+    const companyId = req.user?.companyId;
+
+    this.logger.log(`[GET /routes] Buscando rotas da empresa`);
+    this.logger.log(
+      `   📅 Filtros de data: startDate=${startDate}, endDate=${endDate}, createdStartDate=${createdStartDate}, createdEndDate=${createdEndDate}`,
+    );
+    this.logger.log(
+      `   👤 Filtros de usuário: userAssignedId=${userAssignedId}, search=${search}`,
+    );
+    this.logger.log(
+      `   🎯 Filtros de rota: status=${status}, orderBy=${orderBy}`,
+    );
+    this.logger.log(
+      `   📊 Filtros de métricas: minStops=${minStops}, maxStops=${maxStops}, minDistance=${minDistance}, maxDistance=${maxDistance}, minDuration=${minDuration}, maxDuration=${maxDuration}`,
+    );
+    this.logger.log(
+      `   ⚠️ Filtros especiais: isOverdue=${isOverdue}, isUpcoming=${isUpcoming}`,
+    );
+
+    return this.routeService.findAllRoutes(companyId, {
+      // Filtros de Data
+      startDate,
+      endDate,
+      createdStartDate,
+      createdEndDate,
+
+      // Filtros de Status e Ordenação
+      status,
+      orderBy: orderBy === 'all' ? undefined : orderBy,
+      userAssignedId: userAssignedId === 'none' ? 'none' : userAssignedId,
+      search,
+
+      // Filtros de Métricas
+      minStops: minStops ? parseInt(minStops) : undefined,
+      maxStops: maxStops ? parseInt(maxStops) : undefined,
+      minDistance: minDistance ? parseFloat(minDistance) : undefined,
+      maxDistance: maxDistance ? parseFloat(maxDistance) : undefined,
+      minDuration: minDuration ? parseInt(minDuration) : undefined,
+      maxDuration: maxDuration ? parseInt(maxDuration) : undefined,
+
+      // Filtros Especiais
+      isOverdue: isOverdue === 'true',
+      isUpcoming: isUpcoming === 'true',
+    });
+  }
 
   /**
    * 6. GET /routes/:id
@@ -394,28 +405,45 @@ async findAllRoutes(
     return summary;
   }
 
- /**
- * 12. POST /routes/:id/duplicate
- * Duplica uma rota existente e cria NOVAS tarefas (tasks) clonadas
- */
-@Post(':id/duplicate')
-async duplicateRoute(
-  @Param('id') routeId: string,
-  @Body() body: { title?: string; routeDate?: string; description?: string },
-  @Req() req: any,
-) {
-  const companyId = req.user?.companyId;
-  const userId = req.user?.id;
+  /**
+   * 12. POST /routes/:id/duplicate
+   * Duplica uma rota existente e cria NOVAS tarefas (tasks) clonadas
+   */
+  @Post(':id/duplicate')
+  async duplicateRoute(
+    @Param('id') routeId: string,
+    @Body() body: { title?: string; routeDate?: string; description?: string },
+    @Req() req: any,
+  ) {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.id;
 
-  this.logger.log(`[POST] Duplicando rota ${routeId} com criação de novas tasks`);
+    this.logger.log(
+      `[POST] Duplicando rota ${routeId} com criação de novas tasks`,
+    );
 
-  const result = await this.routeService.duplicateRouteWithTasks(
-    routeId,
-    companyId,
-    userId,
-    body,
-  );
+    const result = await this.routeService.duplicateRouteWithTasks(
+      routeId,
+      companyId,
+      userId,
+      body,
+    );
 
-  return result;
-}
+    return result;
+  }
+  /**
+   * 13. GET /routes/:id/tasks
+   * Busca todas as tarefas associadas a uma rota
+   *
+   * @example
+   * GET /routes/abc-123-def/tasks
+   */
+  @Get(':id/tasks')
+  async getRouteTasks(@Param('id') id: string, @Req() req: any) {
+    const companyId = req.user?.companyId;
+
+    this.logger.log(`[GET /routes/${id}/tasks] Buscando tasks da rota`);
+
+    return this.routeService.getTasksByRoute(id, companyId);
+  }
 }

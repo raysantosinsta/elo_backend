@@ -343,6 +343,8 @@ model Task {
   priority    Int @default(1) @map("prioridade")
   columnOrder Int @default(0) @map("ordem_coluna") //ordem dentro da coluna
 
+  intervalTime Int? @map("tempo_intervalo") // Tempo gasto na tarefa, em minutos
+
   // Usuários Relacionados
   userAssigned   User?   @relation("TaskAssignedUser", fields: [userAssignedId], references: [id])
   userAssignedId String? @map("user_assigned_id") @db.Uuid

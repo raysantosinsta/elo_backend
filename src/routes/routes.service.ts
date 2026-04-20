@@ -1109,6 +1109,9 @@ export class RouteService {
         _count: {
           select: { stops: true },
         },
+        tasks: {
+          select: { id: true, title: true, status: true, intervalTime: true },
+        },
       },
       orderBy: {
         createdAt: 'desc',
@@ -1963,6 +1966,61 @@ export class RouteService {
       tasksCreated: createdTasks.length,
       tasksCompleted: updatedOriginalTasks.length,
     };
+  }
+
+  // routes.service.ts - Adicione este método após o método deleteRoute
+
+  /**
+   * Busca todas as tarefas associadas a uma rota
+   * @param routeId - ID da rota
+   * @param companyId - ID da empresa (para validação de segurança)
+   * @returns Lista de tarefas com id, title, intervalTime e status
+   */
+  async getTasksByRoute(routeId: string, companyId: string) {
+    this.logger.log(`[getTasksByRoute] Buscando tasks da rota ${routeId}`);
+
+    // Primeiro, verificar se a rota existe e pertence à empresa
+    const route = await this.prisma.route.findFirst({
+      where: {
+        id: routeId,
+        companyId: companyId,
+      },
+    });
+
+    if (!route) {
+      throw new NotFoundException('Rota não encontrada');
+    }
+
+    // Buscar todas as tasks vinculadas a esta rota
+    const tasks = await this.prisma.task.findMany({
+      where: {
+        routeId: routeId,
+        companyId: companyId,
+      },
+      select: {
+        id: true,
+        title: true,
+        intervalTime: true,
+        status: true,
+        scheduledDate: true,
+        createdAt: true,
+        taskAddress: {
+          select: {
+            endereco: true,
+            cidade: true,
+          },
+        },
+      },
+      orderBy: {
+        createdAt: 'asc',
+      },
+    });
+
+    this.logger.log(
+      `[getTasksByRoute] Encontradas ${tasks.length} tasks para a rota ${routeId}`,
+    );
+
+    return tasks;
   }
 
   // Auxiliar para formatar segundos em "2h 30min"

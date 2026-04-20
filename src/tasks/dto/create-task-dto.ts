@@ -19,8 +19,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
-  IsUUID,
-  ValidateNested,
+  IsUUID
 } from 'class-validator';
 
 export function validateFiles(files: {
@@ -75,6 +74,9 @@ export class CreateTaskDto {
   @IsUUID() @IsNotEmpty() columnId: string;
   @IsOptional() @IsDateString() dueDate?: string | Date;
   @IsOptional() @IsUUID() assignedToId?: string;
+  @IsOptional()
+  @IsInt()
+  intervalTime?: number; // Tempo gasto na tarefa em minutos
 
   // 🔥 REMOVER O @Transform E DEIXAR COMO STRING
   @IsOptional()
@@ -146,6 +148,10 @@ export class UpdateTaskDto {
   @IsOptional()
   @IsUUID()
   completedById?: string;
+
+  @IsOptional()
+  @IsInt()
+  intervalTime?: number;
 
   // 🔥 CORREÇÃO: Aceitar tanto string quanto objeto
   @IsOptional()
