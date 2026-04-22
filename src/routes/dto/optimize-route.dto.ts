@@ -46,4 +46,8 @@ export class FinalizeTaskDto {
   @IsOptional()
   @IsDateString()
   scheduledAt?: string; // Usado para reagendamento
+
+  @IsOptional()
+  @IsDateString()
+  dueDate?: string; // Usado para definir nova data de vencimento, se necessário
 }

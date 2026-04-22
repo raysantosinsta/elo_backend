@@ -356,8 +356,6 @@ export class TasksService {
     return task;
   }
 
-  // No tasks.service.ts - método update
-
   async update(
     id: string,
     dto: UpdateTaskDto,
@@ -382,6 +380,24 @@ export class TasksService {
     }
 
     await this.validateTaskRelations(dto);
+
+    // 🔥 FUNÇÃO AUXILIAR PARA PRESERVAR A DATA LOCAL
+    const preserveLocalDate = (dateString: string): Date => {
+      // Se já for uma string no formato YYYY-MM-DD
+      const [year, month, day] = dateString.split('T')[0].split('-');
+      // Criar data no UTC com horário 12:00 (meio-dia)
+      // Isso garante que a data salva seja exatamente o dia selecionado
+      return new Date(
+        Date.UTC(
+          parseInt(year),
+          parseInt(month) - 1,
+          parseInt(day),
+          12, // Meio-dia UTC
+          0,
+          0,
+        ),
+      );
+    };
 
     // 🔥 LOG DETALHADO DO ADDRESS RECEBIDO
     console.log(
@@ -483,9 +499,32 @@ export class TasksService {
     if (dto.columnOrder !== undefined)
       data.columnOrder = Number(dto.columnOrder);
     if (dto.finalComment !== undefined) data.finalComment = dto.finalComment;
-    if (dto.dueDate) data.dueDate = new Date(dto.dueDate);
-    if (dto.scheduledAt) data.scheduledDate = new Date(dto.scheduledAt);
-    if (dto.intervalTime !== undefined) data.intervalTime = dto.intervalTime; // 🔥 ADICIONE ESTA LINHA
+
+    // 🔥 CORREÇÃO DE TIMEZONE PARA dueDate
+    if (dto.dueDate) {
+      const dueDateStr =
+        typeof dto.dueDate === 'string'
+          ? dto.dueDate
+          : dto.dueDate.toISOString();
+      data.dueDate = preserveLocalDate(dueDateStr);
+      console.log(
+        `📅 dueDate original: ${dueDateStr} -> salvo como UTC: ${data.dueDate.toISOString()}`,
+      );
+    }
+
+    // 🔥 CORREÇÃO DE TIMEZONE PARA scheduledAt
+    if (dto.scheduledAt) {
+      const scheduledStr =
+        typeof dto.scheduledAt === 'string'
+          ? dto.scheduledAt
+          : dto.scheduledAt.toISOString();
+      data.scheduledDate = preserveLocalDate(scheduledStr);
+      console.log(
+        `📅 scheduledAt original: ${scheduledStr} -> salvo como UTC: ${data.scheduledDate.toISOString()}`,
+      );
+    }
+
+    if (dto.intervalTime !== undefined) data.intervalTime = dto.intervalTime;
 
     if (dto.assignedToId !== undefined) {
       data.userAssigned = dto.assignedToId
@@ -695,10 +734,13 @@ export class TasksService {
 
   // No tasks.service.ts - método findAllPaginated
 
+  // tasks.service.ts - Método findAllPaginated corrigido
+
   async findAllPaginated(params: any) {
     const tenantId = this.cls.get<string>('tenantId');
 
-    await this.cacheManager.del(`tasks_list_${tenantId}`);
+    // 🔥 REMOVER O CACHE QUE PODE ESTAR CAUSANDO PROBLEMA
+    // await this.cacheManager.del(`tasks_list_${tenantId}`);
 
     const {
       page = 1,
@@ -713,6 +755,7 @@ export class TasksService {
       isOverdue,
       excludeCompleted = false,
     } = params;
+
     const skip = (page - 1) * limit;
 
     // 1. MAPEAMENTO DE DATA
@@ -725,102 +768,155 @@ export class TasksService {
     const dateFilter: Prisma.DateTimeNullableFilter = {};
 
     if (startDate) {
-      dateFilter.gte = new Date(startDate);
-    }
-    if (endDate) {
-      const endD = new Date(endDate);
-      endD.setUTCHours(23, 59, 59, 999);
-      dateFilter.lte = endD;
+      const start = new Date(startDate);
+      if (!isNaN(start.getTime())) {
+        dateFilter.gte = start;
+      }
     }
 
-    // 3. QUERY PRINCIPAL
+    if (endDate) {
+      const end = new Date(endDate);
+      if (!isNaN(end.getTime())) {
+        end.setUTCHours(23, 59, 59, 999);
+        dateFilter.lte = end;
+      }
+    }
+
+    // 3. CONSTRUIR WHERE DE FORMA SEGURA
     const where: Prisma.TaskWhereInput = {
       companyId: tenantId,
-      ...(columnId && { columnId }),
-      ...(excludeCompleted && {
-        status: { not: TaskStatus.COMPLETED },
-      }),
-      ...(search && {
-        OR: [
-          { title: { contains: search, mode: 'insensitive' } },
-          { description: { contains: search, mode: 'insensitive' } },
-          { userAssigned: { name: { contains: search, mode: 'insensitive' } } },
-        ],
-      }),
-      ...((startDate || endDate) && {
-        [dbField]: dateFilter,
-      }),
-      ...(assignedToId &&
-        assignedToId !== 'all' && { userAssignedId: assignedToId }),
-      ...(hasLocation === true && {
-        taskAddress: {
-          is: { latitude: { not: null }, longitude: { not: null } },
-        },
-      }),
-      ...(hasLocation === false && {
-        OR: [
-          { taskAddress: null },
-          { taskAddress: { is: { latitude: null } } },
-        ],
-      }),
-      ...(isOverdue === true && {
-        dueDate: {
-          lt: new Date(),
-        },
-        status: {
-          not: TaskStatus.COMPLETED,
-        },
-      }),
     };
 
-    const [tasks, total] = await Promise.all([
-      this.prisma.task.findMany({
-        where,
-        skip,
-        take: Number(limit),
-        include: {
-          taskImages: {
-            select: { id: true, url: true, filename: true, size: true },
-            orderBy: { createdAt: 'asc' },
-          },
-          taskAudios: {
-            select: { id: true, url: true, duration: true },
-            orderBy: { createdAt: 'asc' },
-          },
-          taskVideos: {
-            select: { id: true, url: true, duration: true },
-            orderBy: { createdAt: 'asc' },
-          },
-          userAssigned: {
-            select: { id: true, name: true, email: true, contact: true },
-          },
-          userCreate: { select: { id: true, name: true } },
-          userUpdate: { select: { id: true, name: true } },
-          userCompleted: { select: { id: true, name: true } },
-          column: true,
-          route: true,
-          taskAddress: true, // 🔥🔥🔥 ADICIONAR ESTA LINHA 🔥🔥🔥
-          company: { select: { id: true, name: true } },
-        },
-        orderBy: [{ columnOrder: 'asc' }, { createdAt: 'desc' }],
-      }),
-      this.prisma.task.count({ where }),
-    ]);
-
-    // 🔥 LOG PARA VERIFICAR SE O intervalTime ESTÁ VINDO
-    if (tasks.length > 0) {
-      console.log('🔍 Primeira task retornada:', {
-        id: tasks[0].id,
-        title: tasks[0].title,
-        intervalTime: tasks[0].intervalTime,
-        hasIntervalTime: 'intervalTime' in tasks[0],
-      });
+    // Adicionar filtros apenas se existirem
+    if (columnId) {
+      where.columnId = columnId;
     }
 
-    return {
-      data: tasks,
-      meta: { total, page, limit, lastPage: Math.ceil(total / limit) },
-    };
+    if (excludeCompleted) {
+      where.status = { not: TaskStatus.COMPLETED };
+    }
+
+    if (search && search.trim() !== '') {
+      where.OR = [
+        { title: { contains: search, mode: 'insensitive' } },
+        { description: { contains: search, mode: 'insensitive' } },
+        { userAssigned: { name: { contains: search, mode: 'insensitive' } } },
+      ];
+    }
+
+    // Filtro de data - só adicionar se tiver data válida
+    if ((startDate || endDate) && Object.keys(dateFilter).length > 0) {
+      where[dbField] = dateFilter;
+    }
+
+    if (assignedToId && assignedToId !== 'all') {
+      where.userAssignedId = assignedToId;
+    }
+
+    if (hasLocation === true) {
+      where.taskAddress = {
+        is: { latitude: { not: null }, longitude: { not: null } },
+      };
+    }
+
+    if (hasLocation === false) {
+      where.OR = [
+        { taskAddress: null },
+        { taskAddress: { is: { latitude: null } } },
+      ];
+    }
+
+    if (isOverdue === true) {
+      where.dueDate = {
+        lt: new Date(),
+      };
+      where.status = {
+        not: TaskStatus.COMPLETED,
+      };
+    }
+
+    this.logger.log(
+      `[findAllPaginated] Executando query com where: ${JSON.stringify(where)}`,
+    );
+
+    try {
+      // 🔥 USAR Promise.allSettled PARA EVITAR QUE UM ERRO QUEBRE TUDO
+      const [tasksResult, totalResult] = await Promise.allSettled([
+        this.prisma.task.findMany({
+          where,
+          skip,
+          take: Number(limit),
+          include: {
+            taskImages: {
+              select: { id: true, url: true, filename: true, size: true },
+              orderBy: { createdAt: 'asc' },
+            },
+            taskAudios: {
+              select: { id: true, url: true, duration: true },
+              orderBy: { createdAt: 'asc' },
+            },
+            taskVideos: {
+              select: { id: true, url: true, duration: true },
+              orderBy: { createdAt: 'asc' },
+            },
+            userAssigned: {
+              select: { id: true, name: true, email: true, contact: true },
+            },
+            userCreate: { select: { id: true, name: true } },
+            userUpdate: { select: { id: true, name: true } },
+            userCompleted: { select: { id: true, name: true } },
+            column: true,
+            route: true,
+            taskAddress: true,
+            company: { select: { id: true, name: true } },
+          },
+          orderBy: [{ columnOrder: 'asc' }, { createdAt: 'desc' }],
+        }),
+        this.prisma.task.count({ where }),
+      ]);
+
+      // Tratar o resultado das tasks
+      if (tasksResult.status === 'rejected') {
+        this.logger.error(`Erro ao buscar tasks: ${tasksResult.reason}`);
+        throw new Error('Erro ao buscar tarefas');
+      }
+
+      // Tratar o resultado da contagem
+      if (totalResult.status === 'rejected') {
+        this.logger.error(`Erro ao contar tasks: ${totalResult.reason}`);
+        throw new Error('Erro ao contar tarefas');
+      }
+
+      const tasks = tasksResult.value;
+      const total = totalResult.value;
+
+      this.logger.log(
+        `[findAllPaginated] Busca concluída: ${tasks.length} tasks de ${total} total`,
+      );
+
+      // 🔥 LOG PARA VERIFICAR O intervalTime
+      if (tasks.length > 0) {
+        this.logger.log(`Primeira task retornada:`, {
+          id: tasks[0].id,
+          title: tasks[0].title,
+          intervalTime: tasks[0].intervalTime,
+          hasIntervalTime: 'intervalTime' in tasks[0],
+        });
+      }
+
+      return {
+        data: tasks,
+        meta: { total, page, limit, lastPage: Math.ceil(total / limit) },
+      };
+    } catch (error) {
+      this.logger.error(
+        `Erro no findAllPaginated: ${error.message}`,
+        error.stack,
+      );
+      throw new InternalServerErrorException(
+        'Erro ao buscar tarefas. Tente novamente mais tarde.',
+      );
+    }
   }
 
   // No tasks.service.ts - método findOne

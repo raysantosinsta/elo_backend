@@ -134,75 +134,84 @@ export class TasksController {
     return this.tasksService.create(finalDto as CreateTaskDto, files);
   }
 
+  @Put(':id')
+  @ApiOperation({ summary: 'Atualiza uma tarefa existente' })
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(
+    FileFieldsInterceptor([
+      { name: 'images', maxCount: 10 },
+      { name: 'audios', maxCount: 10 },
+      { name: 'videos', maxCount: 5 },
+    ]),
+  )
+  async update(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() updateTaskDto: UpdateTaskDto,
+    @UploadedFiles()
+    files: {
+      images?: UploadedFile[];
+      audios?: UploadedFile[];
+      videos?: UploadedFile[];
+    },
+  ) {
+    this.logger.log(`📝 Atualizando task ${id}`);
 
+    // 🔥 PROCESSAR MANUALMENTE O ADDRESS
+    // O body vem como string do FormData, precisamos fazer o parse
+    const rawBody = updateTaskDto as any;
 
-@Put(':id')
-@ApiOperation({ summary: 'Atualiza uma tarefa existente' })
-@ApiConsumes('multipart/form-data')
-@UseInterceptors(
-  FileFieldsInterceptor([
-    { name: 'images', maxCount: 10 },
-    { name: 'audios', maxCount: 10 },
-    { name: 'videos', maxCount: 5 },
-  ]),
-)
-async update(
-  @Param('id', ParseUUIDPipe) id: string,
-  @Body() updateTaskDto: UpdateTaskDto,
-  @UploadedFiles()
-  files: {
-    images?: UploadedFile[];
-    audios?: UploadedFile[];
-    videos?: UploadedFile[];
-  },
-) {
-  this.logger.log(`📝 Atualizando task ${id}`);
-  
-  // 🔥 PROCESSAR MANUALMENTE O ADDRESS
-  // O body vem como string do FormData, precisamos fazer o parse
-  const rawBody = updateTaskDto as any;
-  
-  if (rawBody.address) {
-    try {
-      // Se for string, parseia
-      if (typeof rawBody.address === 'string') {
-        updateTaskDto.address = JSON.parse(rawBody.address);
-        this.logger.log(`✅ Address parseado da string: ${JSON.stringify(updateTaskDto.address)}`);
+    if (rawBody.address) {
+      try {
+        // Se for string, parseia
+        if (typeof rawBody.address === 'string') {
+          updateTaskDto.address = JSON.parse(rawBody.address);
+          this.logger.log(
+            `✅ Address parseado da string: ${JSON.stringify(updateTaskDto.address)}`,
+          );
+        }
+        // Se já for objeto, mantém
+        else if (typeof rawBody.address === 'object') {
+          this.logger.log(
+            `✅ Address já é objeto: ${JSON.stringify(updateTaskDto.address)}`,
+          );
+        }
+      } catch (e) {
+        this.logger.error(`❌ Erro ao parsear address: ${e.message}`);
+        updateTaskDto.address = undefined;
       }
-      // Se já for objeto, mantém
-      else if (typeof rawBody.address === 'object') {
-        this.logger.log(`✅ Address já é objeto: ${JSON.stringify(updateTaskDto.address)}`);
+    }
+
+    // 🔥 VERIFICAR SE OS CAMPOS DE LATITUDE/LONGITUDE VIERAM SEPARADOS
+    if (rawBody.latitude || rawBody.longitude) {
+      this.logger.log(
+        `📍 Latitude/Longitude separados encontrados: lat=${rawBody.latitude}, lng=${rawBody.longitude}`,
+      );
+
+      if (!updateTaskDto.address) {
+        updateTaskDto.address = {};
       }
-    } catch (e) {
-      this.logger.error(`❌ Erro ao parsear address: ${e.message}`);
-      updateTaskDto.address = undefined;
+
+      if (rawBody.latitude) {
+        updateTaskDto.address.latitude = parseFloat(rawBody.latitude);
+      }
+      if (rawBody.longitude) {
+        updateTaskDto.address.longitude = parseFloat(rawBody.longitude);
+      }
     }
+
+    this.logger.log(
+      `📦 Address final para service: ${JSON.stringify(updateTaskDto.address)}`,
+    );
+
+    if (
+      files &&
+      (files.images?.length || files.audios?.length || files.videos?.length)
+    ) {
+      validateFiles(files);
+    }
+
+    return this.tasksService.update(id, updateTaskDto, files);
   }
-  
-  // 🔥 VERIFICAR SE OS CAMPOS DE LATITUDE/LONGITUDE VIERAM SEPARADOS
-  if (rawBody.latitude || rawBody.longitude) {
-    this.logger.log(`📍 Latitude/Longitude separados encontrados: lat=${rawBody.latitude}, lng=${rawBody.longitude}`);
-    
-    if (!updateTaskDto.address) {
-      updateTaskDto.address = {};
-    }
-    
-    if (rawBody.latitude) {
-      updateTaskDto.address.latitude = parseFloat(rawBody.latitude);
-    }
-    if (rawBody.longitude) {
-      updateTaskDto.address.longitude = parseFloat(rawBody.longitude);
-    }
-  }
-  
-  this.logger.log(`📦 Address final para service: ${JSON.stringify(updateTaskDto.address)}`);
-  
-  if (files && (files.images?.length || files.audios?.length || files.videos?.length)) {
-    validateFiles(files);
-  }
-  
-  return this.tasksService.update(id, updateTaskDto, files);
-}
 
   @Patch(':id/status')
   @ApiOperation({ summary: 'Move a tarefa entre colunas e/ou altera status' })
@@ -316,7 +325,13 @@ async update(
     const dto = new UpdateTaskDto();
     dto.status = body.status;
     dto.finalComment = body.finalComment;
-    if (body.scheduledAt) dto.scheduledAt = body.scheduledAt;
+    // 🔥 PRIORIZAR dueDate (prazo final) em vez de scheduledAt
+    if (body.dueDate) {
+      dto.dueDate = body.dueDate;
+    } else if (body.scheduledAt) {
+      // Fallback: se veio scheduledAt, usar como dueDate
+      dto.dueDate = body.scheduledAt;
+    }
 
     return this.tasksService.update(id, dto);
   }

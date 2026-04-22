@@ -19,7 +19,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
-  IsUUID
+  IsUUID,
 } from 'class-validator';
 
 export function validateFiles(files: {
@@ -97,7 +97,6 @@ export class CreateTaskDto {
   @IsOptional() createdById?: string;
 }
 
-
 export class UpdateTaskDto {
   @IsOptional()
   @IsString()
@@ -158,12 +157,12 @@ export class UpdateTaskDto {
   @Transform(({ value }) => {
     console.log('🔍 Transformando address - valor original:', value);
     console.log('🔍 Tipo do valor:', typeof value);
-    
+
     if (!value) {
       console.log('❌ Address é null ou undefined');
       return undefined;
     }
-    
+
     // Se for string, tenta fazer parse
     if (typeof value === 'string') {
       try {
@@ -175,13 +174,13 @@ export class UpdateTaskDto {
         return undefined;
       }
     }
-    
+
     // Se já for objeto, retorna diretamente
     if (typeof value === 'object') {
       console.log('✅ Address já é objeto, retornando diretamente:', value);
       return value;
     }
-    
+
     console.log('❌ Address não é string nem objeto, retornando undefined');
     return undefined;
   })
@@ -242,5 +241,6 @@ export class UpdateTaskDto {
 export class FinalizeTaskDto {
   @IsEnum(TaskStatus) status: TaskStatus;
   @IsOptional() @IsString() finalComment: string;
+  @IsOptional() @IsDateString() dueDate?: string;
   @IsOptional() @IsDateString() scheduledAt?: string;
 }

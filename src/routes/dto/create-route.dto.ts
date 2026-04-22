@@ -69,6 +69,10 @@ export class FinalizeTaskDto {
   @IsOptional()
   @IsDateString()
   scheduledAt?: string;
+
+  @IsOptional()
+  @IsDateString()
+  dueDate?: string;
 }
 
 // DTO para criar uma parada/stop da rota
