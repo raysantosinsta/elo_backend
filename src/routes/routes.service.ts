@@ -503,8 +503,9 @@ export class RouteService {
     // 🔥 CORREÇÃO: Determinar o status baseado no DTO e observações
     let statusFinal: TaskStatus;
 
-    if (dto.status === 'FAILED') {
-      // Se veio explicitamente FAILED
+    if (dto.status === 'RESCHEDULED') {
+      statusFinal = TaskStatus.RESCHEDULED;
+    } else if (dto.status === 'FAILED') {
       statusFinal = TaskStatus.FAILED;
     } else if (dto.status === 'COMPLETED') {
       statusFinal = TaskStatus.COMPLETED;
@@ -512,6 +513,12 @@ export class RouteService {
       // Fallback: verificar nas observações
       const notes = dto.finalComment || '';
       if (
+        notes.includes('REAGENDADA') ||
+        notes.includes('RESCHEDULED') ||
+        notes.includes('🔄')
+      ) {
+        statusFinal = TaskStatus.RESCHEDULED;
+      } else if (
         notes.includes('FALHA') ||
         notes.includes('FAILED') ||
         notes.includes('❌')
@@ -530,7 +537,7 @@ export class RouteService {
         status: statusFinal,
         finalComment: dto.finalComment,
         scheduledDate: dto.scheduledAt ? new Date(dto.scheduledAt) : undefined,
-        dueDate: dto.scheduledAt ? new Date(dto.scheduledAt) : undefined,
+        dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
         completionDate:
           statusFinal === TaskStatus.COMPLETED ? new Date() : null,
         userCompletedId: statusFinal === TaskStatus.COMPLETED ? userId : null,
@@ -540,9 +547,11 @@ export class RouteService {
 
     return {
       message:
-        statusFinal === TaskStatus.FAILED
-          ? 'Tarefa marcada como falha'
-          : 'Tarefa finalizada com sucesso',
+        statusFinal === TaskStatus.RESCHEDULED
+          ? 'Tarefa reagendada com sucesso'
+          : statusFinal === TaskStatus.FAILED
+            ? 'Tarefa marcada como falha'
+            : 'Tarefa finalizada com sucesso',
       task: updatedTask,
     };
   }
@@ -1437,6 +1446,16 @@ export class RouteService {
     // Verificar se é FALHA (FAILED)
     if (
       notes &&
+      (notes.includes('REAGENDADA') ||
+        notes.includes('RESCHEDULED') ||
+        notes.includes('🔄 TAREFA REAGENDADA'))
+    ) {
+      taskStatus = TaskStatus.RESCHEDULED;
+      this.logger.log(
+        `   🔄 Reagendamento detectado - status da tarefa: RESCHEDULED`,
+      );
+    } else if (
+      notes &&
       (notes.includes('❌ ERRO NA VISITA') ||
         notes.includes('FALHA') ||
         notes.includes('FAILED') ||
@@ -1444,8 +1463,7 @@ export class RouteService {
     ) {
       taskStatus = TaskStatus.FAILED;
       this.logger.log(`   ⚠️ Falha detectada - status da tarefa: FAILED`);
-    }
-    // Caso contrário, sucesso
+    } // Caso contrário, sucesso
     else {
       taskStatus = TaskStatus.COMPLETED;
       this.logger.log(`   ✅ Sucesso - status da tarefa: COMPLETED`);

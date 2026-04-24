@@ -36,8 +36,8 @@ export class OptimizeRouteDto {
 // 3. DTO para Finalizar a Tarefa (Visita)
 export class FinalizeTaskDto {
   @IsString()
-  @IsIn(['COMPLETED', 'FAILED']) // Trava para aceitar apenas esses status
-  status: 'COMPLETED' | 'FAILED';
+  @IsIn(['COMPLETED', 'FAILED', 'RESCHEDULED']) // Trava para aceitar apenas esses status
+  status: 'COMPLETED' | 'FAILED' | 'RESCHEDULED';
 
   @IsString()
   @IsOptional()

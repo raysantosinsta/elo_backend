@@ -254,8 +254,45 @@ export class TasksController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'Lista tarefas' })
-  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiOperation({ summary: 'Lista tarefas com paginação e filtros' })
+  @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
+  @ApiQuery({ name: 'limit', required: false, type: Number, example: 10 })
+  @ApiQuery({ name: 'columnId', required: false, type: String })
+  @ApiQuery({ name: 'search', required: false, type: String })
+  @ApiQuery({ name: 'startDate', required: false, type: String })
+  @ApiQuery({ name: 'endDate', required: false, type: String })
+  @ApiQuery({ name: 'assignedToId', required: false, type: String })
+  @ApiQuery({
+    name: 'hasLocation',
+    required: false,
+    type: String,
+    enum: ['true', 'false'],
+  })
+  @ApiQuery({
+    name: 'dateType',
+    required: false,
+    type: String,
+    enum: ['created', 'scheduled', 'due'],
+  })
+  @ApiQuery({
+    name: 'isOverdue',
+    required: false,
+    type: String,
+    enum: ['true', 'false'],
+  })
+  @ApiQuery({
+    name: 'excludeCompleted',
+    required: false,
+    type: String,
+    enum: ['true', 'false'],
+  })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    type: String,
+    description:
+      'Filtrar por status específico(s). Ex: "PENDING,IN_PROGRESS,RESCHEDULED"',
+  })
   async findAllPaginated(
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
@@ -267,17 +304,28 @@ export class TasksController {
     @Query('hasLocation') hasLocation?: string,
     @Query('dateType') dateType?: string,
     @Query('isOverdue') isOverdue?: string,
-    @Query('excludeCompleted') excludeCompleted?: string, // NOVO PARÂMETRO
+    @Query('excludeCompleted') excludeCompleted?: string,
+    @Query('status') status?: string,
   ) {
+    // Converter hasLocation para boolean
     let hasLocationBool: boolean | undefined = undefined;
     if (hasLocation === 'true') hasLocationBool = true;
     if (hasLocation === 'false') hasLocationBool = false;
+
+    // Converter isOverdue para boolean
     let isOverdueBool: boolean | undefined = undefined;
     if (isOverdue === 'true') isOverdueBool = true;
 
-    // NOVO: Converter excludeCompleted para boolean
+    // Converter excludeCompleted para boolean
     let excludeCompletedBool: boolean | undefined = undefined;
     if (excludeCompleted === 'true') excludeCompletedBool = true;
+
+    // 🔥 Processar múltiplos status separados por vírgula
+    let statusArray: string[] | undefined = undefined;
+    if (status) {
+      statusArray = status.split(',').map((s) => s.trim().toUpperCase());
+      console.log(`📊 Filtro de status recebido: ${statusArray.join(', ')}`);
+    }
 
     return this.tasksService.findAllPaginated({
       page,
@@ -289,8 +337,9 @@ export class TasksController {
       assignedToId,
       hasLocation: hasLocationBool,
       dateType,
-      isOverdue: isOverdueBool, // <--- PASSADO
-      excludeCompleted: excludeCompletedBool, // NOVO
+      isOverdue: isOverdueBool,
+      excludeCompleted: excludeCompletedBool,
+      status: statusArray, // 🔥 PASSANDO O ARRAY DE STATUS
     });
   }
 

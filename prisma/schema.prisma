@@ -51,6 +51,7 @@ enum TaskStatus {
   IN_PROGRESS
   COMPLETED
   FAILED
+  RESCHEDULED
 }
 
 enum BudgetGroupStatus {

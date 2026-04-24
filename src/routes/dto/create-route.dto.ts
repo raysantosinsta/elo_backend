@@ -60,7 +60,7 @@ export class OptimizeRouteDto {
 // DTO para finalizar tarefa (existente)
 export class FinalizeTaskDto {
   @IsString()
-  status: 'COMPLETED' | 'FAILED';
+  status: 'COMPLETED' | 'FAILED' | 'RESCHEDULED';
 
   @IsOptional()
   @IsString()

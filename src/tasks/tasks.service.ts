@@ -730,17 +730,10 @@ export class TasksService {
     }
   }
 
-  // --- READS ---
-
-  // No tasks.service.ts - método findAllPaginated
-
-  // tasks.service.ts - Método findAllPaginated corrigido
+  // No tasks.service.ts - método findAllPaginated corrigido para usar o parâmetro status
 
   async findAllPaginated(params: any) {
     const tenantId = this.cls.get<string>('tenantId');
-
-    // 🔥 REMOVER O CACHE QUE PODE ESTAR CAUSANDO PROBLEMA
-    // await this.cacheManager.del(`tasks_list_${tenantId}`);
 
     const {
       page = 1,
@@ -754,6 +747,7 @@ export class TasksService {
       dateType,
       isOverdue,
       excludeCompleted = false,
+      status, // 🔥 PARÂMETRO STATUS ADICIONADO
     } = params;
 
     const skip = (page - 1) * limit;
@@ -787,13 +781,48 @@ export class TasksService {
       companyId: tenantId,
     };
 
+    // 🔥🔥🔥 FILTRO POR STATUS (NOVO) 🔥🔥🔥
+    if (status && Array.isArray(status) && status.length > 0) {
+      // Converte os status string para o enum TaskStatus
+      const validStatuses = status
+        .map((s) => {
+          // Verifica se o status é válido no enum
+          if (Object.values(TaskStatus).includes(s as TaskStatus)) {
+            return s as TaskStatus;
+          }
+          return null;
+        })
+        .filter(Boolean);
+
+      // 🔥 FILTRO POR STATUS - VERSÃO SIMPLIFICADA
+      if (status && Array.isArray(status) && status.length > 0) {
+        // Filtra apenas status que existem no enum
+        const validStatuses = status.filter((s) =>
+          Object.values(TaskStatus).includes(s as TaskStatus),
+        ) as TaskStatus[];
+
+        if (validStatuses.length > 0) {
+          where.status = { in: validStatuses };
+          this.logger.log(
+            `📊 Aplicando filtro de status: ${validStatuses.join(', ')}`,
+          );
+        }
+      }
+      // Se não tem status específico, usa o excludeCompleted
+      else if (excludeCompleted) {
+        where.status = { not: TaskStatus.COMPLETED };
+        this.logger.log(`📊 Excluindo tarefas COMPLETED`);
+      }
+    }
+    // Se não tem status específico, usa o excludeCompleted
+    else if (excludeCompleted) {
+      where.status = { not: TaskStatus.COMPLETED };
+      this.logger.log(`📊 Excluindo tarefas COMPLETED`);
+    }
+
     // Adicionar filtros apenas se existirem
     if (columnId) {
       where.columnId = columnId;
-    }
-
-    if (excludeCompleted) {
-      where.status = { not: TaskStatus.COMPLETED };
     }
 
     if (search && search.trim() !== '') {
@@ -810,7 +839,11 @@ export class TasksService {
     }
 
     if (assignedToId && assignedToId !== 'all') {
-      where.userAssignedId = assignedToId;
+      if (assignedToId === 'none') {
+        where.userAssignedId = null;
+      } else {
+        where.userAssignedId = assignedToId;
+      }
     }
 
     if (hasLocation === true) {
@@ -840,7 +873,6 @@ export class TasksService {
     );
 
     try {
-      // 🔥 USAR Promise.allSettled PARA EVITAR QUE UM ERRO QUEBRE TUDO
       const [tasksResult, totalResult] = await Promise.allSettled([
         this.prisma.task.findMany({
           where,
@@ -875,13 +907,11 @@ export class TasksService {
         this.prisma.task.count({ where }),
       ]);
 
-      // Tratar o resultado das tasks
       if (tasksResult.status === 'rejected') {
         this.logger.error(`Erro ao buscar tasks: ${tasksResult.reason}`);
         throw new Error('Erro ao buscar tarefas');
       }
 
-      // Tratar o resultado da contagem
       if (totalResult.status === 'rejected') {
         this.logger.error(`Erro ao contar tasks: ${totalResult.reason}`);
         throw new Error('Erro ao contar tarefas');
@@ -893,16 +923,6 @@ export class TasksService {
       this.logger.log(
         `[findAllPaginated] Busca concluída: ${tasks.length} tasks de ${total} total`,
       );
-
-      // 🔥 LOG PARA VERIFICAR O intervalTime
-      if (tasks.length > 0) {
-        this.logger.log(`Primeira task retornada:`, {
-          id: tasks[0].id,
-          title: tasks[0].title,
-          intervalTime: tasks[0].intervalTime,
-          hasIntervalTime: 'intervalTime' in tasks[0],
-        });
-      }
 
       return {
         data: tasks,

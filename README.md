@@ -6,9 +6,9 @@ npx prisma migrate diff \
   --to-schema-datamodel prisma/schema.prisma \
   --script 
 
-  mkdir prisma/migrations/20260101_task_intervalo
+  mkdir prisma/migrations/20260101_task_RESCHEDULED
 
-  npx prisma migrate resolve --applied 20260101_task_intervalo
+  npx prisma migrate resolve --applied 20260101_task_RESCHEDULED
 
    npx prisma generate
 
