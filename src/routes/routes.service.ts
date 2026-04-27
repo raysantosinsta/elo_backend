@@ -743,7 +743,22 @@ export class RouteService {
 
               // Fallback: usa o que veio no DTO
               if (!zipCode && stop.zipCode) zipCode = stop.zipCode;
-              if (!bW
+              if (!bairro && stop.bairro) bairro = stop.bairro;
+
+              return {
+                name: stop.name,
+                address: stop.address,
+                complement: stop.complement || '',
+                neighborhood: (bairro || stop.neighborhood || '').toString(), // ✅ bairro vai aqui
+                city: stop.city,
+                state: stop.state,
+                zipCode: (zipCode || '').toString(),
+                latitude: stop.latitude,
+                longitude: stop.longitude,
+                order: index + 1,
+                notes: stop.notes || '',
+                companyId: companyId,
+                taskId: existingTask?.id || null,
               };
             }),
           ),

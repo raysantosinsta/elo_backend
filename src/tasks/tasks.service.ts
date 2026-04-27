@@ -747,7 +747,7 @@ export class TasksService {
       dateType,
       isOverdue,
       excludeCompleted = false,
-      status, // 🔥 PARÂMETRO STATUS ADICIONADO
+      status,
     } = params;
 
     const skip = (page - 1) * limit;
@@ -758,21 +758,52 @@ export class TasksService {
     if (dateType === 'due') dbField = 'dueDate';
     if (dateType === 'created') dbField = 'createdAt';
 
-    // 2. FILTRO DE DATA
-    const dateFilter: Prisma.DateTimeNullableFilter = {};
+    // 2. FILTRO DE DATA - CORRIGIDO PARA MANTER O MÊS CORRETO
+    const dateFilter: any = {};
 
     if (startDate) {
-      const start = new Date(startDate);
+      let start: Date;
+
+      // Se for string no formato YYYY-MM-DD (vindo do frontend)
+      if (
+        typeof startDate === 'string' &&
+        startDate.match(/^\d{4}-\d{2}-\d{2}$/)
+      ) {
+        const [year, month, day] = startDate.split('-').map(Number);
+        // 🔥 CORREÇÃO: Criar data com mês correto (month-1 porque Date usa 0-11)
+        start = new Date(year, month - 1, day, 0, 0, 0, 0);
+      } else {
+        start = new Date(startDate);
+      }
+
       if (!isNaN(start.getTime())) {
         dateFilter.gte = start;
+        this.logger.log(
+          `📅 Filtro startDate: ${start.toISOString()} (original: ${startDate})`,
+        );
       }
     }
 
     if (endDate) {
-      const end = new Date(endDate);
+      let end: Date;
+
+      // Se for string no formato YYYY-MM-DD (vindo do frontend)
+      if (typeof endDate === 'string' && endDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
+        const [year, month, day] = endDate.split('-').map(Number);
+        // 🔥 CORREÇÃO: Criar data com mês correto e fim do dia
+        end = new Date(year, month - 1, day, 23, 59, 59, 999);
+      } else {
+        end = new Date(endDate);
+        if (!isNaN(end.getTime())) {
+          end.setHours(23, 59, 59, 999);
+        }
+      }
+
       if (!isNaN(end.getTime())) {
-        end.setUTCHours(23, 59, 59, 999);
         dateFilter.lte = end;
+        this.logger.log(
+          `📅 Filtro endDate: ${end.toISOString()} (original: ${endDate})`,
+        );
       }
     }
 
@@ -781,43 +812,19 @@ export class TasksService {
       companyId: tenantId,
     };
 
-    // 🔥🔥🔥 FILTRO POR STATUS (NOVO) 🔥🔥🔥
+    // FILTRO POR STATUS
     if (status && Array.isArray(status) && status.length > 0) {
-      // Converte os status string para o enum TaskStatus
-      const validStatuses = status
-        .map((s) => {
-          // Verifica se o status é válido no enum
-          if (Object.values(TaskStatus).includes(s as TaskStatus)) {
-            return s as TaskStatus;
-          }
-          return null;
-        })
-        .filter(Boolean);
-
-      // 🔥 FILTRO POR STATUS - VERSÃO SIMPLIFICADA
-      if (status && Array.isArray(status) && status.length > 0) {
-        // Filtra apenas status que existem no enum
-        const validStatuses = status.filter((s) =>
-          Object.values(TaskStatus).includes(s as TaskStatus),
-        ) as TaskStatus[];
-
-        if (validStatuses.length > 0) {
-          where.status = { in: validStatuses };
-          this.logger.log(
-            `📊 Aplicando filtro de status: ${validStatuses.join(', ')}`,
-          );
-        }
+      const validStatuses = status.filter((s) =>
+        Object.values(TaskStatus).includes(s as TaskStatus),
+      ) as TaskStatus[];
+      if (validStatuses.length > 0) {
+        where.status = { in: validStatuses };
+        this.logger.log(
+          `📊 Aplicando filtro de status: ${validStatuses.join(', ')}`,
+        );
       }
-      // Se não tem status específico, usa o excludeCompleted
-      else if (excludeCompleted) {
-        where.status = { not: TaskStatus.COMPLETED };
-        this.logger.log(`📊 Excluindo tarefas COMPLETED`);
-      }
-    }
-    // Se não tem status específico, usa o excludeCompleted
-    else if (excludeCompleted) {
+    } else if (excludeCompleted) {
       where.status = { not: TaskStatus.COMPLETED };
-      this.logger.log(`📊 Excluindo tarefas COMPLETED`);
     }
 
     // Adicionar filtros apenas se existirem
@@ -833,9 +840,17 @@ export class TasksService {
       ];
     }
 
-    // Filtro de data - só adicionar se tiver data válida
+    // FILTRO DE DATA - APLICA APENAS SE TIVER DATAS VÁLIDAS
     if ((startDate || endDate) && Object.keys(dateFilter).length > 0) {
-      where[dbField] = dateFilter;
+      // Para o campo dueDate, filtra apenas tarefas que têm dueDate definido
+      if (dbField === 'dueDate') {
+        where[dbField] = dateFilter;
+        this.logger.log(
+          `📅 Aplicando filtro dueDate: ${JSON.stringify(dateFilter)}`,
+        );
+      } else {
+        where[dbField] = dateFilter;
+      }
     }
 
     if (assignedToId && assignedToId !== 'all') {
@@ -928,7 +943,7 @@ export class TasksService {
         data: tasks,
         meta: { total, page, limit, lastPage: Math.ceil(total / limit) },
       };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(
         `Erro no findAllPaginated: ${error.message}`,
         error.stack,
