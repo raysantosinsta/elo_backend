@@ -1,4 +1,5 @@
 /* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/require-await */
 /* eslint-disable @typescript-eslint/restrict-template-expressions */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
@@ -565,10 +566,8 @@ export class RouteService {
     };
   }
 
-  /**
-   * CRIA uma nova rota sem criar tarefas
-   * Vincula tarefas existentes com base no título das paradas
-   */
+  // CRIA uma nova rota sem criar tarefas
+  // Vincula tarefas existentes com base no título das paradas
   async createRoute(dto: CreateRouteDto, companyId: string, userId: string) {
     this.logger.log('='.repeat(80));
     this.logger.log(`🚀 [createRoute] INICIANDO CRIAÇÃO DE ROTA`);
@@ -588,7 +587,6 @@ export class RouteService {
       ) {
         const [year, month, day] = dto.routeDate.split('-');
         // Criar data no UTC com horário 12:00 (meio-dia) para evitar deslocamento de dia
-        // Isso garante que a data salva seja exatamente o dia que o usuário selecionou
         routeDate = new Date(
           Date.UTC(
             parseInt(year),
@@ -687,13 +685,16 @@ export class RouteService {
           companyId: companyId,
           title: { in: stopTitles },
         },
+        include: {
+          taskAddress: true, // 🔥 INCLUIR O ENDEREÇO PARA PEGAR O CEP
+        },
       });
     }
 
     this.logger.log(`📊 Tasks encontradas: ${existingTasks.length}`);
     existingTasks.forEach((task) => {
       this.logger.log(
-        `   - ${task.title} (ID: ${task.id}, status: ${task.status})`,
+        `   - ${task.title} (ID: ${task.id}, status: ${task.status}, CEP: ${task.taskAddress?.cep || 'N/A'})`,
       );
     });
 
@@ -708,7 +709,7 @@ export class RouteService {
       data: {
         title: dto.title,
         description: dto.description || '',
-        routeDate: finalRouteDate, // 🔥 Usar a data processada
+        routeDate: finalRouteDate,
         status: RouteStatus.SCHEDULED,
         totalDistanceMeters: totalDistanceMeters,
         totalDurationSeconds: totalDurationSeconds,
@@ -718,24 +719,34 @@ export class RouteService {
         userAssignedId: dto.userAssignedId || null,
         orderBy: dto.orderBy || 'DISTANCE',
         stops: {
-          create: optimizedStops.map((stop, index) => {
-            const existingTask = taskByTitle.get(stop.name);
-            return {
-              name: stop.name,
-              address: stop.address,
-              complement: stop.complement || '',
-              neighborhood: stop.neighborhood || '',
-              city: stop.city,
-              state: stop.state,
-              zipCode: stop.zipCode || '',
-              latitude: stop.latitude,
-              longitude: stop.longitude,
-              order: index + 1,
-              notes: stop.notes || '',
-              companyId: companyId,
-              taskId: existingTask?.id || null,
-            };
-          }),
+          create: await Promise.all(
+            optimizedStops.map(async (stop, index) => {
+              const existingTask = taskByTitle.get(stop.name);
+
+              // 🔥 BUSCAR O ENDEREÇO COMPLETO DA TAREFA EXISTENTE
+              let zipCode = '';
+              let bairro = '';
+
+              if (existingTask) {
+                const taskAddress = await this.prisma.taskAddress.findFirst({
+                  where: { taskId: existingTask.id },
+                });
+
+                if (taskAddress) {
+                  zipCode = taskAddress.cep || '';
+                  bairro = taskAddress.bairro || '';
+                  this.logger.log(
+                    `📦 Parada ${index + 1}: Dados copiados da task "${existingTask.title}": CEP=${zipCode}, Bairro=${bairro}`,
+                  );
+                }
+              }
+
+              // Fallback: usa o que veio no DTO
+              if (!zipCode && stop.zipCode) zipCode = stop.zipCode;
+              if (!bW
+              };
+            }),
+          ),
         },
       },
       include: {
@@ -755,6 +766,16 @@ export class RouteService {
     this.logger.log(
       `   Duração total salva: ${route.totalDurationSeconds} segundos`,
     );
+
+    // Verificar CEPs salvos nas paradas
+    const savedStops = await this.prisma.routeStop.findMany({
+      where: { routeId: route.id },
+      select: { name: true, zipCode: true },
+    });
+    this.logger.log(`📦 CEPs salvos nas paradas:`);
+    savedStops.forEach((stop) => {
+      this.logger.log(`   - ${stop.name}: ${stop.zipCode || 'SEM CEP'}`);
+    });
 
     // 🔥 VINCULAR AS TAREFAS EXISTENTES À ROTA
     if (existingTasks.length > 0) {
@@ -1202,6 +1223,23 @@ export class RouteService {
       include: {
         stops: {
           orderBy: { order: 'asc' },
+          select: {
+            id: true,
+            name: true,
+            address: true,
+            complement: true,
+            neighborhood: true,
+            city: true,
+            state: true,
+            zipCode: true, // 🔥 ADICIONAR ESTA LINHA
+            latitude: true,
+            longitude: true,
+            order: true,
+            visited: true,
+            visitedAt: true,
+            notes: true,
+            taskId: true,
+          },
         },
         userAssigned: { select: { id: true, name: true, contact: true } },
         userCreate: { select: { id: true, name: true } },
@@ -1219,13 +1257,10 @@ export class RouteService {
     let formattedDistance: string;
     let formattedDuration: string;
 
-    // Para rotas com apenas 1 parada
     if (stopsCount === 1) {
       formattedDistance = 'Distância variável';
       formattedDuration = 'Calcular na execução';
-    }
-    // Para rotas com mais de 1 parada
-    else if (totalDistanceMeters > 0) {
+    } else if (totalDistanceMeters > 0) {
       formattedDistance = `${(totalDistanceMeters / 1000).toFixed(1)} km`;
       formattedDuration = this.formatDuration(totalDurationSeconds);
     } else {

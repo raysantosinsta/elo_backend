@@ -61,78 +61,82 @@ export class TasksController {
 
   constructor(private readonly tasksService: TasksService) {}
 
-  // src/tasks/tasks.controller.ts
 
-  @Post()
-  @ApiOperation({ summary: 'Cria uma nova tarefa' })
-  @ApiConsumes('multipart/form-data')
-  @ApiResponse({ status: 201, description: 'Tarefa criada.' })
-  @UseInterceptors(
-    FileFieldsInterceptor([
-      { name: 'images', maxCount: 10 },
-      { name: 'audios', maxCount: 10 },
-      { name: 'videos', maxCount: 5 },
-    ]),
-    FileLoggerInterceptor,
-  )
-  async create(
-    @CurrentUser() user: any,
-    @Body() createTaskDto: CreateTaskDto,
-    @UploadedFiles()
-    files: {
-      images?: UploadedFile[];
-      audios?: UploadedFile[];
-      videos?: UploadedFile[];
-    },
-  ) {
-    if (!user.companyId) {
-      throw new BadRequestException(
-        'Usuário não está vinculado a uma empresa.',
-      );
-    }
-
-    console.log('📦 [CONTROLLER] Address cru recebido:', createTaskDto.address);
-    console.log(
-      '📦 [CONTROLLER] Type of address:',
-      typeof createTaskDto.address,
-    );
-
-    // 🔥 FAZER O PARSE MANUALMENTE
-    let parsedAddress: CreateTaskAddressDto | undefined = undefined;
-
-    if (
-      typeof createTaskDto.address === 'string' &&
-      createTaskDto.address.trim() !== ''
-    ) {
-      try {
-        const parsed = JSON.parse(createTaskDto.address);
-        console.log('✅ [CONTROLLER] Address parseado:', parsed);
-
-        if (parsed && typeof parsed === 'object' && parsed.cep) {
-          parsedAddress = parsed as CreateTaskAddressDto;
-        }
-      } catch (e) {
-        console.error('❌ [CONTROLLER] Erro ao parsear address:', e);
-      }
-    }
-
-    // 🔥 CRIAR UM OBJETO COM O ADDRESS PARSEADO
-    const finalDto = {
-      ...createTaskDto,
-      address: parsedAddress,
-    };
-
-    console.log('📦 [CONTROLLER] Address final:', finalDto.address);
-
-    if (files) {
-      validateFiles(files);
-    }
-
-    finalDto.companyId = user.companyId;
-    finalDto.createdById = user.id;
-
-    return this.tasksService.create(finalDto as CreateTaskDto, files);
+ @Post()
+@ApiOperation({ summary: 'Cria uma nova tarefa' })
+@ApiConsumes('multipart/form-data')
+@ApiResponse({ status: 201, description: 'Tarefa criada.' })
+@UseInterceptors(
+  FileFieldsInterceptor([
+    { name: 'images', maxCount: 10 },
+    { name: 'audios', maxCount: 10 },
+    { name: 'videos', maxCount: 5 },
+  ]),
+  FileLoggerInterceptor,
+)
+async create(
+  @CurrentUser() user: any,
+  @Body() createTaskDto: CreateTaskDto,
+  @UploadedFiles()
+  files: {
+    images?: UploadedFile[];
+    audios?: UploadedFile[];
+    videos?: UploadedFile[];
+  },
+) {
+  if (!user.companyId) {
+    throw new BadRequestException('Usuário não está vinculado a uma empresa.');
   }
+
+  console.log('📦 [CONTROLLER] Address cru recebido:', createTaskDto.address);
+  console.log('📦 [CONTROLLER] Type of address:', typeof createTaskDto.address);
+
+  // 🔥 FAZER O PARSE MANUALMENTE
+  let parsedAddress: CreateTaskAddressDto | undefined = undefined;
+
+  if (
+    typeof createTaskDto.address === 'string' &&
+    createTaskDto.address.trim() !== ''
+  ) {
+    try {
+      const parsed = JSON.parse(createTaskDto.address);
+      console.log('✅ [CONTROLLER] Address parseado:', parsed);
+
+      if (parsed && typeof parsed === 'object') {
+        parsedAddress = {
+          cep: parsed.cep || '',
+          endereco: parsed.endereco || '',
+          numero: parsed.numero || '',
+          bairro: parsed.bairro || '',
+          cidade: parsed.cidade || '',
+          estado: parsed.estado || '',
+          complemento: parsed.complemento,
+          latitude: parsed.latitude,
+          longitude: parsed.longitude,
+        } as CreateTaskAddressDto;
+      }
+    } catch (e) {
+      console.error('❌ [CONTROLLER] Erro ao parsear address:', e);
+    }
+  }
+
+  // 🔥 CRIA UM NOVO DTO COM O ADDRESS PARSEADO
+  const finalDto = {
+    ...createTaskDto,
+    address: parsedAddress, // 👈 USA O PARSEADO, NÃO O ORIGINAL
+  };
+
+  console.log('📦 [CONTROLLER] Address final:', finalDto.address);
+
+  if (files) {
+    validateFiles(files);
+  }
+
+  finalDto.companyId = user.companyId;
+  finalDto.createdById = user.id;
+
+  return this.tasksService.create(finalDto as CreateTaskDto, files);
+}
 
   @Put(':id')
   @ApiOperation({ summary: 'Atualiza uma tarefa existente' })

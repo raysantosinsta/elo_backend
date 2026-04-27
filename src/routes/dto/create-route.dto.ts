@@ -9,9 +9,10 @@ import {
   IsEnum,
   IsNumber,
   IsOptional,
+  isString,
   IsString,
   IsUUID,
-  ValidateNested
+  ValidateNested,
 } from 'class-validator';
 
 export enum RouteOrderType {
@@ -101,6 +102,10 @@ export class RouteStopDto {
   @IsString()
   zipCode: string;
 
+   @IsOptional()
+  @IsString()
+  numero?: string;  // ✅ JÁ ESTÁ CORRETO
+
   @IsNumber()
   latitude: number;
 
@@ -110,6 +115,11 @@ export class RouteStopDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  // 🔥 SE PRECISAR DE BAIRRO, USE:
+  @IsOptional()
+  @IsString()
+  bairro?: string;
 }
 
 // src/routes/dto/optimize-route.dto.ts
