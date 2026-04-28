@@ -1,7 +1,9 @@
+/* eslint-disable prettier/prettier */
+/* eslint-disable prefer-const */
+/* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/require-await */
-/* eslint-disable prettier/prettier */
 // location.gateway.ts
 import {
   WebSocketGateway,
@@ -24,6 +26,12 @@ interface DriverLocation {
   isSimulating: boolean;
 }
 
+interface ThrottleInfo {
+  lastUpdateTime: number;
+  updateCount: number;
+  lastResetTime: number;
+}
+
 @WebSocketGateway({
   cors: {
     origin: '*', // Em produção, restrinja para seu domínio
@@ -34,7 +42,7 @@ interface DriverLocation {
 @Injectable()
 export class LocationGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
-  server: Server;
+  server: Server | undefined;
 
   private readonly logger = new Logger(LocationGateway.name);
   
@@ -44,6 +52,24 @@ export class LocationGateway implements OnGatewayConnection, OnGatewayDisconnect
   
   // Última localização conhecida de cada motorista
   private lastLocations = new Map<string, DriverLocation>();
+  
+  // 🔥 THROTTLE: Controle de frequência de atualizações
+  private lastUpdateTime = new Map<string, number>();
+  private updateThrottle = new Map<string, ThrottleInfo>();
+  
+  // 🔥 CONFIGURAÇÕES DE THROTTLE
+  private readonly THROTTLE_MS = 1000; // 1 segundo entre atualizações
+  private readonly MAX_UPDATES_PER_MINUTE = 30; // Máximo 30 atualizações por minuto
+  
+  // 🔥 LIMPEZA PERIÓDICA DE MEMÓRIA (a cada 5 minutos)
+  private cleanupInterval: NodeJS.Timeout;
+
+  constructor() {
+    // Iniciar limpeza periódica de memória
+    this.cleanupInterval = setInterval(() => {
+      this.cleanupMemory();
+    }, 5 * 60 * 1000); // 5 minutos
+  }
 
   handleConnection(client: Socket) {
     this.logger.log(`Cliente conectado: ${client.id}`);
@@ -104,8 +130,13 @@ export class LocationGateway implements OnGatewayConnection, OnGatewayDisconnect
       this.driverSessions.delete(driverId);
       this.logger.log(`🚗 Motorista ${driverId} desconectado`);
       
+      // 🔥 Limpar throttle e cache do motorista desconectado
+      const throttleKey = `${driverId}_${routeId}`;
+      this.lastUpdateTime.delete(throttleKey);
+      this.updateThrottle.delete(throttleKey);
+      
       // Notificar observadores que o motorista está offline
-      this.server.to(`route:${routeId}`).emit('driver-offline', {
+      this.server?.to(`route:${routeId}`).emit('driver-offline', {
         driverId,
         message: 'Motorista está offline',
       });
@@ -127,6 +158,72 @@ export class LocationGateway implements OnGatewayConnection, OnGatewayDisconnect
       this.logger.warn(`Cliente ${client.id} tentou atualizar localização sem driverId/routeId`);
       return;
     }
+
+    // 🔥 VALIDAÇÃO DOS DADOS
+    if (typeof data.latitude !== 'number' || typeof data.longitude !== 'number') {
+      this.logger.warn(`Motorista ${driverId} enviou coordenadas inválidas`);
+      return;
+    }
+
+    // 🔥 THROTTLE: Verificar última vez que este motorista enviou atualização
+    const now = Date.now();
+    const throttleKey = `${driverId}_${routeId}`;
+    const lastUpdateTime = this.lastUpdateTime.get(throttleKey) || 0;
+    
+    // Enviar atualização no máximo a cada THROTTLE_MS
+    if (now - lastUpdateTime < this.THROTTLE_MS) {
+      // Ignora atualizações muito frequentes
+      this.logger.debug(`⏳ Throttle ativo para motorista ${driverId} (${now - lastUpdateTime}ms desde última atualização)`);
+      return;
+    }
+    
+    // 🔥 VERIFICAR LIMITE DE ATUALIZAÇÕES POR MINUTO
+    let throttleInfo = this.updateThrottle.get(throttleKey);
+    if (!throttleInfo) {
+      throttleInfo = {
+        lastUpdateTime: now,
+        updateCount: 1,
+        lastResetTime: now,
+      };
+      this.updateThrottle.set(throttleKey, throttleInfo);
+    } else {
+      // Resetar contagem a cada minuto
+      if (now - throttleInfo.lastResetTime > 60000) {
+        throttleInfo.updateCount = 1;
+        throttleInfo.lastResetTime = now;
+      } else {
+        throttleInfo.updateCount++;
+      }
+      
+      throttleInfo.lastUpdateTime = now;
+      
+      // Se excedeu o limite, bloquear
+      if (throttleInfo.updateCount > this.MAX_UPDATES_PER_MINUTE) {
+        this.logger.warn(`⚠️ Motorista ${driverId} excedeu limite de atualizações (${throttleInfo.updateCount}/${this.MAX_UPDATES_PER_MINUTE})`);
+        return;
+      }
+    }
+    
+    this.lastUpdateTime.set(throttleKey, now);
+    
+    // 🔥 VERIFICAR SE A LOCALIZAÇÃO MUDOU SIGNIFICATIVAMENTE (opcional)
+    const lastLocation = this.lastLocations.get(`${driverId}_${routeId}`);
+    if (lastLocation) {
+      const distance = this.calculateDistance(
+        lastLocation.latitude,
+        lastLocation.longitude,
+        data.latitude,
+        data.longitude
+      );
+      
+      // Se a distância for muito pequena (< 5 metros), não enviar atualização
+      if (distance < 5 && lastLocation.isSimulating === data.isSimulating) {
+        this.logger.debug(`📍 Motorista ${driverId} movimentou apenas ${distance.toFixed(1)}m, ignorando...`);
+        return;
+      }
+      
+      this.logger.debug(`📍 Motorista ${driverId} movimentou ${distance.toFixed(1)}m`);
+    }
     
     const location: DriverLocation = {
       driverId,
@@ -140,20 +237,126 @@ export class LocationGateway implements OnGatewayConnection, OnGatewayDisconnect
     // Armazenar última localização
     this.lastLocations.set(`${driverId}_${routeId}`, location);
     
-    this.logger.debug(
-      `📍 Motorista ${driverId} atualizou posição: ${data.latitude}, ${data.longitude} (${data.isSimulating ? 'simulação' : 'GPS real'})`
+    this.logger.log(
+      `📍 Motorista ${driverId} atualizou posição: ${data.latitude.toFixed(6)}, ${data.longitude.toFixed(6)} (${data.isSimulating ? 'simulação' : 'GPS real'})`
     );
     
-    // Retransmitir para TODOS os clientes na sala da rota (incluindo observadores)
-    // EXCETO o próprio motorista (para não duplicar no frontend)
+    // 🔥 RETRANSMITIR PARA OBSERVADORES
+    // IMPORTANTE: Usar `client.to` para enviar para TODOS na sala EXCETO o motorista
     client.to(`route:${routeId}`).emit('location-update', location);
     
-    // Opcional: enviar também um ACK para o motorista
-    client.emit('location-ack', { timestamp: location.timestamp });
+    // 🔥 OPCIONAL: Enviar também para o próprio motorista (ACK)
+    client.emit('location-ack', { 
+      timestamp: location.timestamp,
+      received: true 
+    });
+    
+    // 🔥 LOG DO NÚMERO DE OBSERVADORES
+    const roomSize = this.routeRooms.get(routeId)?.size || 0;
+    if (roomSize > 1) {
+      this.logger.debug(`   👀 Enviado para ${roomSize - 1} observador(es)`);
+    }
   }
   
-  // Método para obter a localização atual de um motorista (via HTTP, se necessário)
+  // 🔥 MÉTODO PARA TRANSMITIR LOCALIZAÇÃO EM MASSA (para simulações)
+  @SubscribeMessage('batch-update')
+  handleBatchUpdate(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { locations: Array<{ latitude: number; longitude: number; isSimulating?: boolean }> },
+  ) {
+    const { driverId, routeId } = client.data;
+    
+    if (!driverId || !routeId) {
+      return;
+    }
+    
+    // Processar apenas a última localização do batch
+    const lastLocation = data.locations[data.locations.length - 1];
+    if (lastLocation) {
+      this.handleUpdateLocation(client, {
+        latitude: lastLocation.latitude,
+        longitude: lastLocation.longitude,
+        isSimulating: lastLocation.isSimulating,
+      });
+    }
+  }
+  
+  // 🔥 MÉTODO PARA OBTER STATUS DO MOTORISTA
+  @SubscribeMessage('get-driver-status')
+  handleGetDriverStatus(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { driverId: string; routeId: string },
+  ) {
+    const location = this.lastLocations.get(`${data.driverId}_${data.routeId}`);
+    const isOnline = this.driverSessions.has(data.driverId);
+    
+    client.emit('driver-status', {
+      driverId: data.driverId,
+      routeId: data.routeId,
+      isOnline,
+      lastLocation: location || null,
+      lastUpdate: location?.timestamp || null,
+    });
+  }
+  
+  // 🔥 MÉTODO PARA LIMPEZA DE MEMÓRIA
+  private cleanupMemory() {
+    const now = Date.now();
+    let cleanedThrottle = 0;
+    let cleanedLocations = 0;
+    
+    // Limpar throttle antigo (mais de 10 minutos sem atualização)
+    for (const [key, info] of this.updateThrottle.entries()) {
+      if (now - info.lastUpdateTime > 10 * 60 * 1000) {
+        this.updateThrottle.delete(key);
+        cleanedThrottle++;
+      }
+    }
+    
+    // Limpar lastUpdateTime antigo
+    for (const [key, lastTime] of this.lastUpdateTime.entries()) {
+      if (now - lastTime > 10 * 60 * 1000) {
+        this.lastUpdateTime.delete(key);
+      }
+    }
+    
+    // Limpar localizações antigas (motoristas desconectados há mais de 30 min)
+    // Nota: Não estamos limpando lastLocations para não perder histórico recente
+    
+    if (cleanedThrottle > 0) {
+      this.logger.log(`🧹 Limpeza de memória: ${cleanedThrottle} entradas de throttle removidas`);
+    }
+  }
+  
+  // 🔥 UTILITÁRIO: Calcular distância entre dois pontos (Haversine)
+  private calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    const R = 6371000; // Raio da Terra em metros
+    const dLat = this.deg2rad(lat2 - lat1);
+    const dLon = this.deg2rad(lon2 - lon1);
+    const a = 
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(this.deg2rad(lat1)) * Math.cos(this.deg2rad(lat2)) * 
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  }
+  
+  private deg2rad(deg: number): number {
+    return deg * (Math.PI / 180);
+  }
+  
+  // 🔥 MÉTODO PARA OBTER A LOCALIZAÇÃO ATUAL (via HTTP)
   async getCurrentLocation(driverId: string, routeId: string): Promise<DriverLocation | null> {
     return this.lastLocations.get(`${driverId}_${routeId}`) || null;
+  }
+  
+  // 🔥 MÉTODO PARA OBTER ESTATÍSTICAS (para debug)
+  getStats() {
+    return {
+      activeDrivers: this.driverSessions.size,
+      activeRooms: this.routeRooms.size,
+      cachedLocations: this.lastLocations.size,
+      throttledDrivers: this.updateThrottle.size,
+    };
   }
 }
