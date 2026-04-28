@@ -257,6 +257,33 @@ export class LocationGateway implements OnGatewayConnection, OnGatewayDisconnect
       this.logger.debug(`   👀 Enviado para ${roomSize - 1} observador(es)`);
     }
   }
+
+  // Adicione este método no LocationGateway
+
+// 🔥 MÉTODO PARA NOTIFICAR QUE A ROTA FOI FINALIZADA
+@SubscribeMessage('route-finished')
+handleRouteFinished(
+  @ConnectedSocket() client: Socket,
+  @MessageBody() data: { routeId: string; message?: string },
+) {
+  const { routeId } = data;
+  const { driverId } = client.data;
+  
+  this.logger.log(`🏁 Rota finalizada: ${routeId} pelo motorista ${driverId}`);
+  
+  // Notificar TODOS os observadores na sala
+  this.server?.to(`route:${routeId}`).emit('route-completed', {
+    routeId,
+    driverId,
+    message: data.message || 'Rota finalizada com sucesso!',
+    timestamp: new Date(),
+  });
+  
+  // Limpar cache do motorista
+  const throttleKey = `${driverId}_${routeId}`;
+  this.lastUpdateTime.delete(throttleKey);
+  this.updateThrottle.delete(throttleKey);
+}
   
   // 🔥 MÉTODO PARA TRANSMITIR LOCALIZAÇÃO EM MASSA (para simulações)
   @SubscribeMessage('batch-update')
