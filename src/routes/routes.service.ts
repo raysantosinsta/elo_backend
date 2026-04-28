@@ -131,248 +131,222 @@ export class RouteService {
     return tasks;
   }
 
-  /**
-   * OTIMIZADOR DE ROTAS (O Coração da Logística).
-   * Recebe uma lista de IDs de tarefas e a localização do motorista.
-   * Retorna as tarefas ordenadas pela melhor sequência lógica.
-   * @param dto - Dados contendo IDs das tarefas e localização inicial do motorista.
-   */
   async optimizeRoute(dto: OptimizeRouteDto) {
-    this.logger.log('='.repeat(80));
-    this.logger.log('🚀 [optimizeRoute] INICIANDO OTIMIZAÇÃO DE ROTA');
-    this.logger.log('='.repeat(80));
-    this.logger.log(`📦 Quantidade de tarefas: ${dto.taskIds.length}`);
-    this.logger.log(
-      `📍 Localização motorista: lat=${dto.driverLatitude}, lng=${dto.driverLongitude}`,
-    );
-    this.logger.log(
-      `🎯 Tipo de ordenação: ${dto.orderBy || 'DISTANCE (padrão)'}`,
-    );
-    this.logger.log(`📋 IDs das tarefas: ${dto.taskIds.join(', ')}`);
+  this.logger.log('='.repeat(80));
+  this.logger.log('🚀 [optimizeRoute] INICIANDO OTIMIZAÇÃO DE ROTA');
+  this.logger.log('='.repeat(80));
+  
+  // 🔥 LOG DETALHADO DO DTO RECEBIDO
+  this.logger.log(`📦 DTO recebido:`);
+  this.logger.log(`   taskIds: ${JSON.stringify(dto.taskIds)}`);
+  this.logger.log(`   Quantidade de taskIds: ${dto.taskIds.length}`);
+  this.logger.log(`   driverLatitude: ${dto.driverLatitude}`);
+  this.logger.log(`   driverLongitude: ${dto.driverLongitude}`);
+  this.logger.log(`   orderBy: ${dto.orderBy || 'DISTANCE (padrão)'}`);
 
-    // 1. Busca todas as tarefas solicitadas no banco de dados
-    this.logger.log('🔍 [1/6] Buscando tarefas no banco de dados...');
+  // 1. Busca todas as tarefas solicitadas no banco de dados
+  this.logger.log('🔍 [1/6] Buscando tarefas no banco de dados...');
 
-    const tasks = await this.prisma.task.findMany({
-      where: {
-        id: { in: dto.taskIds },
-        taskAddress: {
-          latitude: { not: null },
-          longitude: { not: null },
-        },
+  const tasks = await this.prisma.task.findMany({
+    where: {
+      id: { in: dto.taskIds },
+      taskAddress: {
+        latitude: { not: null },
+        longitude: { not: null },
       },
-      include: {
-        taskAddress: true,
-        column: { select: { id: true } },
-        userAssigned: { select: { id: true, name: true } },
-      },
-    });
+    },
+    include: {
+      taskAddress: true,
+      column: { select: { id: true } },
+      userAssigned: { select: { id: true, name: true } },
+    },
+  });
 
-    this.logger.log(
-      `✅ [1/6] Tarefas encontradas: ${tasks.length} de ${dto.taskIds.length} solicitadas`,
-    );
-
-    // Log detalhado das tarefas encontradas
+  this.logger.log(`✅ [1/6] Tarefas encontradas: ${tasks.length} de ${dto.taskIds.length} solicitadas`);
+  
+  // 🔥 LOG DETALHADO DAS TAREFAS ENCONTRADAS
+  if (tasks.length > 0) {
+    this.logger.log(`📋 LISTA DE TAREFAS ENCONTRADAS:`);
     tasks.forEach((task, index) => {
-      this.logger.log(
-        `   ${index + 1}. ID: ${task.id} | Título: ${task.title}`,
-      );
-      this.logger.log(
-        `      Endereço: ${task.taskAddress?.endereco}, ${task.taskAddress?.numero} - ${task.taskAddress?.cidade}`,
-      );
-      this.logger.log(
-        `      Coordenadas: lat=${task.taskAddress?.latitude}, lng=${task.taskAddress?.longitude}`,
-      );
+      this.logger.log(`   ${index + 1}. ID: ${task.id}`);
+      this.logger.log(`      Título: ${task.title}`);
+      this.logger.log(`      Status: ${task.status}`);
+      this.logger.log(`      Prioridade: ${task.priority}`);
+      this.logger.log(`      Endereço: ${task.taskAddress?.endereco}, ${task.taskAddress?.numero} - ${task.taskAddress?.cidade}`);
+      this.logger.log(`      Coordenadas: lat=${task.taskAddress?.latitude}, lng=${task.taskAddress?.longitude}`);
+    });
+  }
+
+  // Verificar tarefas que não foram encontradas
+  const foundIds = tasks.map((t) => t.id);
+  const missingIds = dto.taskIds.filter((id) => !foundIds.includes(id));
+  if (missingIds.length > 0) {
+    this.logger.warn(`⚠️ Tarefas não encontradas (sem coordenadas válidas): ${missingIds.join(', ')}`);
+  }
+
+  if (tasks.length === 0) {
+    this.logger.error(`❌ [1/6] Nenhuma tarefa válida encontrada!`);
+    this.logger.error(`   IDs solicitados: ${dto.taskIds.join(', ')}`);
+    throw new NotFoundException(
+      'Nenhuma tarefa válida encontrada. Verifique se todas as tarefas têm endereço com coordenadas.',
+    );
+  }
+
+  let optimizedOrder: typeof tasks = [];
+
+  // --- CENÁRIO A: ORDENAÇÃO POR PRIORIDADE ---
+  if (dto.orderBy === RouteOrderType.PRIORITY) {
+    this.logger.log('🎯 [2/6] Usando ordenação por PRIORIDADE');
+
+    optimizedOrder = tasks.sort((a, b) => {
+      const priorityA = a.priority ?? 999;
+      const priorityB = b.priority ?? 999;
+      return priorityA - priorityB;
     });
 
-    // Verificar tarefas que não foram encontradas
-    const foundIds = tasks.map((t) => t.id);
-    const missingIds = dto.taskIds.filter((id) => !foundIds.includes(id));
-    if (missingIds.length > 0) {
-      this.logger.warn(
-        `⚠️ Tarefas não encontradas (sem coordenadas válidas): ${missingIds.join(', ')}`,
-      );
-    }
+    this.logger.log('📊 Ordem por prioridade:');
+    optimizedOrder.forEach((task, idx) => {
+      this.logger.log(`   ${idx + 1}. ${task.title} (prioridade: ${task.priority ?? 'N/A'})`);
+    });
+  }
+  // --- CENÁRIO B: ORDENAÇÃO POR PROXIMIDADE (Algoritmo Vizinho Mais Próximo) ---
+  else {
+    this.logger.log('🎯 [2/6] Usando ordenação por PROXIMIDADE (Vizinho Mais Próximo)');
 
-    if (tasks.length === 0) {
-      this.logger.error(`❌ [1/6] Nenhuma tarefa válida encontrada!`);
-      this.logger.error(`   IDs solicitados: ${dto.taskIds.join(', ')}`);
-      throw new NotFoundException(
-        'Nenhuma tarefa válida encontrada. Verifique se todas as tarefas têm endereço com coordenadas.',
-      );
-    }
+    // Ponto de partida (Localização do Motorista)
+    let currentLocation = {
+      lat: Number(dto.driverLatitude),
+      lng: Number(dto.driverLongitude),
+    };
+    this.logger.log(`📍 Ponto de partida: lat=${currentLocation.lat}, lng=${currentLocation.lng}`);
 
-    let optimizedOrder: typeof tasks = [];
+    // Cria uma cópia da lista para ir removendo as tarefas já visitadas
+    const remainingTasks = [...tasks];
+    this.logger.log(`📋 Tarefas pendentes: ${remainingTasks.length}`);
 
-    // --- CENÁRIO A: ORDENAÇÃO POR PRIORIDADE ---
-    if (dto.orderBy === RouteOrderType.PRIORITY) {
-      this.logger.log('🎯 [2/6] Usando ordenação por PRIORIDADE');
+    let iteration = 0;
 
-      optimizedOrder = tasks.sort((a, b) => {
-        const priorityA = a.priority ?? 999;
-        const priorityB = b.priority ?? 999;
-        return priorityA - priorityB;
-      });
+    // Enquanto houver tarefas na lista de pendentes...
+    while (remainingTasks.length > 0) {
+      iteration++;
+      this.logger.log(`\n🔄 [Iteração ${iteration}] Tarefas restantes: ${remainingTasks.length}`);
+      this.logger.log(`📍 Posição atual: lat=${currentLocation.lat}, lng=${currentLocation.lng}`);
 
-      this.logger.log('📊 Ordem por prioridade:');
-      optimizedOrder.forEach((task, idx) => {
-        this.logger.log(
-          `   ${idx + 1}. ${task.title} (prioridade: ${task.priority ?? 'N/A'})`,
-        );
-      });
-    }
-    // --- CENÁRIO B: ORDENAÇÃO POR PROXIMIDADE (Algoritmo Vizinho Mais Próximo) ---
-    else {
-      this.logger.log(
-        '🎯 [2/6] Usando ordenação por PROXIMIDADE (Vizinho Mais Próximo)',
-      );
+      let nearestTaskIndex = -1;
+      let minDistance = Infinity;
 
-      // Ponto de partida (Localização do Motorista)
-      let currentLocation = {
-        lat: Number(dto.driverLatitude),
-        lng: Number(dto.driverLongitude),
-      };
-      this.logger.log(
-        `📍 Ponto de partida: lat=${currentLocation.lat}, lng=${currentLocation.lng}`,
-      );
+      // Percorre todas as tarefas restantes para achar a mais próxima
+      for (let i = 0; i < remainingTasks.length; i++) {
+        const t = remainingTasks[i];
+        const tLat = Number(t.taskAddress?.latitude);
+        const tLng = Number(t.taskAddress?.longitude);
 
-      // Cria uma cópia da lista para ir removendo as tarefas já visitadas
-      const remainingTasks = [...tasks];
-      this.logger.log(`📋 Tarefas pendentes: ${remainingTasks.length}`);
-
-      let iteration = 0;
-
-      // Enquanto houver tarefas na lista de pendentes...
-      while (remainingTasks.length > 0) {
-        iteration++;
-        this.logger.log(
-          `\n🔄 [Iteração ${iteration}] Tarefas restantes: ${remainingTasks.length}`,
-        );
-        this.logger.log(
-          `📍 Posição atual: lat=${currentLocation.lat}, lng=${currentLocation.lng}`,
-        );
-
-        let nearestTaskIndex = -1;
-        let minDistance = Infinity;
-
-        // Percorre todas as tarefas restantes para achar a mais próxima
-        for (let i = 0; i < remainingTasks.length; i++) {
-          const t = remainingTasks[i];
-          const tLat = Number(t.taskAddress?.latitude);
-          const tLng = Number(t.taskAddress?.longitude);
-
-          if (!t.taskAddress || isNaN(tLat) || isNaN(tLng)) {
-            this.logger.warn(
-              `   ⚠️ Tarefa ${t.id} (${t.title}) - coordenadas inválidas, ignorando`,
-            );
-            continue;
-          }
-
-          const dist = this.calculateDistance(
-            currentLocation.lat,
-            currentLocation.lng,
-            tLat,
-            tLng,
-          );
-
-          this.logger.log(
-            `   📍 Tarefa: ${t.title} | Distância: ${dist.toFixed(2)} km`,
-          );
-
-          if (dist < minDistance) {
-            minDistance = dist;
-            nearestTaskIndex = i;
-          }
+        if (!t.taskAddress || isNaN(tLat) || isNaN(tLng)) {
+          this.logger.warn(`   ⚠️ Tarefa ${t.id} (${t.title}) - coordenadas inválidas, ignorando`);
+          continue;
         }
 
-        if (nearestTaskIndex === -1) {
-          this.logger.warn(
-            `⚠️ Nenhuma tarefa válida encontrada na iteração ${iteration}`,
-          );
-          optimizedOrder.push(...remainingTasks);
-          break;
-        }
-
-        // Adiciona a tarefa mais próxima na lista otimizada
-        const nearestTask = remainingTasks[nearestTaskIndex];
-        optimizedOrder.push(nearestTask);
-        this.logger.log(
-          `✅ Tarefa escolhida: ${nearestTask.title} (distância: ${minDistance.toFixed(2)} km)`,
+        const dist = this.calculateDistance(
+          currentLocation.lat,
+          currentLocation.lng,
+          tLat,
+          tLng,
         );
 
-        // Atualiza a localização atual
-        const nextLat = Number(nearestTask.taskAddress?.latitude);
-        const nextLng = Number(nearestTask.taskAddress?.longitude);
+        this.logger.log(`   📍 Tarefa: ${t.title} | Distância: ${dist.toFixed(2)} km`);
 
-        if (!isNaN(nextLat) && !isNaN(nextLng)) {
-          currentLocation = { lat: nextLat, lng: nextLng };
-          this.logger.log(
-            `📍 Nova posição: ${nearestTask.taskAddress?.endereco}, ${nearestTask.taskAddress?.numero}`,
-          );
+        if (dist < minDistance) {
+          minDistance = dist;
+          nearestTaskIndex = i;
         }
-
-        // Remove a tarefa escolhida da lista de pendentes
-        remainingTasks.splice(nearestTaskIndex, 1);
       }
 
-      this.logger.log(
-        `\n✅ [2/6] Ordenação por proximidade concluída em ${iteration} iterações`,
-      );
-      this.logger.log('📊 Ordem final da rota:');
-      optimizedOrder.forEach((task, idx) => {
-        this.logger.log(
-          `   ${idx + 1}. ${task.title} (${task.taskAddress?.cidade})`,
-        );
-      });
+      if (nearestTaskIndex === -1) {
+        this.logger.warn(`⚠️ Nenhuma tarefa válida encontrada na iteração ${iteration}`);
+        optimizedOrder.push(...remainingTasks);
+        break;
+      }
+
+      // Adiciona a tarefa mais próxima na lista otimizada
+      const nearestTask = remainingTasks[nearestTaskIndex];
+      optimizedOrder.push(nearestTask);
+      this.logger.log(`✅ Tarefa escolhida: ${nearestTask.title} (distância: ${minDistance.toFixed(2)} km)`);
+
+      // Atualiza a localização atual
+      const nextLat = Number(nearestTask.taskAddress?.latitude);
+      const nextLng = Number(nearestTask.taskAddress?.longitude);
+
+      if (!isNaN(nextLat) && !isNaN(nextLng)) {
+        currentLocation = { lat: nextLat, lng: nextLng };
+        this.logger.log(`📍 Nova posição: ${nearestTask.taskAddress?.endereco}, ${nearestTask.taskAddress?.numero}`);
+      }
+
+      // Remove a tarefa escolhida da lista de pendentes
+      remainingTasks.splice(nearestTaskIndex, 1);
     }
 
-    // --- CÁLCULO DE ESTATÍSTICAS DA ROTA ---
-    this.logger.log('\n📊 [3/6] Calculando estatísticas da rota...');
-
-    const stats = await this.calculateRouteStats(
-      { lat: Number(dto.driverLatitude), lng: Number(dto.driverLongitude) },
-      optimizedOrder,
-    );
-
-    this.logger.log(`✅ [3/6] Estatísticas calculadas:`);
-    this.logger.log(`   Tempo total: ${stats.formattedDuration}`);
-    this.logger.log(`   Distância total: ${stats.formattedDistance}`);
-    this.logger.log(`   Segundos: ${stats.totalDurationSeconds}`);
-    this.logger.log(`   Metros: ${stats.totalDistanceMeters}`);
-
-    // --- VALIDAÇÃO FINAL ---
-    this.logger.log('\n🔍 [4/6] Validando rota final...');
-
-    if (optimizedOrder.length !== tasks.length) {
-      this.logger.warn(
-        `⚠️ Aviso: ${optimizedOrder.length} tarefas otimizadas, mas ${tasks.length} foram encontradas`,
-      );
-    }
-
-    // Verificar se todas as tarefas originais estão na rota
-    const optimizedIds = optimizedOrder.map((t) => t.id);
-    const missingInOptimized = tasks.filter(
-      (t) => !optimizedIds.includes(t.id),
-    );
-    if (missingInOptimized.length > 0) {
-      this.logger.warn(
-        `⚠️ Tarefas não incluídas na rota: ${missingInOptimized.map((t) => t.title).join(', ')}`,
-      );
-    }
-
-    this.logger.log('\n' + '='.repeat(80));
-    this.logger.log(
-      `✅ [FINAL] Rota otimizada com ${optimizedOrder.length} paradas`,
-    );
-    this.logger.log(`   Tempo estimado: ${stats.formattedDuration}`);
-    this.logger.log(`   Distância: ${stats.formattedDistance}`);
-    this.logger.log('='.repeat(80) + '\n');
-
-    return {
-      route: optimizedOrder,
-      stats: stats,
-    };
+    this.logger.log(`\n✅ [2/6] Ordenação por proximidade concluída em ${iteration} iterações`);
+    this.logger.log('📊 Ordem final da rota (OTIMIZADA):');
+    optimizedOrder.forEach((task, idx) => {
+      this.logger.log(`   ${idx + 1}. ${task.title} (${task.taskAddress?.cidade}) - lat: ${task.taskAddress?.latitude}, lng: ${task.taskAddress?.longitude}`);
+    });
   }
+
+  // 🔥 LOG DA ORDEM FINAL COMPARADA COM A ORDEM ORIGINAL
+  this.logger.log(`\n📊 COMPARAÇÃO DE ORDEM:`);
+  this.logger.log(`   Ordem original (recebida):`);
+  tasks.forEach((task, idx) => {
+    this.logger.log(`     ${idx + 1}. ${task.title}`);
+  });
+  this.logger.log(`   Ordem otimizada (retornada):`);
+  optimizedOrder.forEach((task, idx) => {
+    this.logger.log(`     ${idx + 1}. ${task.title}`);
+  });
+
+  // --- CÁLCULO DE ESTATÍSTICAS DA ROTA ---
+  this.logger.log('\n📊 [3/6] Calculando estatísticas da rota...');
+
+  const stats = await this.calculateRouteStats(
+    { lat: Number(dto.driverLatitude), lng: Number(dto.driverLongitude) },
+    optimizedOrder,
+  );
+
+  this.logger.log(`✅ [3/6] Estatísticas calculadas:`);
+  this.logger.log(`   Tempo total: ${stats.formattedDuration}`);
+  this.logger.log(`   Distância total: ${stats.formattedDistance}`);
+  this.logger.log(`   Segundos: ${stats.totalDurationSeconds}`);
+  this.logger.log(`   Metros: ${stats.totalDistanceMeters}`);
+
+  // --- VALIDAÇÃO FINAL ---
+  this.logger.log('\n🔍 [4/6] Validando rota final...');
+
+  if (optimizedOrder.length !== tasks.length) {
+    this.logger.warn(`⚠️ Aviso: ${optimizedOrder.length} tarefas otimizadas, mas ${tasks.length} foram encontradas`);
+  }
+
+  // Verificar se todas as tarefas originais estão na rota
+  const optimizedIds = optimizedOrder.map((t) => t.id);
+  const missingInOptimized = tasks.filter((t) => !optimizedIds.includes(t.id));
+  if (missingInOptimized.length > 0) {
+    this.logger.warn(`⚠️ Tarefas não incluídas na rota: ${missingInOptimized.map((t) => t.title).join(', ')}`);
+  }
+
+  // 🔥 LOG DO RETORNO
+  this.logger.log('\n' + '='.repeat(80));
+  this.logger.log(`✅ [FINAL] Rota otimizada com ${optimizedOrder.length} paradas`);
+  this.logger.log(`   Ordem final (array de retorno):`);
+  optimizedOrder.forEach((task, idx) => {
+    this.logger.log(`     ${idx + 1}. ${task.title} (ID: ${task.id})`);
+  });
+  this.logger.log(`   Tempo estimado: ${stats.formattedDuration}`);
+  this.logger.log(`   Distância: ${stats.formattedDistance}`);
+  this.logger.log('='.repeat(80) + '\n');
+
+  return {
+    route: optimizedOrder,
+    stats: stats,
+  };
+}
 
   /**
    * Calcula o tempo e distância totais da rota.
