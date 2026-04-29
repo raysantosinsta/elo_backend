@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 /* eslint-disable prettier/prettier */
 /* eslint-disable @typescript-eslint/no-unsafe-enum-comparison */
 /* eslint-disable @typescript-eslint/restrict-template-expressions */
@@ -31,21 +32,20 @@ import { InjectMetric } from '@willsoto/nestjs-prometheus';
 import type { Cache } from 'cache-manager';
 import { ClsService } from 'nestjs-cls';
 import { Counter, Histogram } from 'prom-client';
+import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SupabaseService } from '../supabase/supabase.service';
-import { AuditService } from '../audit/audit.service';
 import {
   CreateFlowDto,
   CreateFlowItemDto,
   CreateStageDto,
-  DateFilterType,
+  DeadlineDashboardQueryDto,
   FlowFilterDto,
+  MoveItemWithDeadlineDto,
   UpdateFlowItemDto,
   UpdateItemStageDeadlineDto,
-  BulkUpdateItemStagesDto,
-  MoveItemWithDeadlineDto,
-  DeadlineDashboardQueryDto,
 } from './dto/create-flow.dto';
+import { WhatsappNotificationService } from 'src/whatsapp-notification/whatsapp-notification.service';
 
 // --- MÉTRICAS ---
 const flowOpsCounter = new Counter({
@@ -77,9 +77,12 @@ export class FlowService {
 
   constructor(
     private prisma: PrismaService,
+
     private readonly cls: ClsService,
     private supabase: SupabaseService,
     private auditService: AuditService,
+    private readonly whatsappNotification: WhatsappNotificationService, // 🔥 ADICIONA
+
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
     @InjectMetric('flow_item_moves_total')
     public moveCounter: Counter<string>,
@@ -1614,6 +1617,23 @@ export class FlowService {
 
         const item = await tx.flowItem.create({ data: dataToCreate });
 
+        // ============================================================
+        // 🔥 🔥 🔥 NOTIFICAÇÃO WHATSAPP - ADICIONE AQUI 🔥 🔥 🔥
+        // ============================================================
+        try {
+          const phoneNumber = '+5585984372865';
+          const message = `✅ NOVO ITEM: ${item.title}`;
+
+          await this.whatsappNotification.sendSimpleMessage(
+            phoneNumber,
+            message,
+          );
+          this.logger.log(`📱 Notificação enviada para ${phoneNumber}`);
+        } catch (error: any) {
+          console.error('❌ ERRO NO WHATSAPP:', error.message);
+        }
+        // ============================================================
+
         // 5. Gera os registros de prazo (FlowItemStage) para a nova estrutura
         const stages = await tx.flowStage.findMany({
           where: { flowId, companyId },
@@ -1663,14 +1683,9 @@ export class FlowService {
     userId: string,
     dto: CreateFlowItemDto,
   ) {
-    const companyId = this.getCompanyIdFromContext();
+    console.log('🚀🚀🚀 CREATE FLOW ITEM WITH STAGES FOI CHAMADO! 🚀🚀🚀');
 
-    this.logger.log('========================================');
-    this.logger.log('🎯 [REQUISITO 3] CRIANDO ITEM COM PRAZOS POR ETAPA');
-    this.logger.log('========================================');
-    this.logger.log(`📦 flowId: ${flowId}`);
-    this.logger.log(`📦 userId: ${userId}`);
-    this.logger.log(`📦 dto:`, dto);
+    const companyId = this.getCompanyIdFromContext();
 
     // Primeiro cria o item normalmente
     const item = await this.createFlowItem(flowId, userId, dto);

@@ -36,6 +36,8 @@ import { MetricsModule } from './metrics/metrics.module';
 import { AuditModule } from './audit/audit.module';
 import { CompanyRolesModule } from './company-roles/company-roles.module';
 import { LocationGateway } from './location/location.gateway';
+import { WhatsappNotificationService } from './whatsapp-notification/whatsapp-notification.service';
+import { WhatsappNotificationModule } from './whatsapp-notification/whatsapp-notification.module';
 
 @Module({
   imports: [
@@ -85,6 +87,7 @@ import { LocationGateway } from './location/location.gateway';
     MetricsModule,
     AuditModule,
     CompanyRolesModule,
+    WhatsappNotificationModule,
   ],
   // ADICIONE O CONTROLLER AQUI
   controllers: [AppController, MetricsController],
@@ -102,6 +105,7 @@ import { LocationGateway } from './location/location.gateway';
       useClass: TenantInterceptor,
     },
     LocationGateway,
+    WhatsappNotificationService,
   ],
 })
 export class AppModule { }
