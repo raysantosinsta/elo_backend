@@ -156,8 +156,15 @@ export class UsersService {
 
     const existingUser = await this.findUserById(id);
 
+    // 🔥 VERIFICAÇÃO: Garantir que companyId não seja null
+    const companyId = existingUser.companyId;
+    if (!companyId) {
+      throw new BadRequestException('Usuário não está vinculado a uma empresa');
+    }
+
     const userData: any = {};
 
+    // 🔥 Campos básicos
     if (updateFields.name !== undefined) userData.name = updateFields.name;
     if (updateFields.email !== undefined) userData.email = updateFields.email;
     if (updateFields.contact !== undefined)
@@ -171,63 +178,102 @@ export class UsersService {
           : updateFields.document;
     }
 
+    // 🔥 Status (se veio no updateFields)
+    if (updateFields.status !== undefined) {
+      userData.status = updateFields.status;
+    }
+
+    // =========================================================================
+    // 🔥 TRATAMENTO DO CARGO PROFISSIONAL (professionalRole)
+    // =========================================================================
+    let finalProfessionalRoleId: string | null = null;
+    let finalProfessionalRoleName: string | null = null;
+
     // 🔥 PRIORIDADE 1: Se veio professionalRoleId (ID direto), usa ele
     if (professionalRoleId !== undefined) {
-      userData.professionalRoleId =
+      finalProfessionalRoleId =
         professionalRoleId === '' || professionalRoleId === null
           ? null
           : professionalRoleId;
+
+      // Busca o nome do cargo para salvar também em professionalRoleName
+      if (finalProfessionalRoleId) {
+        const roleFound = await this.prisma.companyRole.findFirst({
+          where: {
+            id: finalProfessionalRoleId,
+            companyId: companyId, // 🔥 Agora companyId é garantido como string
+          },
+          select: { name: true },
+        });
+        finalProfessionalRoleName = roleFound?.name || null;
+      } else {
+        finalProfessionalRoleName = null;
+      }
+
       this.logger.log(
-        `📌 Usando professionalRoleId direto: ${professionalRoleId}`,
+        `📌 Usando professionalRoleId direto: ${finalProfessionalRoleId} -> nome: ${finalProfessionalRoleName}`,
       );
     }
     // 🔥 PRIORIDADE 2: Se veio professionalRole (nome), busca o ID
     else if (professionalRole !== undefined) {
       if (professionalRole === '' || professionalRole === null) {
-        userData.professionalRoleId = null;
+        finalProfessionalRoleId = null;
+        finalProfessionalRoleName = null;
         this.logger.log(`🗑️ Removendo cargo profissional do usuário`);
       } else {
-        const companyId = existingUser.companyId;
         this.logger.log(
           `🔍 Buscando cargo pelo nome: "${professionalRole}" para empresa: ${companyId}`,
         );
 
-        let companyRole: { id: string } | null = null;
-        if (companyId) {
-          companyRole = await this.prisma.companyRole.findFirst({
-            where: {
-              companyId: companyId,
-              name: {
-                equals: professionalRole,
-                mode: 'insensitive',
-              },
-              status: SimpleStatus.ACTIVE,
+        const companyRoleFound = await this.prisma.companyRole.findFirst({
+          where: {
+            companyId: companyId, // 🔥 Agora companyId é garantido como string
+            name: {
+              equals: professionalRole,
+              mode: 'insensitive',
             },
-          });
-        }
+            status: SimpleStatus.ACTIVE,
+          },
+          select: { id: true, name: true },
+        });
 
-        if (companyRole) {
-          userData.professionalRoleId = companyRole.id;
+        if (companyRoleFound) {
+          finalProfessionalRoleId = companyRoleFound.id;
+          finalProfessionalRoleName = companyRoleFound.name;
           this.logger.log(
-            `✅ Cargo "${professionalRole}" encontrado com ID: ${companyRole.id}`,
+            `✅ Cargo "${professionalRole}" encontrado com ID: ${companyRoleFound.id}`,
           );
         } else {
           this.logger.warn(
             `⚠️ Cargo "${professionalRole}" NÃO encontrado para a empresa ${companyId}`,
           );
-          // Opcional: manter o valor anterior ou lançar erro
-          // userData.professionalRoleId = null;
+          // Mantém o valor anterior
+          finalProfessionalRoleId = existingUser.professionalRoleId || null;
+          finalProfessionalRoleName = existingUser.professionalRoleName || null;
         }
       }
     }
+    // 🔥 PRIORIDADE 3: Se não veio nenhum dos dois, mantém os valores atuais
+    else {
+      finalProfessionalRoleId = existingUser.professionalRoleId || null;
+      finalProfessionalRoleName = existingUser.professionalRoleName || null;
+    }
 
-    // Cargo na empresa (companyRole)
+    // Aplica os valores finais ao userData
+    userData.professionalRoleId = finalProfessionalRoleId;
+    userData.professionalRoleName = finalProfessionalRoleName;
+
+    // =========================================================================
+    // 🔥 CARGO NA EMPRESA (companyRole)
+    // =========================================================================
     if (companyRoleId !== undefined) {
       userData.companyRoleId =
         companyRoleId === '' || companyRoleId === null ? null : companyRoleId;
     }
 
-    // 🔥 Role: apenas MASTER pode alterar
+    // =========================================================================
+    // 🔥 ROLE DO SISTEMA: apenas MASTER pode alterar
+    // =========================================================================
     if (role && isMaster) {
       userData.role = role;
     } else if (role && !isMaster) {
@@ -236,17 +282,78 @@ export class UsersService {
       );
     }
 
-    // 🔥 Senha: se fornecida, faz hash
+    // =========================================================================
+    // 🔥 SENHA: se fornecida, faz hash
+    // =========================================================================
     if (password) {
       userData.password = await bcrypt.hash(password, SALT_ROUNDS);
     }
 
     this.logger.log(`📦 Dados finais para atualização:`, userData);
 
-    return await this.db.user.update({
+    // =========================================================================
+    // 🔥 EXECUTAR A ATUALIZAÇÃO
+    // =========================================================================
+    const updatedUser = await this.db.user.update({
       where: { id },
       data: userData,
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        contact: true,
+        document: true,
+        professionalRoleId: true,
+        professionalRoleName: true,
+        professionalRole: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        status: true,
+        role: true,
+        companyId: true,
+        companyRoleId: true,
+        companyRole: {
+          select: {
+            id: true,
+            name: true,
+            level: true,
+            description: true,
+          },
+        },
+        company: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        createdAt: true,
+        updatedAt: true,
+      },
     });
+
+    // =========================================================================
+    // 🔥 FORMATAR A RESPOSTA PARA O FRONTEND
+    // =========================================================================
+    const formattedUser = {
+      ...updatedUser,
+      // Prioriza professionalRoleName, fallback para professionalRole.name
+      professionalRole:
+        updatedUser.professionalRoleName ||
+        updatedUser.professionalRole?.name ||
+        null,
+      // Remove campos aninhados que podem causar confusão
+      professionalRoleName: undefined,
+    };
+
+    this.logger.log(`✅ Usuário ${id} atualizado com sucesso!`);
+    this.logger.log(
+      `📌 professionalRole final: ${formattedUser.professionalRole}`,
+    );
+
+    return formattedUser as any;
   }
 
   public async removeUser(userId: string): Promise<User> {
@@ -256,34 +363,57 @@ export class UsersService {
     });
   }
 
-  // ===========================================================================
-  // 🔍 LEITURA (READ)
-  // ===========================================================================
-
-  public async findUserById(userId: string): Promise<User> {
+  public async findUserById(userId: string): Promise<any> {
     this.logger.log(`🔍 Buscando usuário por ID: ${userId}`);
+
     const user = await this.db.user.findUnique({
       where: { id: userId },
-      include: {
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        contact: true,
+        document: true,
+        professionalRoleName: true,
+        professionalRoleId: true,
+        professionalRole: {
+          select: { id: true, name: true },
+        },
+        status: true,
+        role: true,
+        companyId: true, // 🔥 GARANTIR QUE VENHA companyId
         company: { select: { id: true, name: true } },
         companyRole: {
           select: { id: true, name: true, level: true, description: true },
         },
-        // 🔥 Não precisa incluir professionalRole se estamos usando professionalRoleName
+        createdAt: true,
+        updatedAt: true,
       },
     });
 
     this.logger.log(`📦 Usuário encontrado:`, {
       id: user?.id,
       name: user?.name,
-      companyRoleId: user?.companyRoleId,
-      companyRole: user?.companyRole,
+      companyId: user?.companyId,
+      professionalRoleName: user?.professionalRoleName,
     });
 
     if (!user) {
       throw new NotFoundException('Usuário não encontrado ou acesso negado.');
     }
-    return user;
+
+    // 🔥 Garantir que companyId não seja undefined
+    if (!user.companyId) {
+      throw new BadRequestException('Usuário não está vinculado a uma empresa');
+    }
+
+    // 🔥 Transformar para o frontend
+    return {
+      ...user,
+      professionalRole:
+        user.professionalRoleName || user.professionalRole?.name || null,
+      professionalRoleName: undefined,
+    } as any;
   }
 
   public async findAll(
@@ -302,11 +432,13 @@ export class UsersService {
 
     const where: any = { ...filters };
 
-    if (where.professionalRole) {
-      where.professionalRole = {
-        contains: where.professionalRole,
+    // 🔥 CORREÇÃO: Filtrar pelo nome do cargo (professionalRoleName)
+    if (filters.professionalRole) {
+      where.professionalRoleName = {
+        contains: filters.professionalRole,
         mode: 'insensitive',
       };
+      delete where.professionalRole;
     }
 
     Object.keys(where).forEach(
@@ -327,7 +459,22 @@ export class UsersService {
         take: limit,
         where,
         orderBy: { name: 'asc' },
-        include: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          contact: true,
+          document: true,
+          professionalRoleName: true, // 🔥 INCLUIR este campo
+          professionalRole: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+          status: true,
+          role: true,
+          companyId: true,
           company: { select: { id: true, name: true } },
           companyRole: {
             select: {
@@ -343,14 +490,14 @@ export class UsersService {
 
     this.logger.log(`📦 Total de usuários encontrados: ${data.length}`);
 
-    // 🔥 LOG para verificar se o companyRole veio
-    data.forEach((user) => {
-      this.logger.log(
-        `   - ${user.name}: companyRoleId=${user.companyRoleId}, companyRole=${user.companyRole?.name || 'NULO'}`,
-      );
-    });
+    // 🔥 Transformar para o frontend receber professionalRole como string
+    const formattedData = data.map((user) => ({
+      ...user,
+      professionalRole:
+        user.professionalRoleName || user.professionalRole?.name || null,
+    }));
 
-    return { data, total };
+    return { data: formattedData as any, total };
   }
 
   public async findUsersByCompany(companyId: string): Promise<User[]> {
@@ -363,16 +510,29 @@ export class UsersService {
       );
     }
 
-    return this.db.user.findMany({
+    const users = await this.db.user.findMany({
       where: { companyId, status: SimpleStatus.ACTIVE },
       orderBy: { name: 'asc' },
-      include: {
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        contact: true,
+        professionalRoleName: true, // 🔥 INCLUIR
+        professionalRole: {
+          select: { name: true },
+        },
         companyRole: { select: { id: true, name: true, level: true } },
       },
     });
-  }
 
-  // users.service.ts - findByProfessionalRole
+    // 🔥 Transformar para string
+    return users.map((user) => ({
+      ...user,
+      professionalRole:
+        user.professionalRoleName || user.professionalRole?.name || null,
+    })) as any;
+  }
 
   public async findByProfessionalRole(professionalRole: string) {
     this.logger.log(`Buscando usuários com cargo: ${professionalRole}`);
@@ -388,21 +548,34 @@ export class UsersService {
       where.companyId = tenantId;
     }
 
-    // 🔥 CORREÇÃO: Buscar pelo nome do cargo no relacionamento professionalRole
+    // 🔥 CORREÇÃO: Buscar pelo campo professionalRoleName (texto direto)
+    // E também pelo professionalRoleId (relacionamento)
     const users = await this.db.user.findMany({
       where: {
         ...where,
-        professionalRole: {
-          name: {
-            contains: professionalRole,
-            mode: 'insensitive',
+        OR: [
+          {
+            professionalRoleName: {
+              contains: professionalRole,
+              mode: 'insensitive',
+            },
           },
-        },
+          {
+            professionalRole: {
+              name: {
+                contains: professionalRole,
+                mode: 'insensitive',
+              },
+            },
+          },
+        ],
       },
       select: {
         id: true,
         name: true,
         email: true,
+        contact: true,
+        professionalRoleName: true,
         professionalRole: {
           select: {
             name: true,
@@ -432,8 +605,16 @@ export class UsersService {
 
     // 🔥 Transformar para manter compatibilidade com o frontend
     return users.map((user) => ({
-      ...user,
-      professionalRole: user.professionalRole?.name || null,
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      contact: user.contact,
+      // Prioriza professionalRoleName
+      professionalRole:
+        user.professionalRoleName || user.professionalRole?.name || null,
+      status: user.status,
+      company: user.company,
+      companyRole: user.companyRole,
     }));
   }
 
