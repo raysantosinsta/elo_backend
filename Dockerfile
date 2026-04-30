@@ -37,4 +37,4 @@ RUN echo "=== CONTEUDO FINAL DA PASTA DIST ===" && ls -R /app/dist
 
 EXPOSE 3000
 
-CMD ["node", "dist/main.js"]
+CMD ["node", "dist/src/main.js"]
