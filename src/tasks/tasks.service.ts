@@ -248,6 +248,7 @@ export class TasksService {
           finalComment: dto.finalComment,
           dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
           scheduledDate: dto.scheduledAt ? new Date(dto.scheduledAt) : null,
+          intervalTime: dto.intervalTime ?? null, // 🔥 ADICIONE ESTA LINHA
 
           // 🔥 CRIAÇÃO DO ENDEREÇO - Verifica se parsedAddress existe
           taskAddress:
@@ -355,7 +356,6 @@ export class TasksService {
     return task;
   }
 
-  // --- UPDATE ---
   async update(
     id: string,
     dto: UpdateTaskDto,
@@ -368,7 +368,10 @@ export class TasksService {
     const tenantId = this.cls.get<string>('tenantId');
     const userId = this.cls.get<string>('userId');
 
-    const existing = await this.prisma.task.findUnique({ where: { id } });
+    const existing = await this.prisma.task.findUnique({
+      where: { id },
+      include: { taskAddress: true },
+    });
     if (!existing) throw new NotFoundException('Task não encontrada.');
 
     const isMaster = this.cls.get<boolean>('isMaster');
@@ -378,6 +381,111 @@ export class TasksService {
 
     await this.validateTaskRelations(dto);
 
+    // 🔥 FUNÇÃO AUXILIAR PARA PRESERVAR A DATA LOCAL
+    const preserveLocalDate = (dateString: string): Date => {
+      // Se já for uma string no formato YYYY-MM-DD
+      const [year, month, day] = dateString.split('T')[0].split('-');
+      // Criar data no UTC com horário 12:00 (meio-dia)
+      // Isso garante que a data salva seja exatamente o dia selecionado
+      return new Date(
+        Date.UTC(
+          parseInt(year),
+          parseInt(month) - 1,
+          parseInt(day),
+          12, // Meio-dia UTC
+          0,
+          0,
+        ),
+      );
+    };
+
+    // 🔥 LOG DETALHADO DO ADDRESS RECEBIDO
+    console.log(
+      '📦 [SERVICE] Address recebido no DTO:',
+      JSON.stringify(dto.address, null, 2),
+    );
+    console.log('📦 [SERVICE] Tipo do address:', typeof dto.address);
+    console.log('📦 [SERVICE] Task existe?', !!existing);
+    console.log('📦 [SERVICE] TaskAddress existe?', !!existing.taskAddress);
+
+    // 🔥 ATUALIZAR O ENDEREÇO SEPARADAMENTE
+    if (dto.address !== undefined && dto.address !== null) {
+      const addressObj = dto.address;
+
+      console.log('📦 [SERVICE] Processando addressObj:', addressObj);
+
+      // PEGAR LATITUDE E LONGITUDE
+      const latitude =
+        addressObj.latitude !== undefined &&
+        addressObj.latitude !== null &&
+        addressObj.latitude !== ''
+          ? Number(addressObj.latitude)
+          : null;
+      const longitude =
+        addressObj.longitude !== undefined &&
+        addressObj.longitude !== null &&
+        addressObj.longitude !== ''
+          ? Number(addressObj.longitude)
+          : null;
+
+      console.log('📍 Latitude final:', latitude);
+      console.log('📍 Longitude final:', longitude);
+
+      // Verificar se tem CEP válido
+      const hasValidCep =
+        addressObj.cep && addressObj.cep.replace(/\D/g, '').length > 0;
+
+      if (hasValidCep) {
+        const cleanCep = addressObj.cep.replace(/\D/g, '').slice(0, 8);
+        const addressData = {
+          cep: cleanCep,
+          endereco: addressObj.endereco?.slice(0, 200) || '',
+          numero: addressObj.numero?.slice(0, 10) || '',
+          bairro: addressObj.bairro?.slice(0, 100) || '',
+          cidade: addressObj.cidade?.slice(0, 100) || '',
+          estado: addressObj.estado?.slice(0, 2).toUpperCase() || '',
+          complemento: addressObj.complemento
+            ? addressObj.complemento.slice(0, 100)
+            : null,
+          latitude: latitude,
+          longitude: longitude,
+          companyId: existing.companyId,
+        };
+
+        console.log('📦 Dados do endereço para salvar:', addressData);
+
+        try {
+          if (existing.taskAddress) {
+            // Atualiza endereço existente
+            const updatedAddress = await this.prisma.taskAddress.update({
+              where: { id: existing.taskAddress.id },
+              data: addressData,
+            });
+            console.log('✏️ Endereço atualizado para task:', id);
+            console.log('📦 Endereço atualizado:', updatedAddress);
+          } else {
+            // Cria novo endereço
+            const createdAddress = await this.prisma.taskAddress.create({
+              data: {
+                ...addressData,
+                taskId: id,
+              },
+            });
+            console.log('➕ Endereço criado para task:', id);
+            console.log('📦 Endereço criado:', createdAddress);
+          }
+        } catch (error) {
+          console.error('❌ Erro ao salvar endereço:', error);
+          throw error;
+        }
+      } else {
+        console.log('⚠️ CEP inválido, não salvando endereço');
+      }
+    } else {
+      console.log('⚠️ Nenhum address para processar');
+    }
+
+    // 🔥 ATUALIZAR OS CAMPOS DA TASK
     const data: Prisma.TaskUpdateInput = {
       updatedAt: new Date(),
       userUpdate: { connect: { id: userId } },
@@ -391,8 +499,32 @@ export class TasksService {
     if (dto.columnOrder !== undefined)
       data.columnOrder = Number(dto.columnOrder);
     if (dto.finalComment !== undefined) data.finalComment = dto.finalComment;
-    if (dto.dueDate) data.dueDate = new Date(dto.dueDate);
-    if (dto.scheduledAt) data.scheduledDate = new Date(dto.scheduledAt);
+
+    // 🔥 CORREÇÃO DE TIMEZONE PARA dueDate
+    if (dto.dueDate) {
+      const dueDateStr =
+        typeof dto.dueDate === 'string'
+          ? dto.dueDate
+          : dto.dueDate.toISOString();
+      data.dueDate = preserveLocalDate(dueDateStr);
+      console.log(
+        `📅 dueDate original: ${dueDateStr} -> salvo como UTC: ${data.dueDate.toISOString()}`,
+      );
+    }
+
+    // 🔥 CORREÇÃO DE TIMEZONE PARA scheduledAt
+    if (dto.scheduledAt) {
+      const scheduledStr =
+        typeof dto.scheduledAt === 'string'
+          ? dto.scheduledAt
+          : dto.scheduledAt.toISOString();
+      data.scheduledDate = preserveLocalDate(scheduledStr);
+      console.log(
+        `📅 scheduledAt original: ${scheduledStr} -> salvo como UTC: ${data.scheduledDate.toISOString()}`,
+      );
+    }
+
+    if (dto.intervalTime !== undefined) data.intervalTime = dto.intervalTime;
 
     if (dto.assignedToId !== undefined) {
       data.userAssigned = dto.assignedToId
@@ -401,8 +533,7 @@ export class TasksService {
     }
 
     if (dto.status) {
-        console.log('📝 Atualizando status para:', dto.status);
-
+      console.log('📝 Atualizando status para:', dto.status);
       data.status = dto.status;
       if (dto.status === TaskStatus.COMPLETED) {
         data.completionDate = new Date();
@@ -410,55 +541,6 @@ export class TasksService {
       } else {
         data.completionDate = null;
         data.userCompleted = { disconnect: true };
-      }
-    }
-
-    // 🔥 CORREÇÃO DO ADDRESS - O DTO JÁ FEZ O PARSE VIA @Transform
-    if (dto.address) {
-      // O address já vem como objeto por causa do @Transform no DTO
-      const addressObj = dto.address;
-
-      if (addressObj && addressObj.cep) {
-        const cleanCep = addressObj.cep.replace(/\D/g, '').slice(0, 8);
-        data.taskAddress = {
-          upsert: {
-            create: {
-              cep: cleanCep,
-              endereco: addressObj.endereco?.slice(0, 200) || '',
-              numero: addressObj.numero?.slice(0, 10) || '',
-              bairro: addressObj.bairro?.slice(0, 100) || '',
-              cidade: addressObj.cidade?.slice(0, 100) || '',
-              estado: addressObj.estado?.slice(0, 2).toUpperCase() || '',
-              complemento: addressObj.complemento
-                ? addressObj.complemento.slice(0, 100)
-                : null,
-              latitude: addressObj.latitude
-                ? Number(addressObj.latitude)
-                : null,
-              longitude: addressObj.longitude
-                ? Number(addressObj.longitude)
-                : null,
-              companyId: existing.companyId,
-            },
-            update: {
-              cep: cleanCep,
-              endereco: addressObj.endereco?.slice(0, 200) || '',
-              numero: addressObj.numero?.slice(0, 10) || '',
-              bairro: addressObj.bairro?.slice(0, 100) || '',
-              cidade: addressObj.cidade?.slice(0, 100) || '',
-              estado: addressObj.estado?.slice(0, 2).toUpperCase() || '',
-              complemento: addressObj.complemento
-                ? addressObj.complemento.slice(0, 100)
-                : null,
-              latitude: addressObj.latitude
-                ? Number(addressObj.latitude)
-                : null,
-              longitude: addressObj.longitude
-                ? Number(addressObj.longitude)
-                : null,
-            },
-          },
-        };
       }
     }
 
@@ -483,9 +565,15 @@ export class TasksService {
       await this.handleFileUploads(id, existing.companyId, userId, files);
     }
 
-    const updated = await this.prisma.task.update({
+    // 🔥 ATUALIZA A TASK
+    await this.prisma.task.update({
       where: { id },
       data,
+    });
+
+    // 🔥 RECARREGA A TASK COMPLETA
+    const updated = await this.prisma.task.findUnique({
+      where: { id },
       include: this.getTaskIncludeDetails(),
     });
 
@@ -493,7 +581,36 @@ export class TasksService {
     await this.cacheManager.del(`task_${id}`);
     await this.cacheManager.del(`kanban_columns_${existing.companyId}`);
 
+    console.log('✅ Task atualizada com sucesso:', id);
+    console.log('📦 Endereço final no banco:', updated?.taskAddress);
+
     return updated;
+  }
+
+  // Método auxiliar para transação
+  private async handleFileRemovalsInTransaction(
+    tx: Prisma.TransactionClient,
+    taskId: string,
+    companyId: string,
+    imgIds: string[] = [],
+    audioIds: string[] = [],
+    videoIds: string[] = [],
+  ) {
+    if (imgIds.length) {
+      await tx.taskImage.deleteMany({
+        where: { id: { in: imgIds }, taskId, companyId },
+      });
+    }
+    if (audioIds.length) {
+      await tx.taskAudio.deleteMany({
+        where: { id: { in: audioIds }, taskId, companyId },
+      });
+    }
+    if (videoIds.length) {
+      await tx.taskVideo.deleteMany({
+        where: { id: { in: videoIds }, taskId, companyId },
+      });
+    }
   }
 
   // --- HELPERS (Upload, Notify) ---
@@ -613,12 +730,11 @@ export class TasksService {
     }
   }
 
-  // --- READS ---
+  // No tasks.service.ts - método findAllPaginated corrigido para usar o parâmetro status
 
   async findAllPaginated(params: any) {
     const tenantId = this.cls.get<string>('tenantId');
 
-    // Extraímos os parâmetros
     const {
       page = 1,
       limit = 10,
@@ -630,7 +746,10 @@ export class TasksService {
       hasLocation,
       dateType,
       isOverdue,
-    } = params; // <--- isOverdue AQUI
+      excludeCompleted = false,
+      status,
+    } = params;
+
     const skip = (page - 1) * limit;
 
     // 1. MAPEAMENTO DE DATA
@@ -639,91 +758,231 @@ export class TasksService {
     if (dateType === 'due') dbField = 'dueDate';
     if (dateType === 'created') dbField = 'createdAt';
 
-    // 2. FILTRO DE DATA (Problema da Meia-Noite resolvido)
-    const dateFilter: Prisma.DateTimeNullableFilter = {};
+    // 2. FILTRO DE DATA - CORRIGIDO PARA MANTER O MÊS CORRETO
+    const dateFilter: any = {};
 
     if (startDate) {
-      dateFilter.gte = new Date(startDate);
-    }
-    if (endDate) {
-      const endD = new Date(endDate);
-      endD.setUTCHours(23, 59, 59, 999);
-      dateFilter.lte = endD;
+      let start: Date;
+
+      // Se for string no formato YYYY-MM-DD (vindo do frontend)
+      if (
+        typeof startDate === 'string' &&
+        startDate.match(/^\d{4}-\d{2}-\d{2}$/)
+      ) {
+        const [year, month, day] = startDate.split('-').map(Number);
+        // 🔥 CORREÇÃO: Criar data com mês correto (month-1 porque Date usa 0-11)
+        start = new Date(year, month - 1, day, 0, 0, 0, 0);
+      } else {
+        start = new Date(startDate);
+      }
+
+      if (!isNaN(start.getTime())) {
+        dateFilter.gte = start;
+        this.logger.log(
+          `📅 Filtro startDate: ${start.toISOString()} (original: ${startDate})`,
+        );
+      }
     }
 
-    // 3. QUERY PRINCIPAL
+    if (endDate) {
+      let end: Date;
+
+      // Se for string no formato YYYY-MM-DD (vindo do frontend)
+      if (typeof endDate === 'string' && endDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
+        const [year, month, day] = endDate.split('-').map(Number);
+        // 🔥 CORREÇÃO: Criar data com mês correto e fim do dia
+        end = new Date(year, month - 1, day, 23, 59, 59, 999);
+      } else {
+        end = new Date(endDate);
+        if (!isNaN(end.getTime())) {
+          end.setHours(23, 59, 59, 999);
+        }
+      }
+
+      if (!isNaN(end.getTime())) {
+        dateFilter.lte = end;
+        this.logger.log(
+          `📅 Filtro endDate: ${end.toISOString()} (original: ${endDate})`,
+        );
+      }
+    }
+
+    // 3. CONSTRUIR WHERE DE FORMA SEGURA
     const where: Prisma.TaskWhereInput = {
       companyId: tenantId,
-      ...(columnId && { columnId }),
-      // --- CORREÇÃO AQUI: BUSCA POR NOME DA PESSOA ---
-      ...(search && {
-        OR: [
-          { title: { contains: search, mode: 'insensitive' } },
-          { description: { contains: search, mode: 'insensitive' } },
-          { userAssigned: { name: { contains: search, mode: 'insensitive' } } },
-          {
-            userAssigned: {
-              name: { contains: search, mode: 'insensitive' },
+    };
+
+    // FILTRO POR STATUS
+    if (status && Array.isArray(status) && status.length > 0) {
+      const validStatuses = status.filter((s) =>
+        Object.values(TaskStatus).includes(s as TaskStatus),
+      ) as TaskStatus[];
+      if (validStatuses.length > 0) {
+        where.status = { in: validStatuses };
+        this.logger.log(
+          `📊 Aplicando filtro de status: ${validStatuses.join(', ')}`,
+        );
+      }
+    } else if (excludeCompleted) {
+      where.status = { not: TaskStatus.COMPLETED };
+    }
+
+    // Adicionar filtros apenas se existirem
+    if (columnId) {
+      where.columnId = columnId;
+    }
+
+    if (search && search.trim() !== '') {
+      where.OR = [
+        { title: { contains: search, mode: 'insensitive' } },
+        { description: { contains: search, mode: 'insensitive' } },
+        { userAssigned: { name: { contains: search, mode: 'insensitive' } } },
+      ];
+    }
+
+    // FILTRO DE DATA - APLICA APENAS SE TIVER DATAS VÁLIDAS
+    if ((startDate || endDate) && Object.keys(dateFilter).length > 0) {
+      // Para o campo dueDate, filtra apenas tarefas que têm dueDate definido
+      if (dbField === 'dueDate') {
+        where[dbField] = dateFilter;
+        this.logger.log(
+          `📅 Aplicando filtro dueDate: ${JSON.stringify(dateFilter)}`,
+        );
+      } else {
+        where[dbField] = dateFilter;
+      }
+    }
+
+    if (assignedToId && assignedToId !== 'all') {
+      if (assignedToId === 'none') {
+        where.userAssignedId = null;
+      } else {
+        where.userAssignedId = assignedToId;
+      }
+    }
+
+    if (hasLocation === true) {
+      where.taskAddress = {
+        is: { latitude: { not: null }, longitude: { not: null } },
+      };
+    }
+
+    if (hasLocation === false) {
+      where.OR = [
+        { taskAddress: null },
+        { taskAddress: { is: { latitude: null } } },
+      ];
+    }
+
+    if (isOverdue === true) {
+      where.dueDate = {
+        lt: new Date(),
+      };
+      where.status = {
+        not: TaskStatus.COMPLETED,
+      };
+    }
+
+    this.logger.log(
+      `[findAllPaginated] Executando query com where: ${JSON.stringify(where)}`,
+    );
+
+    try {
+      const [tasksResult, totalResult] = await Promise.allSettled([
+        this.prisma.task.findMany({
+          where,
+          skip,
+          take: Number(limit),
+          include: {
+            taskImages: {
+              select: { id: true, url: true, filename: true, size: true },
+              orderBy: { createdAt: 'asc' },
             },
+            taskAudios: {
+              select: { id: true, url: true, duration: true },
+              orderBy: { createdAt: 'asc' },
+            },
+            taskVideos: {
+              select: { id: true, url: true, duration: true },
+              orderBy: { createdAt: 'asc' },
+            },
+            userAssigned: {
+              select: { id: true, name: true, email: true, contact: true },
+            },
+            userCreate: { select: { id: true, name: true } },
+            userUpdate: { select: { id: true, name: true } },
+            userCompleted: { select: { id: true, name: true } },
+            column: true,
+            route: true,
+            taskAddress: true,
+            company: { select: { id: true, name: true } },
           },
-        ],
-      }),
-      // ----------------------------------------------
+          orderBy: [{ columnOrder: 'asc' }, { createdAt: 'desc' }],
+        }),
+        this.prisma.task.count({ where }),
+      ]);
 
-      // 4. APLICAÇÃO DO FILTRO DE DATA DINÂMICO
-      ...((startDate || endDate) && {
-        [dbField]: dateFilter,
-      }),
+      if (tasksResult.status === 'rejected') {
+        this.logger.error(`Erro ao buscar tasks: ${tasksResult.reason}`);
+        throw new Error('Erro ao buscar tarefas');
+      }
 
-      // Filtro específico (Dropdown de usuário)
-      // Adicionado validação !== 'all' para segurança
-      ...(assignedToId &&
-        assignedToId !== 'all' && { userAssignedId: assignedToId }),
+      if (totalResult.status === 'rejected') {
+        this.logger.error(`Erro ao contar tasks: ${totalResult.reason}`);
+        throw new Error('Erro ao contar tarefas');
+      }
 
-      // Filtro de Localização
-      ...(hasLocation === true && {
-        taskAddress: {
-          is: { latitude: { not: null }, longitude: { not: null } },
-        },
-      }),
-      ...(hasLocation === false && {
-        OR: [
-          { taskAddress: null },
-          { taskAddress: { is: { latitude: null } } },
-        ],
-      }),
+      const tasks = tasksResult.value;
+      const total = totalResult.value;
 
-      ...(isOverdue === true && {
-        dueDate: {
-          lt: new Date(), // Menor que agora
-        },
-        status: {
-          not: TaskStatus.COMPLETED, // E não concluída
-        },
-      }),
-    };
+      this.logger.log(
+        `[findAllPaginated] Busca concluída: ${tasks.length} tasks de ${total} total`,
+      );
 
-    const [tasks, total] = await Promise.all([
-      this.prisma.task.findMany({
-        where,
-        skip,
-        take: Number(limit),
-        include: this.getTaskIncludeDetails(),
-        orderBy: [{ columnOrder: 'asc' }, { createdAt: 'desc' }],
-      }),
-      this.prisma.task.count({ where }),
-    ]);
-
-    return {
-      data: tasks,
-      meta: { total, page, limit, lastPage: Math.ceil(total / limit) },
-    };
+      return {
+        data: tasks,
+        meta: { total, page, limit, lastPage: Math.ceil(total / limit) },
+      };
+    } catch (error: any) {
+      this.logger.error(
+        `Erro no findAllPaginated: ${error.message}`,
+        error.stack,
+      );
+      throw new InternalServerErrorException(
+        'Erro ao buscar tarefas. Tente novamente mais tarde.',
+      );
+    }
   }
+
+  // No tasks.service.ts - método findOne
 
   async findOne(id: string) {
     const t = await this.prisma.task.findUnique({
       where: { id },
-      include: this.getTaskIncludeDetails(),
+      include: {
+        taskImages: {
+          select: { id: true, url: true, filename: true, size: true },
+          orderBy: { createdAt: 'asc' },
+        },
+        taskAudios: {
+          select: { id: true, url: true, duration: true },
+          orderBy: { createdAt: 'asc' },
+        },
+        taskVideos: {
+          select: { id: true, url: true, duration: true },
+          orderBy: { createdAt: 'asc' },
+        },
+        userAssigned: {
+          select: { id: true, name: true, email: true, contact: true },
+        },
+        userCreate: { select: { id: true, name: true } },
+        userUpdate: { select: { id: true, name: true } },
+        userCompleted: { select: { id: true, name: true } },
+        column: true,
+        route: true,
+        taskAddress: true, // 🔥🔥🔥 ADICIONAR ESTA LINHA 🔥🔥🔥
+        company: { select: { id: true, name: true } },
+      },
     });
     if (!t) throw new NotFoundException('Task not found');
     return t;
@@ -733,6 +992,9 @@ export class TasksService {
 
   async remove(id: string) {
     const tenantId = this.cls.get<string>('tenantId');
+
+    await this.cacheManager.del(`tasks_list_${tenantId}`);
+
     const t = await this.prisma.task.findUnique({
       where: { id },
       include: { taskImages: true, taskAudios: true, taskVideos: true },

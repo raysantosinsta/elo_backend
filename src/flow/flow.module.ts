@@ -8,17 +8,21 @@ import { PrismaModule } from 'src/prisma/prisma.module';
 import { SupabaseModule } from 'src/supabase/supabase.module';
 import { makeCounterProvider, makeHistogramProvider } from '@willsoto/nestjs-prometheus';
 import { AuditModule } from 'src/audit/audit.module';
+import { WhatsappNotificationModule } from 'src/whatsapp-notification/whatsapp-notification.module';
+import { WhatsappNotificationService } from 'src/whatsapp-notification/whatsapp-notification.service';
 
 @Module({
   imports: [
     PrismaModule,
     SupabaseModule, 
     AuditModule,
+    WhatsappNotificationModule,
     CacheModule.register(),
   ],
   controllers: [FlowController],
   providers: [
     FlowService,
+    WhatsappNotificationService, // 🔥 Adicionar o serviço de notificação do WhatsApp
     
     // 1. Contador com Labels (Resolve o erro "Invalid number of arguments (2)")
     makeCounterProvider({

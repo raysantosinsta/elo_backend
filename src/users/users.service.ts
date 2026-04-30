@@ -47,83 +47,210 @@ export class UsersService {
   // 📝 ESCRITA (CREATE / UPDATE / DELETE)
   // ===========================================================================
 
+  // users.service.ts - createUser
+
+  // users.service.ts - createUser
+
   public async createUser(data: CreateUserDto): Promise<User> {
     const { password, ...rest } = data;
-    
+    const isMaster = this.cls.get<boolean>('isMaster');
+    const tenantId = this.cls.get<string>('tenantId');
+
     this.logger.log(`Iniciando criação de usuário: ${rest.email}`);
 
     const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
 
-    const isMaster = this.cls.get<boolean>('isMaster');
-    const tenantId = this.cls.get<string>('tenantId');
-
     let targetCompanyId = tenantId;
     let targetRole: UserRole = UserRole.EMPLOYER;
 
-    // --- REGRA DE NEGÓCIO E HIERARQUIA ---
-    // Se for Master, ele cria um ADMIN vinculado a uma empresa específica
     if (isMaster) {
-      targetRole = UserRole.ADMIN;
+      if (data.role) targetRole = data.role;
       if (data.companyId) targetCompanyId = data.companyId;
-    } 
-    // Se for ADMIN (não master), o tenantId já vem do token e o role é EMPLOYER
+    } else {
+      targetRole = UserRole.EMPLOYER;
+    }
 
     try {
-      return await this.db.user.create({
-        data: {
-          name: rest.name,
-          email: rest.email,
-          password: hashedPassword,
-          contact: rest.contact,
-          document: rest.document,
-          professionalRole: rest.professionalRole,
-          status: rest.status || SimpleStatus.ACTIVE,
-          role: targetRole,
-          companyId: targetCompanyId,
+      const userData: any = {
+        name: rest.name,
+        email: rest.email,
+        password: hashedPassword,
+        contact: rest.contact,
+        status: rest.status || SimpleStatus.ACTIVE,
+        role: targetRole,
+        companyId: targetCompanyId,
+      };
+
+      if (rest.document !== undefined && rest.document !== '') {
+        userData.document = rest.document;
+      }
+
+      // 🔥 TRATAR professionalRole (nome do cargo)
+      if (rest.professionalRole !== undefined && rest.professionalRole !== '') {
+        const roleName = rest.professionalRole;
+
+        // Salva o NOME diretamente no campo professionalRoleName
+        userData.professionalRoleName = roleName;
+        this.logger.log(
+          `📌 Salvando nome do cargo profissional: "${roleName}"`,
+        );
+
+        // Opcional: Também tenta buscar o ID para manter o relacionamento
+        const companyRole = await this.prisma.companyRole.findFirst({
+          where: {
+            companyId: targetCompanyId,
+            name: {
+              equals: roleName,
+              mode: 'insensitive',
+            },
+            status: SimpleStatus.ACTIVE,
+          },
+        });
+
+        if (companyRole) {
+          userData.professionalRoleId = companyRole.id;
+          this.logger.log(`✅ Também vinculou ao ID: ${companyRole.id}`);
+        }
+      }
+
+      // Cargo na empresa (companyRole)
+      if (rest.companyRoleId !== undefined && rest.companyRoleId !== '') {
+        userData.companyRoleId = rest.companyRoleId;
+      }
+
+      this.logger.log(`📦 Criando usuário com dados:`, userData);
+
+      const newUser = await this.db.user.create({
+        data: userData,
+        include: {
+          company: { select: { id: true, name: true } },
+          companyRole: { select: { id: true, name: true } },
         },
-        include: { company: { select: { id: true, name: true } } }
       });
+
+      this.logger.log(`✅ Usuário criado com sucesso: ${newUser.id}`);
+
+      return newUser;
     } catch (error: any) {
       if (error.code === 'P2002') {
         throw new ConflictException('Email ou CPF já cadastrados.');
       }
-      
       this.logger.error(`Erro ao criar usuário: ${error.message}`);
       throw new BadRequestException('Não foi possível processar o cadastro.');
     }
   }
 
   public async updateUser(data: UpdateUserDto & { id: string }): Promise<User> {
-    const { id, password, role, ...updateFields } = data;
+    const {
+      id,
+      password,
+      role,
+      professionalRole,
+      professionalRoleId,
+      companyRoleId,
+      ...updateFields
+    } = data;
     const isMaster = this.cls.get<boolean>('isMaster');
 
-    // Valida se o usuário existe e se pertence ao tenant (via findUserById)
-    await this.findUserById(id);
+    this.logger.log(`📝 Atualizando usuário ${id}`);
 
-    const finalData: Prisma.UserUpdateInput = { ...updateFields };
-    
-    // 🔐 PREVENÇÃO DE ESCALAÇÃO DE PRIVILÉGIO
-    // Apenas Master pode alterar o nível de acesso (Role) de um usuário.
+    const existingUser = await this.findUserById(id);
+
+    const userData: any = {};
+
+    if (updateFields.name !== undefined) userData.name = updateFields.name;
+    if (updateFields.email !== undefined) userData.email = updateFields.email;
+    if (updateFields.contact !== undefined)
+      userData.contact = updateFields.contact;
+
+    // 🔥 TRATAR DOCUMENTO: string vazia se torna null
+    if (updateFields.document !== undefined) {
+      userData.document =
+        updateFields.document === '' || updateFields.document === null
+          ? null
+          : updateFields.document;
+    }
+
+    // 🔥 PRIORIDADE 1: Se veio professionalRoleId (ID direto), usa ele
+    if (professionalRoleId !== undefined) {
+      userData.professionalRoleId =
+        professionalRoleId === '' || professionalRoleId === null
+          ? null
+          : professionalRoleId;
+      this.logger.log(
+        `📌 Usando professionalRoleId direto: ${professionalRoleId}`,
+      );
+    }
+    // 🔥 PRIORIDADE 2: Se veio professionalRole (nome), busca o ID
+    else if (professionalRole !== undefined) {
+      if (professionalRole === '' || professionalRole === null) {
+        userData.professionalRoleId = null;
+        this.logger.log(`🗑️ Removendo cargo profissional do usuário`);
+      } else {
+        const companyId = existingUser.companyId;
+        this.logger.log(
+          `🔍 Buscando cargo pelo nome: "${professionalRole}" para empresa: ${companyId}`,
+        );
+
+        let companyRole: { id: string } | null = null;
+        if (companyId) {
+          companyRole = await this.prisma.companyRole.findFirst({
+            where: {
+              companyId: companyId,
+              name: {
+                equals: professionalRole,
+                mode: 'insensitive',
+              },
+              status: SimpleStatus.ACTIVE,
+            },
+          });
+        }
+
+        if (companyRole) {
+          userData.professionalRoleId = companyRole.id;
+          this.logger.log(
+            `✅ Cargo "${professionalRole}" encontrado com ID: ${companyRole.id}`,
+          );
+        } else {
+          this.logger.warn(
+            `⚠️ Cargo "${professionalRole}" NÃO encontrado para a empresa ${companyId}`,
+          );
+          // Opcional: manter o valor anterior ou lançar erro
+          // userData.professionalRoleId = null;
+        }
+      }
+    }
+
+    // Cargo na empresa (companyRole)
+    if (companyRoleId !== undefined) {
+      userData.companyRoleId =
+        companyRoleId === '' || companyRoleId === null ? null : companyRoleId;
+    }
+
+    // 🔥 Role: apenas MASTER pode alterar
     if (role && isMaster) {
-      finalData.role = role;
-    } else if (role) {
-      this.logger.warn(`Tentativa de alteração de Role bloqueada para o usuário ${id}`);
+      userData.role = role;
+    } else if (role && !isMaster) {
+      this.logger.warn(
+        `⚠️ Tentativa de alteração de Role bloqueada para o usuário ${id}`,
+      );
     }
 
+    // 🔥 Senha: se fornecida, faz hash
     if (password) {
-      finalData.password = await bcrypt.hash(password, SALT_ROUNDS);
+      userData.password = await bcrypt.hash(password, SALT_ROUNDS);
     }
+
+    this.logger.log(`📦 Dados finais para atualização:`, userData);
 
     return await this.db.user.update({
       where: { id },
-      data: finalData,
+      data: userData,
     });
   }
 
   public async removeUser(userId: string): Promise<User> {
-    // Garante que o usuário logado tem acesso a este ID antes de deletar
     await this.findUserById(userId);
-
     return await this.db.user.delete({
       where: { id: userId },
     });
@@ -134,10 +261,23 @@ export class UsersService {
   // ===========================================================================
 
   public async findUserById(userId: string): Promise<User> {
-    // O uso de this.db garante a injeção automática de WHERE companyId = tenantId
+    this.logger.log(`🔍 Buscando usuário por ID: ${userId}`);
     const user = await this.db.user.findUnique({
       where: { id: userId },
-      include: { company: { select: { id: true, name: true } } }
+      include: {
+        company: { select: { id: true, name: true } },
+        companyRole: {
+          select: { id: true, name: true, level: true, description: true },
+        },
+        // 🔥 Não precisa incluir professionalRole se estamos usando professionalRoleName
+      },
+    });
+
+    this.logger.log(`📦 Usuário encontrado:`, {
+      id: user?.id,
+      name: user?.name,
+      companyRoleId: user?.companyRoleId,
+      companyRole: user?.companyRole,
     });
 
     if (!user) {
@@ -149,44 +289,66 @@ export class UsersService {
   public async findAll(
     page: number,
     limit: number,
-    filters: { 
-      status?: SimpleStatus; 
-      role?: UserRole; 
+    filters: {
+      status?: SimpleStatus;
+      role?: UserRole;
       companyId?: string;
-      professionalRole?: string; // 🔥 NOVO
-    }
-  ): Promise<{ data: User[], total: number }> {
+      professionalRole?: string;
+    },
+  ): Promise<{ data: User[]; total: number }> {
     const skip = (page - 1) * limit;
     const isMaster = this.cls.get<boolean>('isMaster');
-    
+    const tenantId = this.cls.get<string>('tenantId');
+
     const where: any = { ...filters };
-    
-    // 🔥 Tratamento especial para professionalRole (busca parcial)
+
     if (where.professionalRole) {
       where.professionalRole = {
         contains: where.professionalRole,
         mode: 'insensitive',
       };
     }
-    
-    // Limpeza de filtros vazios
-    Object.keys(where).forEach(key => where[key] === undefined && delete where[key]);
 
-    // Proteção Multi-tenant: Se não for Master, remove companyId do filtro para usar o tenantId do token
+    Object.keys(where).forEach(
+      (key) => where[key] === undefined && delete where[key],
+    );
+
     if (!isMaster) {
-      delete where.companyId;
+      where.companyId = tenantId;
     }
 
+    this.logger.log(`🔍 findAll - where:`, where);
+
+    // 🔥 USAR this.prisma DIRETAMENTE (não this.db) para garantir o include
     const [total, data] = await Promise.all([
-      this.db.user.count({ where }),
-      this.db.user.findMany({
+      this.prisma.user.count({ where }),
+      this.prisma.user.findMany({
         skip,
         take: limit,
         where,
         orderBy: { name: 'asc' },
-        include: { company: { select: { id: true, name: true } } }
-      })
+        include: {
+          company: { select: { id: true, name: true } },
+          companyRole: {
+            select: {
+              id: true,
+              name: true,
+              level: true,
+              description: true,
+            },
+          },
+        },
+      }),
     ]);
+
+    this.logger.log(`📦 Total de usuários encontrados: ${data.length}`);
+
+    // 🔥 LOG para verificar se o companyRole veio
+    data.forEach((user) => {
+      this.logger.log(
+        `   - ${user.name}: companyRoleId=${user.companyRoleId}, companyRole=${user.companyRole?.name || 'NULO'}`,
+      );
+    });
 
     return { data, total };
   }
@@ -195,20 +357,23 @@ export class UsersService {
     const isMaster = this.cls.get<boolean>('isMaster');
     const tenantId = this.cls.get<string>('tenantId');
 
-    // Validação de acesso manual para reforçar a barreira de segurança
     if (!isMaster && companyId !== tenantId) {
-      throw new ForbiddenException('Acesso negado: Você só pode listar membros da sua própria empresa.');
+      throw new ForbiddenException(
+        'Acesso negado: Você só pode listar membros da sua própria empresa.',
+      );
     }
 
     return this.db.user.findMany({
       where: { companyId, status: SimpleStatus.ACTIVE },
       orderBy: { name: 'asc' },
+      include: {
+        companyRole: { select: { id: true, name: true, level: true } },
+      },
     });
   }
 
-  // ===========================================================================
-  // 🔥 NOVO MÉTODO: Buscar usuários por cargo profissional
-  // ===========================================================================
+  // users.service.ts - findByProfessionalRole
+
   public async findByProfessionalRole(professionalRole: string) {
     this.logger.log(`Buscando usuários com cargo: ${professionalRole}`);
 
@@ -217,24 +382,32 @@ export class UsersService {
 
     const where: any = {
       status: SimpleStatus.ACTIVE,
-      professionalRole: {
-        contains: professionalRole,
-        mode: 'insensitive',
-      },
     };
 
-    // Se não for master, filtra pela empresa do token
     if (!isMaster) {
       where.companyId = tenantId;
     }
 
+    // 🔥 CORREÇÃO: Buscar pelo nome do cargo no relacionamento professionalRole
     const users = await this.db.user.findMany({
-      where,
+      where: {
+        ...where,
+        professionalRole: {
+          name: {
+            contains: professionalRole,
+            mode: 'insensitive',
+          },
+        },
+      },
       select: {
         id: true,
         name: true,
         email: true,
-        professionalRole: true,
+        professionalRole: {
+          select: {
+            name: true,
+          },
+        },
         status: true,
         company: {
           select: {
@@ -242,12 +415,26 @@ export class UsersService {
             name: true,
           },
         },
+        companyRole: {
+          select: {
+            id: true,
+            name: true,
+            level: true,
+          },
+        },
       },
       orderBy: { name: 'asc' },
     });
 
-    this.logger.log(`Encontrados ${users.length} usuários com o cargo ${professionalRole}`);
-    return users;
+    this.logger.log(
+      `Encontrados ${users.length} usuários com o cargo ${professionalRole}`,
+    );
+
+    // 🔥 Transformar para manter compatibilidade com o frontend
+    return users.map((user) => ({
+      ...user,
+      professionalRole: user.professionalRole?.name || null,
+    }));
   }
 
   public async searchUsers(query: string): Promise<User[]> {
@@ -261,7 +448,45 @@ export class UsersService {
       },
       take: 10,
       orderBy: { name: 'asc' },
-      include: { company: { select: { id: true, name: true } } }
+      include: {
+        company: { select: { id: true, name: true } },
+        companyRole: { select: { id: true, name: true, level: true } },
+      },
     });
+  }
+
+  public async getProfessionalRoles() {
+    this.logger.log('🔍 Buscando todos os cargos profissionais');
+
+    const tenantId = this.cls.get<string>('tenantId');
+    const isMaster = this.cls.get<boolean>('isMaster');
+
+    // Busca cargos únicos dos usuários da empresa
+    const users = await this.prisma.user.findMany({
+      where: isMaster ? {} : { companyId: tenantId },
+      select: {
+        professionalRoleId: true,
+      },
+      distinct: ['professionalRoleId'],
+    });
+
+    const roles = users
+      .map((u) => u.professionalRoleId)
+      .filter((role): role is string => role !== null && role !== '');
+
+    // Ordena alfabeticamente
+    roles.sort((a, b) => a.localeCompare(b, 'pt-BR'));
+
+    this.logger.log(
+      `✅ Encontrados ${roles.length} cargos únicos: ${roles.join(', ')}`,
+    );
+
+    return {
+      data: roles.map((role) => ({
+        value: role,
+        label: role.charAt(0).toUpperCase() + role.slice(1),
+      })),
+      total: roles.length,
+    };
   }
 }

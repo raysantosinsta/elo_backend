@@ -50,21 +50,40 @@ export class AuthService {
    * Transforma o objeto bruto do Banco de Dados (que tem senha)
    * em um objeto limpo e seguro para devolver ao Frontend.
    */
-  private mapToUserProfile(user: any): UserProfile {
-    return {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      role: user.role,
-      status: user.status,
-      companyId: user.companyId,
-      document: user.document || null,
-      contact: user.phone || 'Não informado',
-      professionalRole: user.professionalRole || null,
-      company: user.company || null,
-      createdAt: user.createdAt,
-    };
+  // auth.service.ts - mapToUserProfile
+  // auth.service.ts - mapToUserProfile
+
+private mapToUserProfile(user: any): UserProfile {
+  // 🔥 PRIORIDADE: Usa professionalRoleName se existir, senão tenta extrair do relacionamento
+  let professionalRoleName = null;
+  
+  if (user.professionalRoleName) {
+    professionalRoleName = user.professionalRoleName;
+    this.logger.log(`✅ Usando professionalRoleName: ${professionalRoleName}`);
+  } else if (user.professionalRole) {
+    if (typeof user.professionalRole === 'object' && user.professionalRole.name) {
+      professionalRoleName = user.professionalRole.name;
+      this.logger.log(`✅ Extraiu nome do relacionamento: ${professionalRoleName}`);
+    } else if (typeof user.professionalRole === 'string') {
+      professionalRoleName = user.professionalRole;
+      this.logger.log(`✅ Usou string diretamente: ${professionalRoleName}`);
+    }
   }
+
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    status: user.status,
+    companyId: user.companyId,
+    document: user.document || null,
+    contact: user.phone || 'Não informado',
+    professionalRole: professionalRoleName, // 🔥 Agora vem o NOME
+    company: user.company || null,
+    createdAt: user.createdAt,
+  };
+}
 
   // --- Infraestrutura e Helpers ---
 
@@ -79,6 +98,7 @@ export class AuthService {
       email: user.email,
       role: user.role, // Permissões
       companyId: user.companyId, // Empresa do usuário
+      professionalRole: user.professionalRole || undefined, // 🔥 ADICIONAR
     };
 
     // Promise.all executa as duas assinaturas em paralelo para otimizar tempo.
@@ -105,12 +125,15 @@ export class AuthService {
   async login(loginUserDto: LoginUserDto): Promise<AuthResponse> {
     const { email, password } = loginUserDto;
 
-    // Busca o usuário no banco pelo email.
-    // O 'include' traz junto os dados da empresa (Join).
+    // 🔥 ADICIONE O INCLUDE DO professionalRole
     const user = await this.prisma.user.findUnique({
       where: { email },
       include: {
-        company: { select: { id: true, name: true, status: true } }, // em Multi-empresa quase tudo o que o usuário faz depende de qual empresa ele pertence
+        company: { select: { id: true, name: true, status: true } },
+        professionalRole: {
+          // 🔥 ADICIONE ESTA LINHA
+          select: { id: true, name: true },
+        },
       },
     });
 
@@ -141,6 +164,7 @@ export class AuthService {
 
     // Mapeia perfil limpo
     const userProfile = this.mapToUserProfile(user);
+    console.log('🔍 [login] userProfile após map:', userProfile);
 
     // Gera tokens
     const tokens = await this.generateTokens(userProfile);
@@ -187,10 +211,15 @@ export class AuthService {
 
       // 3. Fallback para Banco de Dados
       // Se não estava no cache (ou expirou), busca no banco.
+      // 🔥 ADICIONE O INCLUDE DO professionalRole
       const user = await this.prisma.user.findUnique({
         where: { id: payload.sub },
         include: {
           company: { select: { id: true, name: true, status: true } },
+          professionalRole: {
+            // 🔥 ADICIONE ESTA LINHA
+            select: { id: true, name: true },
+          },
         },
       });
 
@@ -200,6 +229,12 @@ export class AuthService {
       }
 
       const userProfile = this.mapToUserProfile(user);
+
+      // 🔥 GARANTIR que o professionalRole está no perfil
+      console.log('🔍 [verifyToken] userProfile:', {
+        id: userProfile.id,
+        professionalRole: userProfile.professionalRole,
+      });
 
       // 4. Salvar no Cache (Renovação)
       // Guarda na memória de novo para as próximas requisições serem rápidas.
@@ -274,15 +309,18 @@ export class AuthService {
    */
   async getProfile(userId: string): Promise<UserProfile> {
     const cacheKey = `user_profile:${userId}`;
-    // Tenta pegar do cache primeiro
     const cached = await this.cacheManager.get<UserProfile>(cacheKey);
     if (cached) return cached;
 
-    // Se não achar, vai no banco
+    // 🔥 ADICIONE O INCLUDE DO professionalRole
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       include: {
         company: { select: { id: true, name: true, status: true } },
+        professionalRole: {
+          // 🔥 ADICIONE ESTA LINHA
+          select: { id: true, name: true },
+        },
       },
     });
 
@@ -298,6 +336,4 @@ export class AuthService {
 
     return profile;
   }
-
-  
 }

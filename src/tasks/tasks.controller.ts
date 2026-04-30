@@ -62,9 +62,7 @@ export class TasksController {
   constructor(private readonly tasksService: TasksService) {}
 
 
-// src/tasks/tasks.controller.ts
-
-@Post()
+ @Post()
 @ApiOperation({ summary: 'Cria uma nova tarefa' })
 @ApiConsumes('multipart/form-data')
 @ApiResponse({ status: 201, description: 'Tarefa criada.' })
@@ -96,23 +94,36 @@ async create(
   // 🔥 FAZER O PARSE MANUALMENTE
   let parsedAddress: CreateTaskAddressDto | undefined = undefined;
 
-  if (typeof createTaskDto.address === 'string' && createTaskDto.address.trim() !== '') {
+  if (
+    typeof createTaskDto.address === 'string' &&
+    createTaskDto.address.trim() !== ''
+  ) {
     try {
       const parsed = JSON.parse(createTaskDto.address);
       console.log('✅ [CONTROLLER] Address parseado:', parsed);
-      
-      if (parsed && typeof parsed === 'object' && parsed.cep) {
-        parsedAddress = parsed as CreateTaskAddressDto;
+
+      if (parsed && typeof parsed === 'object') {
+        parsedAddress = {
+          cep: parsed.cep || '',
+          endereco: parsed.endereco || '',
+          numero: parsed.numero || '',
+          bairro: parsed.bairro || '',
+          cidade: parsed.cidade || '',
+          estado: parsed.estado || '',
+          complemento: parsed.complemento,
+          latitude: parsed.latitude,
+          longitude: parsed.longitude,
+        } as CreateTaskAddressDto;
       }
     } catch (e) {
       console.error('❌ [CONTROLLER] Erro ao parsear address:', e);
     }
   }
 
-  // 🔥 CRIAR UM OBJETO COM O ADDRESS PARSEADO
+  // 🔥 CRIA UM NOVO DTO COM O ADDRESS PARSEADO
   const finalDto = {
     ...createTaskDto,
-    address: parsedAddress,
+    address: parsedAddress, // 👈 USA O PARSEADO, NÃO O ORIGINAL
   };
 
   console.log('📦 [CONTROLLER] Address final:', finalDto.address);
@@ -147,13 +158,62 @@ async create(
       videos?: UploadedFile[];
     },
   ) {
+    this.logger.log(`📝 Atualizando task ${id}`);
+
+    // 🔥 PROCESSAR MANUALMENTE O ADDRESS
+    // O body vem como string do FormData, precisamos fazer o parse
+    const rawBody = updateTaskDto as any;
+
+    if (rawBody.address) {
+      try {
+        // Se for string, parseia
+        if (typeof rawBody.address === 'string') {
+          updateTaskDto.address = JSON.parse(rawBody.address);
+          this.logger.log(
+            `✅ Address parseado da string: ${JSON.stringify(updateTaskDto.address)}`,
+          );
+        }
+        // Se já for objeto, mantém
+        else if (typeof rawBody.address === 'object') {
+          this.logger.log(
+            `✅ Address já é objeto: ${JSON.stringify(updateTaskDto.address)}`,
+          );
+        }
+      } catch (e) {
+        this.logger.error(`❌ Erro ao parsear address: ${e.message}`);
+        updateTaskDto.address = undefined;
+      }
+    }
+
+    // 🔥 VERIFICAR SE OS CAMPOS DE LATITUDE/LONGITUDE VIERAM SEPARADOS
+    if (rawBody.latitude || rawBody.longitude) {
+      this.logger.log(
+        `📍 Latitude/Longitude separados encontrados: lat=${rawBody.latitude}, lng=${rawBody.longitude}`,
+      );
+
+      if (!updateTaskDto.address) {
+        updateTaskDto.address = {};
+      }
+
+      if (rawBody.latitude) {
+        updateTaskDto.address.latitude = parseFloat(rawBody.latitude);
+      }
+      if (rawBody.longitude) {
+        updateTaskDto.address.longitude = parseFloat(rawBody.longitude);
+      }
+    }
+
+    this.logger.log(
+      `📦 Address final para service: ${JSON.stringify(updateTaskDto.address)}`,
+    );
+
     if (
       files &&
       (files.images?.length || files.audios?.length || files.videos?.length)
     ) {
-      // Certifique-se que sua função validateFiles aceita arquivos parciais/opcionais
       validateFiles(files);
     }
+
     return this.tasksService.update(id, updateTaskDto, files);
   }
 
@@ -198,8 +258,45 @@ async create(
   }
 
   @Get()
-  @ApiOperation({ summary: 'Lista tarefas' })
-  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiOperation({ summary: 'Lista tarefas com paginação e filtros' })
+  @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
+  @ApiQuery({ name: 'limit', required: false, type: Number, example: 10 })
+  @ApiQuery({ name: 'columnId', required: false, type: String })
+  @ApiQuery({ name: 'search', required: false, type: String })
+  @ApiQuery({ name: 'startDate', required: false, type: String })
+  @ApiQuery({ name: 'endDate', required: false, type: String })
+  @ApiQuery({ name: 'assignedToId', required: false, type: String })
+  @ApiQuery({
+    name: 'hasLocation',
+    required: false,
+    type: String,
+    enum: ['true', 'false'],
+  })
+  @ApiQuery({
+    name: 'dateType',
+    required: false,
+    type: String,
+    enum: ['created', 'scheduled', 'due'],
+  })
+  @ApiQuery({
+    name: 'isOverdue',
+    required: false,
+    type: String,
+    enum: ['true', 'false'],
+  })
+  @ApiQuery({
+    name: 'excludeCompleted',
+    required: false,
+    type: String,
+    enum: ['true', 'false'],
+  })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    type: String,
+    description:
+      'Filtrar por status específico(s). Ex: "PENDING,IN_PROGRESS,RESCHEDULED"',
+  })
   async findAllPaginated(
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
@@ -211,12 +308,28 @@ async create(
     @Query('hasLocation') hasLocation?: string,
     @Query('dateType') dateType?: string,
     @Query('isOverdue') isOverdue?: string,
+    @Query('excludeCompleted') excludeCompleted?: string,
+    @Query('status') status?: string,
   ) {
+    // Converter hasLocation para boolean
     let hasLocationBool: boolean | undefined = undefined;
     if (hasLocation === 'true') hasLocationBool = true;
     if (hasLocation === 'false') hasLocationBool = false;
+
+    // Converter isOverdue para boolean
     let isOverdueBool: boolean | undefined = undefined;
     if (isOverdue === 'true') isOverdueBool = true;
+
+    // Converter excludeCompleted para boolean
+    let excludeCompletedBool: boolean | undefined = undefined;
+    if (excludeCompleted === 'true') excludeCompletedBool = true;
+
+    // 🔥 Processar múltiplos status separados por vírgula
+    let statusArray: string[] | undefined = undefined;
+    if (status) {
+      statusArray = status.split(',').map((s) => s.trim().toUpperCase());
+      console.log(`📊 Filtro de status recebido: ${statusArray.join(', ')}`);
+    }
 
     return this.tasksService.findAllPaginated({
       page,
@@ -228,7 +341,9 @@ async create(
       assignedToId,
       hasLocation: hasLocationBool,
       dateType,
-      isOverdue: isOverdueBool, // <--- PASSADO
+      isOverdue: isOverdueBool,
+      excludeCompleted: excludeCompletedBool,
+      status: statusArray, // 🔥 PASSANDO O ARRAY DE STATUS
     });
   }
 
@@ -263,7 +378,13 @@ async create(
     const dto = new UpdateTaskDto();
     dto.status = body.status;
     dto.finalComment = body.finalComment;
-    if (body.scheduledAt) dto.scheduledAt = body.scheduledAt;
+    // 🔥 PRIORIZAR dueDate (prazo final) em vez de scheduledAt
+    if (body.dueDate) {
+      dto.dueDate = body.dueDate;
+    } else if (body.scheduledAt) {
+      // Fallback: se veio scheduledAt, usar como dueDate
+      dto.dueDate = body.scheduledAt;
+    }
 
     return this.tasksService.update(id, dto);
   }

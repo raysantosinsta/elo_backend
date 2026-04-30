@@ -1,6 +1,8 @@
 /* eslint-disable prettier/prettier */
-import { SimpleStatus } from '@prisma/client';
+import { SimpleStatus, UserRole } from '@prisma/client';
 import { IsEmail, IsEnum, IsOptional, IsString } from 'class-validator';
+
+;
 
 export class CreateUserDto {
   @IsString()
@@ -16,10 +18,21 @@ export class CreateUserDto {
   @IsString()
   document?: string;
 
+  @IsOptional()
+  @IsString()
+  professionalRole?: string;  // 🔥 Para receber o NOME do cargo
 
   @IsOptional()
   @IsString()
-  professionalRole?: string;
+  professionalRoleId?: string; // 🔥 NOVO: Para receber o ID diretamente
+
+  @IsOptional()
+  @IsString()
+  companyRoleId?: string;
+
+  @IsOptional()
+  @IsEnum(UserRole)
+  role?: UserRole;
 
   @IsString()
   contact: string;
@@ -31,5 +44,4 @@ export class CreateUserDto {
   @IsEnum(SimpleStatus)
   @IsOptional()
   status?: SimpleStatus;
-
 }

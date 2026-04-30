@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 /* eslint-disable prettier/prettier */
 /* eslint-disable @typescript-eslint/no-unsafe-enum-comparison */
 /* eslint-disable @typescript-eslint/restrict-template-expressions */
@@ -31,21 +32,20 @@ import { InjectMetric } from '@willsoto/nestjs-prometheus';
 import type { Cache } from 'cache-manager';
 import { ClsService } from 'nestjs-cls';
 import { Counter, Histogram } from 'prom-client';
+import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SupabaseService } from '../supabase/supabase.service';
-import { AuditService } from '../audit/audit.service';
 import {
   CreateFlowDto,
   CreateFlowItemDto,
   CreateStageDto,
-  DateFilterType,
+  DeadlineDashboardQueryDto,
   FlowFilterDto,
+  MoveItemWithDeadlineDto,
   UpdateFlowItemDto,
   UpdateItemStageDeadlineDto,
-  BulkUpdateItemStagesDto,
-  MoveItemWithDeadlineDto,
-  DeadlineDashboardQueryDto,
 } from './dto/create-flow.dto';
+import { WhatsappNotificationService } from 'src/whatsapp-notification/whatsapp-notification.service';
 
 // --- MÉTRICAS ---
 const flowOpsCounter = new Counter({
@@ -77,9 +77,12 @@ export class FlowService {
 
   constructor(
     private prisma: PrismaService,
+
     private readonly cls: ClsService,
     private supabase: SupabaseService,
     private auditService: AuditService,
+    private readonly whatsappNotification: WhatsappNotificationService, // 🔥 ADICIONA
+
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
     @InjectMetric('flow_item_moves_total')
     public moveCounter: Counter<string>,
@@ -134,22 +137,24 @@ export class FlowService {
       },
       select: {
         role: true,
-        professionalRole: true,
+        professionalRole: {
+          select: { name: true },
+        },
       },
     });
 
     if (!user) return false;
 
-    // Admin e Master sempre podem
     if (['MASTER', 'ADMIN'].includes(user.role)) {
       return true;
     }
 
-    // Employee só pode se tiver cargo de modelagem
     if (user.role === 'EMPLOYER') {
-      const professionalRole = user.professionalRole?.toLowerCase() || '';
+      // 🔥 Pegar o nome do cargo profissional do relacionamento
+      const professionalRoleName =
+        user.professionalRole?.name?.toLowerCase() || '';
       return MODELAGEM_KEYWORDS.some((keyword) =>
-        professionalRole.includes(keyword),
+        professionalRoleName.includes(keyword),
       );
     }
 
@@ -762,6 +767,11 @@ export class FlowService {
     });
 
     await this.invalidateFlowCache(companyId, stage.flowId);
+
+    // 🔥 LIMPAR CACHE ESPECÍFICO DA ETAPA
+    const cacheKey = `flow_board_${stage.flowId}`;
+    await this.cacheManager.del(cacheKey);
+
     return updated;
   }
 
@@ -1501,6 +1511,9 @@ export class FlowService {
 
     const user = await this.prisma.user.findFirst({
       where: { id: userId, companyId },
+      include: {
+        professionalRole: { select: { name: true } },
+      },
     });
 
     if (!user) {
@@ -1604,6 +1617,23 @@ export class FlowService {
 
         const item = await tx.flowItem.create({ data: dataToCreate });
 
+        // ============================================================
+        // 🔥 🔥 🔥 NOTIFICAÇÃO WHATSAPP - ADICIONE AQUI 🔥 🔥 🔥
+        // ============================================================
+        try {
+          const phoneNumber = '+5585984372865';
+          const message = `✅ NOVO ITEM: ${item.title}`;
+
+          await this.whatsappNotification.sendSimpleMessage(
+            phoneNumber,
+            message,
+          );
+          this.logger.log(`📱 Notificação enviada para ${phoneNumber}`);
+        } catch (error: any) {
+          console.error('❌ ERRO NO WHATSAPP:', error.message);
+        }
+        // ============================================================
+
         // 5. Gera os registros de prazo (FlowItemStage) para a nova estrutura
         const stages = await tx.flowStage.findMany({
           where: { flowId, companyId },
@@ -1653,14 +1683,9 @@ export class FlowService {
     userId: string,
     dto: CreateFlowItemDto,
   ) {
-    const companyId = this.getCompanyIdFromContext();
+    console.log('🚀🚀🚀 CREATE FLOW ITEM WITH STAGES FOI CHAMADO! 🚀🚀🚀');
 
-    this.logger.log('========================================');
-    this.logger.log('🎯 [REQUISITO 3] CRIANDO ITEM COM PRAZOS POR ETAPA');
-    this.logger.log('========================================');
-    this.logger.log(`📦 flowId: ${flowId}`);
-    this.logger.log(`📦 userId: ${userId}`);
-    this.logger.log(`📦 dto:`, dto);
+    const companyId = this.getCompanyIdFromContext();
 
     // Primeiro cria o item normalmente
     const item = await this.createFlowItem(flowId, userId, dto);
@@ -3550,6 +3575,12 @@ export class FlowService {
   // ===========================================================================
   async advanceItemToNextStage(itemId: string, userId: string) {
     const companyId = this.cls.get<string>('tenantId');
+    console.log('\n' + '='.repeat(80));
+    console.log('🚀 [advanceItemToNextStage] INICIANDO');
+    console.log('='.repeat(80));
+    console.log(`📌 itemId: ${itemId}`);
+    console.log(`📌 userId: ${userId}`);
+    console.log(`📌 companyId: ${companyId}`);
 
     return this.prisma.$transaction(async (tx) => {
       // 1. Busca item e etapa atual com nomes para o histórico
@@ -3562,16 +3593,29 @@ export class FlowService {
       });
 
       if (!item || !item.stage) {
+        console.log('❌ Item ou etapa não encontrado');
         throw new NotFoundException('Item ou etapa atual não encontrado');
       }
 
+      console.log(`📦 Item encontrado: ${item.title}`);
+      console.log(`📌 Etapa atual: ${item.stage.name} (ID: ${item.stage.id})`);
+      console.log(`📌 allowedRole da etapa: ${item.stage.allowedRole}`);
+
       const user = await tx.user.findFirst({
         where: { id: userId, companyId },
+        include: { professionalRole: true },
       });
 
-      if (!user) throw new ForbiddenException('Usuário não encontrado');
+      if (!user) {
+        console.log('❌ Usuário não encontrado');
+        throw new ForbiddenException('Usuário não encontrado');
+      }
+      console.log(`👤 Usuário encontrado:`);
+      console.log(`   - role: ${user.role}`);
+      console.log(`   - professionalRole: ${user.professionalRole?.name}`);
 
-      // Valida permissão de acesso à etapa atual
+      // 🔥 VALIDAÇÃO DE ACESSO
+      console.log('\n🔒 Chamando validateStageAccess...');
       this.validateStageAccess(user, item.stage);
 
       // 2. Busca todas as etapas ordenadas para determinar a sequência
@@ -3580,8 +3624,20 @@ export class FlowService {
         orderBy: { order: 'asc' },
       });
 
+      console.log(`\n📋 Etapas do fluxo (${allStages.length}):`);
+      allStages.forEach((s, idx) => {
+        console.log(
+          `   ${idx + 1}. ${s.name} (allowedRole: ${s.allowedRole || 'todos'})`,
+        );
+      });
+
       const currentIndex = allStages.findIndex((s) => s.id === item.stageId);
       const nextStage = allStages[currentIndex + 1];
+
+      console.log(`\n📍 Posição atual: índice ${currentIndex}`);
+      console.log(
+        `📍 Próxima etapa: ${nextStage ? nextStage.name : 'NENHUMA (última etapa)'}`,
+      );
 
       // ===========================================================================
       // 🏁 CENÁRIO A: ÚLTIMA ETAPA (FINALIZAÇÃO DO ITEM)
@@ -3964,145 +4020,145 @@ export class FlowService {
   }
 
   async getCompletionStats(
-  period: 'today' | 'week' | 'month' | 'year' = 'week',
-  flowId?: string,
-) {
-  const companyId = this.getCompanyIdFromContext();
+    period: 'today' | 'week' | 'month' | 'year' = 'week',
+    flowId?: string,
+  ) {
+    const companyId = this.getCompanyIdFromContext();
 
-  console.log('\n' + '='.repeat(80));
-  console.log('📊 [SERVICE] getCompletionStats');
-  console.log('='.repeat(80));
-  console.log('📥 Parâmetros recebidos:');
-  console.log('   - period:', period);
-  console.log('   - flowId:', flowId);
-  console.log('   - companyId:', companyId);
+    console.log('\n' + '='.repeat(80));
+    console.log('📊 [SERVICE] getCompletionStats');
+    console.log('='.repeat(80));
+    console.log('📥 Parâmetros recebidos:');
+    console.log('   - period:', period);
+    console.log('   - flowId:', flowId);
+    console.log('   - companyId:', companyId);
 
-  const now = new Date();
-  let startDate: Date;
+    const now = new Date();
+    let startDate: Date;
 
-  switch (period) {
-    case 'today':
-      startDate = new Date(now);
-      startDate.setHours(0, 0, 0, 0);
-      break;
-    case 'week':
-      startDate = new Date(now);
-      startDate.setDate(now.getDate() - 7);
-      startDate.setHours(0, 0, 0, 0);
-      break;
-    case 'month':
-      startDate = new Date(now);
-      startDate.setMonth(now.getMonth() - 1);
-      startDate.setHours(0, 0, 0, 0);
-      break;
-    case 'year':
-      startDate = new Date(now);
-      startDate.setFullYear(now.getFullYear() - 1);
-      startDate.setHours(0, 0, 0, 0);
-      break;
-    default:
-      startDate = new Date(now);
-      startDate.setDate(now.getDate() - 7);
-      startDate.setHours(0, 0, 0, 0);
+    switch (period) {
+      case 'today':
+        startDate = new Date(now);
+        startDate.setHours(0, 0, 0, 0);
+        break;
+      case 'week':
+        startDate = new Date(now);
+        startDate.setDate(now.getDate() - 7);
+        startDate.setHours(0, 0, 0, 0);
+        break;
+      case 'month':
+        startDate = new Date(now);
+        startDate.setMonth(now.getMonth() - 1);
+        startDate.setHours(0, 0, 0, 0);
+        break;
+      case 'year':
+        startDate = new Date(now);
+        startDate.setFullYear(now.getFullYear() - 1);
+        startDate.setHours(0, 0, 0, 0);
+        break;
+      default:
+        startDate = new Date(now);
+        startDate.setDate(now.getDate() - 7);
+        startDate.setHours(0, 0, 0, 0);
+    }
+
+    console.log('📅 Período calculado:');
+    console.log('   - startDate:', startDate.toISOString());
+    console.log('   - endDate:', now.toISOString());
+
+    // 🔥 CONSTRUIR WHERE CLAUSE COM FILTRO DE FLUXO
+    const where: any = {
+      companyId,
+      status: 'CONCLUIDO',
+      updatedAt: { gte: startDate },
+    };
+
+    // 🔥 ADICIONAR FILTRO POR FLUXO SE FORNECIDO
+    if (flowId) {
+      console.log('📌 Aplicando filtro por fluxo:', flowId);
+      where.flowId = flowId;
+    }
+
+    console.log('📋 WHERE CLAUSE:', JSON.stringify(where, null, 2));
+
+    const completedItems = await this.prisma.flowItem.findMany({
+      where,
+      include: {
+        flow: { select: { id: true, name: true } },
+        assignedTo: { select: { id: true, name: true } },
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+
+    console.log('📦 Itens concluídos encontrados:', completedItems.length);
+
+    const totalCompleted = completedItems.length;
+
+    const byFlow = completedItems.reduce(
+      (acc, item) => {
+        const flowName = item.flow?.name || 'Sem fluxo';
+        acc[flowName] = (acc[flowName] || 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>,
+    );
+
+    const byResponsible = completedItems.reduce(
+      (acc, item) => {
+        const name = item.assignedTo?.name || 'Não atribuído';
+        acc[name] = (acc[name] || 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>,
+    );
+
+    const itemsWithProductionTime = completedItems.filter(
+      (item) => item.productionStartedAt,
+    );
+
+    const avgProductionTime =
+      itemsWithProductionTime.length > 0
+        ? itemsWithProductionTime.reduce((sum, item) => {
+            const days = this.calculateProductionDays(
+              item.productionStartedAt!,
+              item.updatedAt,
+            );
+            return sum + days;
+          }, 0) / itemsWithProductionTime.length
+        : 0;
+
+    const overdueCount = completedItems.filter(
+      (item) => item.dueDate && new Date(item.dueDate) < item.updatedAt,
+    ).length;
+
+    console.log('📊 Estatísticas calculadas:');
+    console.log('   - total:', totalCompleted);
+    console.log('   - fluxos únicos:', Object.keys(byFlow).length);
+    console.log('   - responsáveis únicos:', Object.keys(byResponsible).length);
+    console.log('   - atrasados:', overdueCount);
+    console.log('   - tempo médio produção:', avgProductionTime);
+    console.log('='.repeat(80) + '\n');
+
+    return {
+      period,
+      startDate,
+      endDate: new Date(),
+      total: totalCompleted,
+      byFlow,
+      byResponsible,
+      averages: {
+        productionTime: Math.round(avgProductionTime * 10) / 10,
+        perDay: Math.round((totalCompleted / 7) * 10) / 10,
+      },
+      overdue: {
+        count: overdueCount,
+        percentage:
+          totalCompleted > 0
+            ? Math.round((overdueCount / totalCompleted) * 100)
+            : 0,
+      },
+    };
   }
-
-  console.log('📅 Período calculado:');
-  console.log('   - startDate:', startDate.toISOString());
-  console.log('   - endDate:', now.toISOString());
-
-  // 🔥 CONSTRUIR WHERE CLAUSE COM FILTRO DE FLUXO
-  const where: any = {
-    companyId,
-    status: 'CONCLUIDO',
-    updatedAt: { gte: startDate },
-  };
-
-  // 🔥 ADICIONAR FILTRO POR FLUXO SE FORNECIDO
-  if (flowId) {
-    console.log('📌 Aplicando filtro por fluxo:', flowId);
-    where.flowId = flowId;
-  }
-
-  console.log('📋 WHERE CLAUSE:', JSON.stringify(where, null, 2));
-
-  const completedItems = await this.prisma.flowItem.findMany({
-    where,
-    include: {
-      flow: { select: { id: true, name: true } },
-      assignedTo: { select: { id: true, name: true } },
-    },
-    orderBy: { updatedAt: 'desc' },
-  });
-
-  console.log('📦 Itens concluídos encontrados:', completedItems.length);
-
-  const totalCompleted = completedItems.length;
-
-  const byFlow = completedItems.reduce(
-    (acc, item) => {
-      const flowName = item.flow?.name || 'Sem fluxo';
-      acc[flowName] = (acc[flowName] || 0) + 1;
-      return acc;
-    },
-    {} as Record<string, number>,
-  );
-
-  const byResponsible = completedItems.reduce(
-    (acc, item) => {
-      const name = item.assignedTo?.name || 'Não atribuído';
-      acc[name] = (acc[name] || 0) + 1;
-      return acc;
-    },
-    {} as Record<string, number>,
-  );
-
-  const itemsWithProductionTime = completedItems.filter(
-    (item) => item.productionStartedAt,
-  );
-
-  const avgProductionTime =
-    itemsWithProductionTime.length > 0
-      ? itemsWithProductionTime.reduce((sum, item) => {
-          const days = this.calculateProductionDays(
-            item.productionStartedAt!,
-            item.updatedAt,
-          );
-          return sum + days;
-        }, 0) / itemsWithProductionTime.length
-      : 0;
-
-  const overdueCount = completedItems.filter(
-    (item) => item.dueDate && new Date(item.dueDate) < item.updatedAt,
-  ).length;
-
-  console.log('📊 Estatísticas calculadas:');
-  console.log('   - total:', totalCompleted);
-  console.log('   - fluxos únicos:', Object.keys(byFlow).length);
-  console.log('   - responsáveis únicos:', Object.keys(byResponsible).length);
-  console.log('   - atrasados:', overdueCount);
-  console.log('   - tempo médio produção:', avgProductionTime);
-  console.log('='.repeat(80) + '\n');
-
-  return {
-    period,
-    startDate,
-    endDate: new Date(),
-    total: totalCompleted,
-    byFlow,
-    byResponsible,
-    averages: {
-      productionTime: Math.round(avgProductionTime * 10) / 10,
-      perDay: Math.round((totalCompleted / 7) * 10) / 10,
-    },
-    overdue: {
-      count: overdueCount,
-      percentage:
-        totalCompleted > 0
-          ? Math.round((overdueCount / totalCompleted) * 100)
-          : 0,
-    },
-  };
-}
 
   private calculateProductionDays(startDate: Date, endDate: Date): number {
     const start = new Date(startDate).getTime();
@@ -4241,11 +4297,14 @@ export class FlowService {
       return null;
     }
 
+    // 🔥 Buscar usuários pelo nome do cargo profissional no relacionamento
     const users = await this.prisma.user.findMany({
       where: {
         companyId,
         status: 'ACTIVE',
-        professionalRole: { contains: allowedRole, mode: 'insensitive' },
+        professionalRole: {
+          name: { contains: allowedRole, mode: 'insensitive' },
+        },
       },
       orderBy: { createdAt: 'asc' },
       take: 1,
@@ -4255,10 +4314,29 @@ export class FlowService {
   }
 
   private validateStageAccess(
-    user: { role: string; professionalRole: string | null },
+    user: { role: string; professionalRole?: { name: string } | null },
     stage: { name: string; allowedRole: string | null },
   ) {
+    // 🔥 LOG 1: DADOS DE ENTRADA
+    console.log('\n' + '='.repeat(80));
+    console.log('🔍 [validateStageAccess] INICIANDO VALIDAÇÃO');
+    console.log('='.repeat(80));
+    console.log('📌 DADOS DO USUÁRIO:');
+    console.log('   - role (sistema):', user.role);
+    console.log(
+      '   - professionalRole (objeto):',
+      JSON.stringify(user.professionalRole, null, 2),
+    );
+    console.log('   - professionalRole.name:', user.professionalRole?.name);
+    console.log('');
+    console.log('📌 DADOS DA ETAPA:');
+    console.log('   - stage.name:', stage.name);
+    console.log('   - stage.allowedRole:', stage.allowedRole);
+    console.log('='.repeat(80));
+
     if (['MASTER', 'ADMIN'].includes(user.role)) {
+      console.log('✅ [validateStageAccess] Acesso liberado: MASTER/ADMIN');
+      console.log('='.repeat(80) + '\n');
       return true;
     }
 
@@ -4268,11 +4346,22 @@ export class FlowService {
       stage.allowedRole === 'null' ||
       stage.allowedRole === 'all'
     ) {
+      console.log(
+        '✅ [validateStageAccess] Acesso liberado: etapa sem restrição',
+      );
+      console.log('='.repeat(80) + '\n');
       return true;
     }
 
-    const userRole = user.professionalRole?.trim().toLowerCase() || '';
+    // 🔥 Pegar o nome do cargo profissional do relacionamento
+    const userRole = user.professionalRole?.name?.trim().toLowerCase() || '';
     const required = stage.allowedRole.trim().toLowerCase();
+
+    console.log('🔍 COMPARAÇÃO:');
+    console.log(`   - Cargo do usuário: "${userRole}"`);
+    console.log(`   - Cargo requerido: "${required}"`);
+    console.log(`   - São iguais? ${userRole === required}`);
+    console.log(`   - Usuário tem cargo? ${userRole ? 'SIM' : 'NÃO'}`);
 
     const roles = userRole.split(',').map((r) => r.trim());
     const hasAccess = roles.some((r) => r === required);
