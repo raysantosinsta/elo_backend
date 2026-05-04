@@ -4,151 +4,148 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 // services/whatsapp-simple.service.ts
 
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import twilio from 'twilio'; // 🔥 Mudar para import padrão
+import axios from 'axios';
 
 @Injectable()
 export class WhatsAppSimpleService {
   private readonly logger = new Logger(WhatsAppSimpleService.name);
-  private client: twilio.Twilio | null = null; // 🔥 Inicializar como null
-  private accountSid: string;
-  private authToken: string;
+  private readonly accessToken: string;
+  private readonly phoneNumberId: string;
+  private readonly apiVersion: string;
+  private readonly baseUrl: string;
 
   constructor(private configService: ConfigService) {
-    this.accountSid =
-      this.configService.get<string>('TWILIO_ACCOUNT_SID') || '';
-    this.authToken = this.configService.get<string>('TWILIO_AUTH_TOKEN') || '';
+    this.accessToken = this.configService.get<string>('META_WHATSAPP_ACCESS_TOKEN') || '';
+    this.phoneNumberId = this.configService.get<string>('META_WHATSAPP_PHONE_NUMBER_ID') || '';
+    this.apiVersion = this.configService.get<string>('META_WHATSAPP_API_VERSION') || 'v25.0';
+    this.baseUrl = this.configService.get<string>('META_WHATSAPP_BASE_URL') || 'https://graph.facebook.com';
 
-    if (this.accountSid && this.authToken) {
-      // 🔥 Usar twilio como função
-      this.client = new twilio.Twilio(this.accountSid, this.authToken);
-      this.logger.log('✅ Twilio inicializado');
+    if (this.accessToken && this.phoneNumberId) {
+      this.logger.log('✅ Meta WhatsApp API inicializada com sucesso');
+      this.logger.log(`📱 Phone Number ID: ${this.phoneNumberId}`);
+      this.logger.log(`🔑 Access Token: ${this.accessToken.substring(0, 20)}...`);
     } else {
-      this.logger.warn('⚠️ Credenciais Twilio não encontradas');
+      this.logger.warn('⚠️ Credenciais da Meta WhatsApp API não encontradas');
     }
   }
 
   /**
- * 🔥 MÉTODO 1: Envio SIMPLES (texto puro) via Twilio WhatsApp
- * 
- * @description
- * Este método envia uma mensagem de texto simples através da API do Twilio WhatsApp.
- * Ele automaticamente:
- * - Formata o número de telefone para o padrão internacional (+55...)
- * - Adiciona o prefixo 'whatsapp:' obrigatório do Twilio
- * - Configura o número de origem a partir das variáveis de ambiente
- * - Registra logs detalhados de toda a operação
- * 
- * @param {string} to - Número de telefone do destinatário *                       Aceita formatos: "558584372865" ou "+558584372865"
- * @param {string} message - Conteúdo da mensagem a ser enviada
- *                           Pode incluir emojis e quebras de linha
- * 
- * @returns {Promise<boolean>} 
- *          - `true`: Mensagem enviada com sucesso
- *          - `false`: Falha no envio (cliente não inicializado ou erro da API)
- * 
- * @example
- * // Exemplo de uso básico
- * const success = await whatsAppService.sendSimpleMessage(
- *   "558584372865",
- *   "Olá! Teste de integração WhatsApp"
- * );
- * 
- * @example
- * // Exemplo com número já formatado
- * const success = await whatsAppService.sendSimpleMessage(
- *   "+558584372865",
- *   "🚀 Mensagem com emoji!
- *   
- *   Esta é uma mensagem 
- *   com múltiplas linhas."
- * );
- * 
- * @example
- * // Exemplo de uso no FlowService
- * await this.whatsAppService.sendSimpleMessage(
- *   "558584372865",
- *   `🎉 NOVO ITEM!
- *   
- *   Item: ${item.title}
- *   Quantidade: ${item.quantity}`
- * );
- * 
- * @throws {Error} Não lança exceções - todos os erros são capturados e retornam false
- * 
- * @logs
- * - 📱 [TWILIO] Enviando mensagem simples para...
- * - 📝 [TWILIO] Corpo da Mensagem: ...
- * - 📤 [TWILIO] Payload da requisição: ...
- * - ✅ [TWILIO] Resposta de Sucesso! SID: ...
- * - ❌ [TWILIO] Erro disparado pela API do Twilio: ...
- * 
- * @notes
- * - O número de origem é configurado via env: TWILIO_WHATSAPP_FROM
- * - Padrão: 'whatsapp:+14155238886' (sandbox do Twilio)
- * - O Twilio requer o prefixo 'whatsapp:' nos números
- * - A mensagem suporta texto simples, emojis e emojis Unicode
- * - Limite de mensagem: ~1600 caracteres (prática recomendada)
- * 
- * @see {@link https://www.twilio.com/docs/whatsapp} - Documentação oficial Twilio WhatsApp
- * @see {@link https://console.twilio.com} - Console do Twilio para ver logs
- */
+   * 🔥 MÉTODO: Envio de mensagem via Meta WhatsApp API (Graph API)
+   * 
+   * @description
+   * Este método envia uma mensagem de texto simples através da API oficial do WhatsApp Business.
+   * Ele segue exatamente o padrão do curl que funcionou:
+   * 
+   * curl -X POST "https://graph.facebook.com/v25.0/{PHONE_NUMBER_ID}/messages" \
+   * -H "Authorization: Bearer {ACCESS_TOKEN}" \
+   * -H "Content-Type: application/json" \
+   * -d '{
+   *   "messaging_product": "whatsapp",
+   *   "to": "5585984372865",
+   *   "type": "text",
+   *   "text": { "body": "Agora vai funcionar 🚀" }
+   * }'
+   * 
+   * @param {string} to - Número do destinatário (formato: 5585984372865, sem '+' e sem espaços)
+   * @param {string} message - Conteúdo da mensagem a ser enviada
+   * 
+   * @returns {Promise<boolean>} - true se enviado com sucesso, false caso contrário
+   */
   async sendSimpleMessage(to: string, message: string): Promise<boolean> {
-    if (!this.client) {
-      this.logger.error('❌ Cliente Twilio não inicializado');
+    if (!this.accessToken || !this.phoneNumberId) {
+      this.logger.error('❌ Meta WhatsApp API não configurada corretamente');
       return false;
     }
 
     try {
-      let formattedTo = to;
-      if (!formattedTo.startsWith('+')) {
-        formattedTo = `+${formattedTo}`;
+      // Limpa o número de telefone (remove tudo que não é dígito)
+      let cleanedNumber = to.replace(/\D/g, '');
+      
+      // Garante que comece com 55 (código do Brasil)
+      if (!cleanedNumber.startsWith('55')) {
+        cleanedNumber = `55${cleanedNumber}`;
       }
 
-      const fromNumber = this.configService.get<string>(
-        'TWILIO_WHATSAPP_FROM',
-        'whatsapp:+14155238886',
-      );
+      const url = `${this.baseUrl}/${this.apiVersion}/${this.phoneNumberId}/messages`;
+      
+      const payload = {
+        messaging_product: 'whatsapp',
+        to: cleanedNumber,
+        type: 'text',
+        text: {
+          body: message,
+        },
+      };
 
-      const formattedFrom = fromNumber.startsWith('whatsapp:')
-        ? fromNumber
-        : `whatsapp:${fromNumber}`;
+      const headers = {
+        Authorization: `Bearer ${this.accessToken}`,
+        'Content-Type': 'application/json',
+      };
 
-      const finalTo = `whatsapp:${formattedTo}`;
+      this.logger.log(`📱 [META WHATSAPP] Enviando mensagem para: ${cleanedNumber}`);
+      this.logger.log(`📝 [META WHATSAPP] Mensagem: ${message.substring(0, 200)}...`);
+      this.logger.log(`🌐 [META WHATSAPP] URL: ${url}`);
+      this.logger.log(`📦 [META WHATSAPP] Payload: ${JSON.stringify(payload, null, 2)}`);
 
-      this.logger.log(`📱 [TWILIO] Enviando mensagem simples para ${finalTo}`);
-      this.logger.log(`📝 [TWILIO] Corpo da Mensagem: ${message}`);
-      this.logger.log(
-        `📤 [TWILIO] Payload da requisição: ${JSON.stringify(
-          {
-            body: message,
-            from: formattedFrom,
-            to: finalTo,
-          },
-          null,
-          2,
-        )}`,
-      );
+      const response = await axios.post(url, payload, { headers });
 
-      const result = await this.client.messages.create({
-        body: message,
-        from: formattedFrom,
-        to: finalTo,
-      });
-
-      this.logger.log(`✅ [TWILIO] Resposta de Sucesso! SID: ${result.sid}`);
-      this.logger.log(
-        `📄 [TWILIO] Resposta Completa: ${JSON.stringify(result, null, 2)}`,
-      );
-      return true;
+      if (response.status === 200 || response.status === 201) {
+        this.logger.log(`✅ [META WHATSAPP] Mensagem enviada com sucesso!`);
+        this.logger.log(`📄 Resposta: ${JSON.stringify(response.data, null, 2)}`);
+        return true;
+      } else {
+        this.logger.warn(`⚠️ [META WHATSAPP] Resposta inesperada: ${response.status}`);
+        this.logger.warn(`📄 ${JSON.stringify(response.data, null, 2)}`);
+        return false;
+      }
     } catch (error: any) {
-      this.logger.error(`❌ [TWILIO] Erro disparado pela API do Twilio:`);
-      this.logger.error(error.message);
-      if (error.code) this.logger.error(`Código do Erro: ${error.code}`);
-      if (error.moreInfo) this.logger.error(`Mais Info: ${error.moreInfo}`);
+      this.logger.error(`❌ [META WHATSAPP] Erro ao enviar mensagem:`);
+      
+      if (error.response) {
+        // Erro da API do Meta
+        this.logger.error(`Status: ${error.response.status}`);
+        this.logger.error(`Data: ${JSON.stringify(error.response.data, null, 2)}`);
+        
+        // Log detalhado do erro do Meta
+        if (error.response.data?.error) {
+          const metaError = error.response.data.error;
+          this.logger.error(`Meta Error Code: ${metaError.code}`);
+          this.logger.error(`Meta Error Message: ${metaError.message}`);
+          this.logger.error(`Meta Error Type: ${metaError.type}`);
+        }
+      } else if (error.request) {
+        this.logger.error(`Sem resposta da API: ${error.message}`);
+      } else {
+        this.logger.error(`Erro na configuração: ${error.message}`);
+      }
+      
       return false;
     }
   }
 
+  /**
+   * 🔥 Método para formatar número de telefone
+   * Aceita: 558584372865, 5585984372865, 5585984372865@c.us, +5585984372865
+   */
+  private formatPhoneNumber(phoneNumber: string): string {
+    // Remove todos os caracteres não numéricos
+    let cleaned = phoneNumber.replace(/\D/g, '');
+    
+    // Remove sufixo @c.us se existir (formato do WhatsApp Web)
+    cleaned = cleaned.split('@')[0];
+    
+    // Garante que tenha 55 no início
+    if (!cleaned.startsWith('55')) {
+      cleaned = `55${cleaned}`;
+    }
+    
+    return cleaned;
+  }
 }

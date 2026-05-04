@@ -1508,8 +1508,8 @@ export class FlowService {
   ): Promise<void> {
     try {
       // 🔥 CONFIGURAÇÃO - MUDE PARA false QUANDO QUISER USAR NÚMERO DO FUNCIONÁRIO
-      const USE_FIXED_NUMBER_FOR_TEST = false;
-      const FIXED_TEST_NUMBER = '558584372865';
+      const USE_FIXED_NUMBER_FOR_TEST = true;
+      const FIXED_TEST_NUMBER = '5585984372865';
 
       let phoneNumber: string | null = null;
       let userName: string | null = null;
