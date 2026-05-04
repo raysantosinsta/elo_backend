@@ -1,8 +1,11 @@
+/* eslint-disable prettier/prettier */
 import { Module } from '@nestjs/common';
-import { WhatsappNotificationService } from './whatsapp-notification.service';
+import { WhatsAppSimpleService } from './whatsapp-notification.service';
+import { WhatsAppTestController } from './whatsapp-notification.controller';
 
 @Module({
-  providers: [WhatsappNotificationService],
-  exports: [WhatsappNotificationService], // 🔥 EXPORTA PARA OUTROS MÓDULOS
+  controllers: [WhatsAppTestController],
+  providers: [WhatsAppSimpleService],
+  exports: [WhatsAppSimpleService],
 })
 export class WhatsappNotificationModule {}

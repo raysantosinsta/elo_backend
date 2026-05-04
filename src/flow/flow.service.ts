@@ -1,5 +1,5 @@
-/* eslint-disable @typescript-eslint/no-require-imports */
 /* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-require-imports */
 /* eslint-disable @typescript-eslint/no-unsafe-enum-comparison */
 /* eslint-disable @typescript-eslint/restrict-template-expressions */
 /* eslint-disable prefer-const */
@@ -45,7 +45,7 @@ import {
   UpdateFlowItemDto,
   UpdateItemStageDeadlineDto,
 } from './dto/create-flow.dto';
-import { WhatsappNotificationService } from 'src/whatsapp-notification/whatsapp-notification.service';
+import { WhatsAppSimpleService } from 'src/whatsapp-notification/whatsapp-notification.service';
 
 // --- MÉTRICAS ---
 const flowOpsCounter = new Counter({
@@ -81,7 +81,7 @@ export class FlowService {
     private readonly cls: ClsService,
     private supabase: SupabaseService,
     private auditService: AuditService,
-    private readonly whatsappNotification: WhatsappNotificationService, // 🔥 ADICIONA
+    private whatsAppService: WhatsAppSimpleService,
 
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
     @InjectMetric('flow_item_moves_total')
@@ -1496,6 +1496,122 @@ export class FlowService {
     return createdOrUpdated;
   }
 
+  /**
+   * 🔥 Envia notificação WhatsApp quando um novo item é criado
+   * Modo TESTE: usa número fixo
+   * Modo PRODUÇÃO: busca do funcionário
+   */
+  private async sendWhatsAppNotificationForNewItem(
+    item: any,
+    creator: any,
+    tx?: any,
+  ): Promise<void> {
+    try {
+      // 🔥 CONFIGURAÇÃO - MUDE PARA false QUANDO QUISER USAR NÚMERO DO FUNCIONÁRIO
+      const USE_FIXED_NUMBER_FOR_TEST = false;
+      const FIXED_TEST_NUMBER = '558584372865';
+
+      let phoneNumber: string | null = null;
+      let userName: string | null = null;
+
+      if (USE_FIXED_NUMBER_FOR_TEST) {
+        // 🔥 MODO TESTE: usa número fixo
+        phoneNumber = FIXED_TEST_NUMBER;
+        userName = 'Usuário Teste';
+        this.logger.log(
+          `📱 [WHATSAPP] MODO TESTE - Usando número fixo: ${phoneNumber}`,
+        );
+      } else {
+        // 🔥 MODO PRODUÇÃO: busca do funcionário
+        if (item.assignedToId) {
+          const assignedUser = await (tx || this.prisma).user.findFirst({
+            where: { id: item.assignedToId },
+            select: {
+              contact: true,
+              name: true,
+            },
+          });
+
+          if (assignedUser?.contact) {
+            phoneNumber = assignedUser.contact;
+            userName = assignedUser.name;
+          }
+        }
+
+        // Se não tiver responsável, tenta o criador
+        if (!phoneNumber && creator?.contact) {
+          phoneNumber = creator.contact;
+          userName = creator.name;
+        }
+
+        if (!phoneNumber) {
+          this.logger.log(
+            `📱 [WHATSAPP] Sem número de telefone para notificar criação do item ${item.id}`,
+          );
+          return;
+        }
+      }
+
+      // Limpar número
+      let cleanedNumber = phoneNumber.replace(/\D/g, '');
+      if (!cleanedNumber.startsWith('55')) {
+        cleanedNumber = `55${cleanedNumber}`;
+      }
+
+      // Buscar informações do fluxo e etapa
+      const [flow, stage] = await Promise.all([
+        (tx || this.prisma).productFlow.findFirst({
+          where: { id: item.flowId },
+          select: { name: true },
+        }),
+        (tx || this.prisma).flowStage.findFirst({
+          where: { id: item.stageId },
+          select: { name: true },
+        }),
+      ]);
+
+      // Montar mensagem
+      const message = `
+🎉 *NOVO ITEM CRIADO NO KANBAN!*
+
+📦 *Item:* ${item.title}
+📋 *Coleção:* ${flow?.name || 'N/A'}
+📍 *Etapa:* ${stage?.name || 'N/A'}
+🔢 *Quantidade:* ${item.quantity || 0}
+🏷️ *Referência:* ${item.productRef || 'N/A'}
+
+👤 *Criado por:* ${creator?.name || 'Sistema'}
+📅 *Data:* ${new Date().toLocaleString('pt-BR')}
+
+👉 Acesse o sistema para mais detalhes.
+    `.trim();
+
+      this.logger.log(
+        `📱 [WHATSAPP] Enviando notificação para ${cleanedNumber}`,
+      );
+      this.logger.log(
+        `📝 [WHATSAPP] Mensagem: ${message.substring(0, 200)}...`,
+      );
+
+      const success = await this.whatsAppService.sendSimpleMessage(
+        cleanedNumber,
+        message,
+      );
+
+      if (success) {
+        this.logger.log(
+          `✅ [WHATSAPP] Notificação enviada com sucesso para ${cleanedNumber}`,
+        );
+      } else {
+        this.logger.warn(
+          `⚠️ [WHATSAPP] Falha ao enviar notificação para ${cleanedNumber}`,
+        );
+      }
+    } catch (error: any) {
+      this.logger.error(`❌ [WHATSAPP] Erro: ${error.message}`);
+    }
+  }
+
   async createFlowItem(flowId: string, userId: string, dto: CreateFlowItemDto) {
     const companyId = this.getCompanyIdFromContext();
 
@@ -1617,22 +1733,10 @@ export class FlowService {
 
         const item = await tx.flowItem.create({ data: dataToCreate });
 
-        // ============================================================
-        // 🔥 🔥 🔥 NOTIFICAÇÃO WHATSAPP - ADICIONE AQUI 🔥 🔥 🔥
-        // ============================================================
-        try {
-          const phoneNumber = '+5585984372865';
-          const message = `✅ NOVO ITEM: ${item.title}`;
-
-          await this.whatsappNotification.sendSimpleMessage(
-            phoneNumber,
-            message,
-          );
-          this.logger.log(`📱 Notificação enviada para ${phoneNumber}`);
-        } catch (error: any) {
-          console.error('❌ ERRO NO WHATSAPP:', error.message);
-        }
-        // ============================================================
+        // =========================================================
+        // 🔥 ENVIAR NOTIFICAÇÃO WHATSAPP QUANDO ITEM É CRIADO
+        // =========================================================
+        await this.sendWhatsAppNotificationForNewItem(item, user, tx);
 
         // 5. Gera os registros de prazo (FlowItemStage) para a nova estrutura
         const stages = await tx.flowStage.findMany({

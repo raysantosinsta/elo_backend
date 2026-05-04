@@ -36,7 +36,7 @@ import { MetricsModule } from './metrics/metrics.module';
 import { AuditModule } from './audit/audit.module';
 import { CompanyRolesModule } from './company-roles/company-roles.module';
 import { LocationGateway } from './location/location.gateway';
-import { WhatsappNotificationService } from './whatsapp-notification/whatsapp-notification.service';
+import { WhatsAppSimpleService } from './whatsapp-notification/whatsapp-notification.service';
 import { WhatsappNotificationModule } from './whatsapp-notification/whatsapp-notification.module';
 
 @Module({
@@ -105,7 +105,7 @@ import { WhatsappNotificationModule } from './whatsapp-notification/whatsapp-not
       useClass: TenantInterceptor,
     },
     LocationGateway,
-    WhatsappNotificationService,
+    WhatsAppSimpleService,
   ],
 })
 export class AppModule { }

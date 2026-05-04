@@ -353,7 +353,7 @@ export class CreateFlowItemDto {
   @ApiProperty({ example: 'Camisa Social Azul' })
   @IsString()
   @IsNotEmpty()
-  title: string;
+  title: string | undefined;
 
   @ApiProperty({ required: false, example: 'PED-2024-001' })
   @IsOptional()
@@ -430,6 +430,13 @@ export class CreateFlowItemDto {
   @ApiProperty({ description: 'ID do fluxo relacionado' })
   @IsUUID()
   flowId: string;
+
+  @ApiPropertyOptional({
+    description: 'Número de telefone para notificação WhatsApp',
+  })
+  @IsOptional()
+  @IsString()
+  notificationPhone?: string;
 }
 
 export class UpdateFlowItemDto {
