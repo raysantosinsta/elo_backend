@@ -54,7 +54,7 @@ export class WhatsAppSimpleService {
    * }'
    * 
    * @param {string} to - Número do destinatário (formato: 5585984372865, sem '+' e sem espaços)
-   * @param {string} message - Conteúdo da mensagem a ser enviada
+   * @param {string} message - Conteúdo da mensagem a ser enviada...
    * 
    * @returns {Promise<boolean>} - true se enviado com sucesso, false caso contrário
    */

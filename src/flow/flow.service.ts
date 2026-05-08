@@ -1501,114 +1501,291 @@ export class FlowService {
    * Modo TESTE: usa número fixo
    * Modo PRODUÇÃO: busca do funcionário
    */
-  private async sendWhatsAppNotificationForNewItem(
+  //   private async sendWhatsAppNotificationForNewItem(
+  //     item: any,
+  //     creator: any,
+  //     tx?: any,
+  //   ): Promise<void> {
+  //     try {
+  //       // 🔥 CONFIGURAÇÃO - MUDE PARA false QUANDO QUISER USAR NÚMERO DO FUNCIONÁRIO
+  //       const USE_FIXED_NUMBER_FOR_TEST = true;
+  //       const FIXED_TEST_NUMBER = '5585984372865';
+
+  //       let phoneNumber: string | null = null;
+  //       let userName: string | null = null;
+
+  //       if (USE_FIXED_NUMBER_FOR_TEST) {
+  //         // 🔥 MODO TESTE: usa número fixo
+  //         phoneNumber = FIXED_TEST_NUMBER;
+  //         userName = 'Usuário Teste';
+  //         this.logger.log(
+  //           `📱 [WHATSAPP] MODO TESTE - Usando número fixo: ${phoneNumber}`,
+  //         );
+  //       } else {
+  //         // 🔥 MODO PRODUÇÃO: busca do funcionário
+  //         if (item.assignedToId) {
+  //           const assignedUser = await (tx || this.prisma).user.findFirst({
+  //             where: { id: item.assignedToId },
+  //             select: {
+  //               contact: true,
+  //               name: true,
+  //             },
+  //           });
+
+  //           if (assignedUser?.contact) {
+  //             phoneNumber = assignedUser.contact;
+  //             userName = assignedUser.name;
+  //           }
+  //         }
+
+  //         // Se não tiver responsável, tenta o criador
+  //         if (!phoneNumber && creator?.contact) {
+  //           phoneNumber = creator.contact;
+  //           userName = creator.name;
+  //         }
+
+  //         if (!phoneNumber) {
+  //           this.logger.log(
+  //             `📱 [WHATSAPP] Sem número de telefone para notificar criação do item ${item.id}`,
+  //           );
+  //           return;
+  //         }
+  //       }
+
+  //       // Limpar número
+  //       let cleanedNumber = phoneNumber.replace(/\D/g, '');
+  //       if (!cleanedNumber.startsWith('55')) {
+  //         cleanedNumber = `55${cleanedNumber}`;
+  //       }
+
+  //       // Buscar informações do fluxo e etapa
+  //       const [flow, stage] = await Promise.all([
+  //         (tx || this.prisma).productFlow.findFirst({
+  //           where: { id: item.flowId },
+  //           select: { name: true },
+  //         }),
+  //         (tx || this.prisma).flowStage.findFirst({
+  //           where: { id: item.stageId },
+  //           select: { name: true },
+  //         }),
+  //       ]);
+
+  //       // Montar mensagem
+  //       const message = `
+  // 🎉 *NOVO ITEM CRIADO NO KANBAN!*
+
+  // 📦 *Item:* ${item.title}
+  // 📋 *Coleção:* ${flow?.name || 'N/A'}
+  // 📍 *Etapa:* ${stage?.name || 'N/A'}
+  // 🔢 *Quantidade:* ${item.quantity || 0}
+  // 🏷️ *Referência:* ${item.productRef || 'N/A'}
+
+  // 👤 *Criado por:* ${creator?.name || 'Sistema'}
+  // 📅 *Data:* ${new Date().toLocaleString('pt-BR')}
+
+  // 👉 Acesse o sistema para mais detalhes.
+  //     `.trim();
+
+  //       this.logger.log(
+  //         `📱 [WHATSAPP] Enviando notificação para ${cleanedNumber}`,
+  //       );
+  //       this.logger.log(
+  //         `📝 [WHATSAPP] Mensagem: ${message.substring(0, 200)}...`,
+  //       );
+
+  //       const success = await this.whatsAppService.sendSimpleMessage(
+  //         cleanedNumber,
+  //         message,
+  //       );
+
+  //       if (success) {
+  //         this.logger.log(
+  //           `✅ [WHATSAPP] Notificação enviada com sucesso para ${cleanedNumber}`,
+  //         );
+  //       } else {
+  //         this.logger.warn(
+  //           `⚠️ [WHATSAPP] Falha ao enviar notificação para ${cleanedNumber}`,
+  //         );
+  //       }
+  //     } catch (error: any) {
+  //       this.logger.error(`❌ [WHATSAPP] Erro: ${error.message}`);
+  //     }
+  //   }
+
+  /**
+   * 🔥 Envia notificação WhatsApp para todos os funcionários com o cargo vinculado à coluna
+   */
+  private async sendWhatsAppNotificationByColumnRole(
     item: any,
-    creator: any,
-    tx?: any,
+    stage: any,
+    companyId: string,
+    action: 'CREATED' | 'MOVED',
+    previousStageName?: string,
+    performedBy?: { id: string; name: string },
   ): Promise<void> {
     try {
-      // 🔥 CONFIGURAÇÃO - MUDE PARA false QUANDO QUISER USAR NÚMERO DO FUNCIONÁRIO
-      const USE_FIXED_NUMBER_FOR_TEST = true;
-      const FIXED_TEST_NUMBER = '5585984372865';
+      this.logger.log(
+        `📢 [NOTIFICATION] Iniciando envio de notificações baseadas no cargo da coluna`,
+      );
+      this.logger.log(`📋 Item: ${item.title} (ID: ${item.id})`);
+      this.logger.log(`📍 Coluna destino: ${stage.name}`);
+      this.logger.log(
+        `🔑 Cargo requerido para esta coluna: ${stage.allowedRole || 'nenhum'}`,
+      );
 
-      let phoneNumber: string | null = null;
-      let userName: string | null = null;
-
-      if (USE_FIXED_NUMBER_FOR_TEST) {
-        // 🔥 MODO TESTE: usa número fixo
-        phoneNumber = FIXED_TEST_NUMBER;
-        userName = 'Usuário Teste';
+      // 1. Verificar se a coluna tem um cargo definido
+      if (
+        !stage.allowedRole ||
+        stage.allowedRole.trim() === '' ||
+        stage.allowedRole === 'all'
+      ) {
         this.logger.log(
-          `📱 [WHATSAPP] MODO TESTE - Usando número fixo: ${phoneNumber}`,
+          `⚠️ Coluna "${stage.name}" não possui cargo específico definido. Nenhuma notificação enviada.`,
         );
-      } else {
-        // 🔥 MODO PRODUÇÃO: busca do funcionário
-        if (item.assignedToId) {
-          const assignedUser = await (tx || this.prisma).user.findFirst({
-            where: { id: item.assignedToId },
-            select: {
-              contact: true,
-              name: true,
+        return;
+      }
+
+      // 2. Buscar todos os usuários da empresa com o cargo correspondente
+      const targetRoleName = stage.allowedRole.trim();
+
+      // 🔥 CORREÇÃO: Usar where direto com o relacionamento professionalRole
+      const usersToNotify = await this.prisma.user.findMany({
+        where: {
+          companyId,
+          status: 'ACTIVE',
+          contact: { not: undefined }, // 🔥 Isso funciona no Prisma
+          OR: [
+            // Usuários com o cargo profissional correspondente via relacionamento
+            {
+              professionalRole: {
+                name: {
+                  contains: targetRoleName,
+                  mode: 'insensitive',
+                },
+              },
             },
-          });
+            // ADM/MASTER também recebem
+            {
+              role: {
+                in: ['MASTER', 'ADMIN'],
+              },
+            },
+          ],
+        },
+        include: {
+          professionalRole: {
+            select: { name: true },
+          },
+        },
+      });
 
-          if (assignedUser?.contact) {
-            phoneNumber = assignedUser.contact;
-            userName = assignedUser.name;
-          }
-        }
+      // Remover duplicatas (caso um ADM também tenha o cargo)
+      const uniqueUsers = Array.from(
+        new Map(usersToNotify.map((u) => [u.id, u])).values(),
+      );
 
-        // Se não tiver responsável, tenta o criador
-        if (!phoneNumber && creator?.contact) {
-          phoneNumber = creator.contact;
-          userName = creator.name;
-        }
+      this.logger.log(
+        `👥 Usuários encontrados com cargo "${targetRoleName}" ou ADM: ${uniqueUsers.length}`,
+      );
 
-        if (!phoneNumber) {
-          this.logger.log(
-            `📱 [WHATSAPP] Sem número de telefone para notificar criação do item ${item.id}`,
-          );
-          return;
-        }
+      if (uniqueUsers.length === 0) {
+        this.logger.log(
+          `⚠️ Nenhum usuário encontrado com o cargo "${targetRoleName}"`,
+        );
+        return;
       }
 
-      // Limpar número
-      let cleanedNumber = phoneNumber.replace(/\D/g, '');
-      if (!cleanedNumber.startsWith('55')) {
-        cleanedNumber = `55${cleanedNumber}`;
-      }
+      // 3. Montar a mensagem
+      const actionText = action === 'CREATED' ? 'criado' : 'movido';
+      const movementText =
+        action === 'MOVED' && previousStageName
+          ? `da coluna "${previousStageName}" `
+          : '';
 
-      // Buscar informações do fluxo e etapa
-      const [flow, stage] = await Promise.all([
-        (tx || this.prisma).productFlow.findFirst({
-          where: { id: item.flowId },
-          select: { name: true },
-        }),
-        (tx || this.prisma).flowStage.findFirst({
-          where: { id: item.stageId },
-          select: { name: true },
-        }),
-      ]);
+      const flowName = item.flow?.name || 'N/A';
 
-      // Montar mensagem
-      const message = `
-🎉 *NOVO ITEM CRIADO NO KANBAN!*
+      const baseMessage = `
+📢 *ATUALIZAÇÃO NO KANBAN - ${stage.name.toUpperCase()}!*
 
 📦 *Item:* ${item.title}
-📋 *Coleção:* ${flow?.name || 'N/A'}
-📍 *Etapa:* ${stage?.name || 'N/A'}
-🔢 *Quantidade:* ${item.quantity || 0}
 🏷️ *Referência:* ${item.productRef || 'N/A'}
+🔢 *Quantidade:* ${item.quantity || 0}
+📍 *Coluna:* ${stage.name}
+📋 *Coleção:* ${flowName}
 
-👤 *Criado por:* ${creator?.name || 'Sistema'}
+🔄 *Status:* Item foi ${actionText} ${movementText}para a coluna "${stage.name}"
+
+👤 *Ação realizada por:* ${performedBy?.name || 'Sistema'}
 📅 *Data:* ${new Date().toLocaleString('pt-BR')}
+
+⚠️ *Cargo requisitado:* ${targetRoleName}
 
 👉 Acesse o sistema para mais detalhes.
     `.trim();
 
-      this.logger.log(
-        `📱 [WHATSAPP] Enviando notificação para ${cleanedNumber}`,
-      );
-      this.logger.log(
-        `📝 [WHATSAPP] Mensagem: ${message.substring(0, 200)}...`,
-      );
+      // 4. Enviar notificações
+      let successCount = 0;
+      let failCount = 0;
+      const notifiedUsers: string[] = [];
 
-      const success = await this.whatsAppService.sendSimpleMessage(
-        cleanedNumber,
-        message,
-      );
+      for (const user of uniqueUsers) {
+        if (!user.contact) {
+          this.logger.warn(
+            `⚠️ Usuário ${user.name} não tem contato cadastrado`,
+          );
+          continue;
+        }
 
-      if (success) {
+        // Limpar número de telefone
+        let cleanedNumber = user.contact.replace(/\D/g, '');
+        if (!cleanedNumber.startsWith('55')) {
+          cleanedNumber = `55${cleanedNumber}`;
+        }
+
+        // 🔥 Acessar o nome do cargo profissional com segurança
+        const userRoleName = user.professionalRole?.name || user.role || 'N/A';
+
+        const personalizedMessage = `
+👋 Olá *${user.name}*!
+
+${baseMessage}
+
+📌 *Seu cargo:* ${userRoleName}
+🎯 *Cargo requisitado:* ${targetRoleName}
+
+---
+*ELO PRODUTIVO* - Sistema de Gestão de Fluxos
+      `.trim();
+
         this.logger.log(
-          `✅ [WHATSAPP] Notificação enviada com sucesso para ${cleanedNumber}`,
+          `📱 Enviando notificação para ${user.name} (${userRoleName}) - ${cleanedNumber}`,
         );
-      } else {
-        this.logger.warn(
-          `⚠️ [WHATSAPP] Falha ao enviar notificação para ${cleanedNumber}`,
+
+        const success = await this.whatsAppService.sendSimpleMessage(
+          cleanedNumber,
+          personalizedMessage,
         );
+
+        if (success) {
+          successCount++;
+          notifiedUsers.push(`${user.name} (${userRoleName})`);
+          this.logger.log(`✅ Notificação enviada para ${user.name}`);
+        } else {
+          failCount++;
+          this.logger.warn(`❌ Falha ao enviar para ${user.name}`);
+        }
+
+        // Delay para não sobrecarregar a API
+        await new Promise((resolve) => setTimeout(resolve, 500));
       }
+
+      this.logger.log(
+        `📢 [NOTIFICATION] Resumo: ${successCount} enviadas, ${failCount} falhas`,
+      );
+      this.logger.log(`📋 Usuários notificados: ${notifiedUsers.join(', ')}`);
     } catch (error: any) {
-      this.logger.error(`❌ [WHATSAPP] Erro: ${error.message}`);
+      this.logger.error(`❌ [NOTIFICATION] Erro: ${error.message}`);
+      this.logger.error(`📚 Stack: ${error.stack}`);
     }
   }
 
@@ -1736,7 +1913,19 @@ export class FlowService {
         // =========================================================
         // 🔥 ENVIAR NOTIFICAÇÃO WHATSAPP QUANDO ITEM É CRIADO
         // =========================================================
-        await this.sendWhatsAppNotificationForNewItem(item, user, tx);
+        // await this.sendWhatsAppNotificationForNewItem(item, user, tx);
+
+        // =========================================================
+        // 🔥 NOTIFICAÇÃO: Enviar WhatsApp para funcionários do cargo da coluna
+        // =========================================================
+        await this.sendWhatsAppNotificationByColumnRole(
+          { ...item, flow: { name: flow.name } },
+          targetStage,
+          companyId,
+          'CREATED',
+          undefined,
+          { id: userId, name: user.name },
+        );
 
         // 5. Gera os registros de prazo (FlowItemStage) para a nova estrutura
         const stages = await tx.flowStage.findMany({
@@ -3539,6 +3728,12 @@ export class FlowService {
 
     if (!itemBeforeMove) throw new NotFoundException('Item não encontrado');
 
+    // Buscar dados do usuário que está movendo
+    const performingUser = await this.prisma.user.findFirst({
+      where: { id: userId, companyId },
+      select: { id: true, name: true, role: true },
+    });
+
     const result = await this.executeWithResilience('move_item', async () => {
       return this.prisma.$transaction(
         async (tx) => {
@@ -3619,6 +3814,7 @@ export class FlowService {
               assignedTo: { select: { id: true, name: true } },
               supplier: { select: { id: true, name: true } },
               stage: { select: { id: true, name: true } },
+              flow: { select: { id: true, name: true } },
             },
           });
 
@@ -3662,6 +3858,27 @@ export class FlowService {
             result.assignedTo?.name || result.supplier?.name || 'Não atribuído',
         },
       });
+    }
+
+    // ===========================================================================
+    // 🔥 NOTIFICAÇÃO: Enviar WhatsApp para funcionários do cargo da coluna DESTINO
+    // ===========================================================================
+    if (result && result.stage && itemBeforeMove.stageId !== newStageId) {
+      await this.sendWhatsAppNotificationByColumnRole(
+        {
+          id: result.id,
+          title: result.title,
+          productRef: result.productRef,
+          quantity: result.quantity,
+          flow: result.flow, // 🔥 AGORA result.flow existe porque incluímos no update
+          assignedToId: result.assignedToId,
+        },
+        result.stage,
+        companyId,
+        'MOVED',
+        itemBeforeMove.stage?.name,
+        { id: userId, name: performingUser?.name || 'Sistema' },
+      );
     }
 
     // 🔥 AJUSTE: Removida a lógica de setTimeout que concluía o item automaticamente
@@ -4276,7 +4493,7 @@ export class FlowService {
 
   async addMediaToItem(
     itemId: string,
-    file: Express.Multer.File,
+    file: any,
     type: 'image' | 'audio' | 'video',
     userId: string,
   ) {
