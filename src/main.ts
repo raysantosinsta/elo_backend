@@ -42,6 +42,7 @@ async function bootstrap() {
   // CORS configurado para produção (aceita variáveis de ambiente)
   app.enableCors({
     origin: [
+      'https://app.eloprodutivo.com.br',
       'https://elo-frontend-three.vercel.app', // <--- COLOQUE SUA URL DA VERCEL AQUI
       'http://localhost:3000',
       'http://localhost:3001'
