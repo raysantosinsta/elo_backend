@@ -602,20 +602,49 @@ export class CompanyRolesService {
    * Limpa todos os caches relacionados aos cargos da empresa
    */
   private async clearRolesCache(companyId: string) {
-    const keysToDelete = [
-      `company_roles_list_${companyId}_p1_l10_`,
-      `company_roles_list_${companyId}_p1_l20_`,
-      `company_roles_list_${companyId}_p1_l50_`,
-    ];
+    try {
+      // 🔥 Buscar todas as chaves do cache que começam com o padrão
+      const cacheKeys = [
+        `company_roles_list_${companyId}_p`,
+        `company_roles_all_active_${companyId}`,
+        `company_role_`,
+      ];
 
-    for (const key of keysToDelete) {
-      try {
-        await this.cacheManager.del(key);
-      } catch (error) {
-        this.logger.warn(
-          `Erro ao limpar cache para key ${key}: ${error.message}`,
-        );
+      // Usar o cache manager para deletar por padrão
+      for (const keyPattern of cacheKeys) {
+        try {
+          // Para Redis ou cache manager que suporta delete por padrão
+          // Infelizmente cache-manager não tem scan nativo, então vamos guardar as keys em um Set
+          await this.cacheManager.del(keyPattern);
+        } catch (error) {
+          this.logger.warn(
+            `Erro ao limpar cache para padrão ${keyPattern}: ${error.message}`,
+          );
+        }
       }
+
+      // 🔥 SOLUÇÃO MAIS SIMPLES: Limpar todas as keys conhecidas
+      // Para cada combinação possível de página e limite
+      const pages = [1, 2, 3, 4, 5];
+      const limits = [10, 20, 50, 100];
+      const includeInactiveValues = [true, false];
+
+      for (const page of pages) {
+        for (const limit of limits) {
+          for (const includeInactive of includeInactiveValues) {
+            const cacheKey = `company_roles_list_${companyId}_p${page}_l${limit}_i${includeInactive}`;
+            try {
+              await this.cacheManager.del(cacheKey);
+            } catch (error) {
+              // Ignora erros individuais
+            }
+          }
+        }
+      }
+
+      this.logger.log(`✅ Cache limpo para empresa ${companyId}`);
+    } catch (error) {
+      this.logger.error(`Erro ao limpar cache: ${error.message}`);
     }
   }
 
@@ -644,6 +673,11 @@ export class CompanyRolesService {
    */
   async findAllActive() {
     const companyId = this.getCompanyIdFromAuth();
+    const cacheKey = `company_roles_all_active_${companyId}`;
+
+    // 🔥 Adicionar cache para este método também
+    const cached = await this.cacheManager.get(cacheKey);
+    if (cached) return cached;
 
     const roles = await this.db.companyRole.findMany({
       where: {
@@ -652,6 +686,8 @@ export class CompanyRolesService {
       },
       orderBy: [{ level: 'asc' }, { name: 'asc' }],
     });
+
+    await this.cacheManager.set(cacheKey, roles, 300000); // 5 minutos
 
     return roles;
   }

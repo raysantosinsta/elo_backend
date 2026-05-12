@@ -47,9 +47,12 @@ export class UsersService {
   // 📝 ESCRITA (CREATE / UPDATE / DELETE)
   // ===========================================================================
 
-  // users.service.ts - createUser
-
-  // users.service.ts - createUser
+  // ============================================================================
+  // REGRAS DE CRIAÇÃO DE USUÁRIOS POR PERMISSÃO
+  // ============================================================================
+  // MASTER → cria usuários com role = ADM (cargo opcional)
+  // ADM    → cria usuários com role = EMPLOYER (cargo obrigatório)
+  // ============================================================================
 
   public async createUser(data: CreateUserDto): Promise<User> {
     const { password, ...rest } = data;
@@ -61,29 +64,29 @@ export class UsersService {
     const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
 
     let targetCompanyId = tenantId;
-    let targetRole: UserRole = UserRole.EMPLOYER;
+    let targetRole: UserRole;
 
+    // 🔥 REGRA CORRIGIDA
     if (isMaster) {
-      if (data.role) targetRole = data.role;
+      // MASTER sempre cria ADMIN (a não ser que explicitamente informe outra role)
+      targetRole = data.role || UserRole.ADMIN; // 🔥 FIX: Padrão ADMIN
       if (data.companyId) targetCompanyId = data.companyId;
     } else {
+      // ADMIN sempre cria EMPLOYER
       targetRole = UserRole.EMPLOYER;
     }
 
-    // 🔥 FORMATAR O TELEFONE: adicionar 55 se não tiver
-  let formattedContact = rest.contact;
-  if (formattedContact) {
-    // Remove tudo que não é dígito
-    let numbersOnly = formattedContact.replace(/\D/g, '');
-    
-    // Se não começar com 55, adiciona
-    if (!numbersOnly.startsWith('55')) {
-      numbersOnly = `55${numbersOnly}`;
+    this.logger.log(`📌 Role definida: ${targetRole} (isMaster: ${isMaster})`);
+
+    // 🔥 Formatar telefone (adicionar 55 se não tiver)
+    let formattedContact = rest.contact;
+    if (formattedContact) {
+      let numbersOnly = formattedContact.replace(/\D/g, '');
+      if (!numbersOnly.startsWith('55')) {
+        numbersOnly = `55${numbersOnly}`;
+      }
+      formattedContact = numbersOnly;
     }
-    
-    formattedContact = numbersOnly;
-    this.logger.log(`📱 Telefone formatado: ${formattedContact}`);
-  }
 
     try {
       const userData: any = {
@@ -96,26 +99,31 @@ export class UsersService {
         companyId: targetCompanyId,
       };
 
+      // Documento opcional
       if (rest.document !== undefined && rest.document !== '') {
         userData.document = rest.document;
       }
 
-      // 🔥 TRATAR professionalRole (nome do cargo)
-      if (rest.professionalRole !== undefined && rest.professionalRole !== '') {
-        const roleName = rest.professionalRole;
+      // 🔥 REGRA 2 (ADM): Cargo profissional é obrigatório
+      if (!isMaster) {
+        if (!rest.professionalRole || rest.professionalRole === '') {
+          throw new BadRequestException(
+            'Cargo profissional é obrigatório para criação de usuários',
+          );
+        }
 
-        // Salva o NOME diretamente no campo professionalRoleName
-        userData.professionalRoleName = roleName;
+        // Salva o nome do cargo
+        userData.professionalRoleName = rest.professionalRole;
         this.logger.log(
-          `📌 Salvando nome do cargo profissional: "${roleName}"`,
+          `📌 Salvando cargo profissional: "${rest.professionalRole}"`,
         );
 
-        // Opcional: Também tenta buscar o ID para manter o relacionamento
+        // Tenta vincular ao ID se existir
         const companyRole = await this.prisma.companyRole.findFirst({
           where: {
             companyId: targetCompanyId,
             name: {
-              equals: roleName,
+              equals: rest.professionalRole,
               mode: 'insensitive',
             },
             status: SimpleStatus.ACTIVE,
@@ -124,16 +132,15 @@ export class UsersService {
 
         if (companyRole) {
           userData.professionalRoleId = companyRole.id;
-          this.logger.log(`✅ Também vinculou ao ID: ${companyRole.id}`);
         }
       }
 
-      // Cargo na empresa (companyRole)
+      // Cargo na empresa (opcional para ambos)
       if (rest.companyRoleId !== undefined && rest.companyRoleId !== '') {
         userData.companyRoleId = rest.companyRoleId;
       }
 
-      this.logger.log(`📦 Criando usuário com dados:`, userData);
+      this.logger.log(`📦 Criando usuário com role: ${targetRole}`);
 
       const newUser = await this.db.user.create({
         data: userData,
@@ -149,6 +156,9 @@ export class UsersService {
     } catch (error: any) {
       if (error.code === 'P2002') {
         throw new ConflictException('Email ou CPF já cadastrados.');
+      }
+      if (error instanceof BadRequestException) {
+        throw error;
       }
       this.logger.error(`Erro ao criar usuário: ${error.message}`);
       throw new BadRequestException('Não foi possível processar o cadastro.');
