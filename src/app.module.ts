@@ -38,10 +38,13 @@ import { CompanyRolesModule } from './company-roles/company-roles.module';
 import { LocationGateway } from './location/location.gateway';
 import { WhatsAppSimpleService } from './whatsapp-notification/whatsapp-notification.service';
 import { WhatsappNotificationModule } from './whatsapp-notification/whatsapp-notification.module';
+import { ScheduleModule } from '@nestjs/schedule';
+
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }), // carrega .env
+    ScheduleModule.forRoot(),
     ClsModule.forRoot({
       global: true,
       middleware: { mount: true }, // Monta o middleware para toda requisição

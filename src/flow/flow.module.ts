@@ -10,6 +10,8 @@ import { makeCounterProvider, makeHistogramProvider } from '@willsoto/nestjs-pro
 import { AuditModule } from 'src/audit/audit.module';
 import { WhatsappNotificationModule } from 'src/whatsapp-notification/whatsapp-notification.module';
 import { WhatsappModule } from 'src/whatsapp/whatsapp.module';
+import { ScheduleModule } from '@nestjs/schedule';
+
 
 @Module({
   imports: [
@@ -19,6 +21,7 @@ import { WhatsappModule } from 'src/whatsapp/whatsapp.module';
     WhatsappNotificationModule,
     WhatsappModule,
     CacheModule.register(),
+    ScheduleModule.forRoot(),
   ],
   controllers: [FlowController],
   providers: [

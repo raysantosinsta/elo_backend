@@ -47,6 +47,7 @@ import {
 } from './dto/create-flow.dto';
 import { WhatsAppSimpleService } from 'src/whatsapp-notification/whatsapp-notification.service';
 import { WhatsappService } from 'src/whatsapp/whatsapp.service';
+import { Cron, CronExpression } from '@nestjs/schedule';
 
 // --- MÉTRICAS ---
 const flowOpsCounter = new Counter({
@@ -5232,4 +5233,156 @@ export class FlowService {
 
     return deadlines;
   }
+
+  // ===========================================================================
+// 🔥 NOTIFICAÇÃO DE ITENS ATRASADOS
+// ===========================================================================
+
+/**
+ * Executa todos os dias às 8:00 para verificar itens atrasados
+ */
+@Cron(CronExpression.EVERY_DAY_AT_8AM)
+async checkOverdueItemsAndNotify() {
+  this.logger.log('🕐 Iniciando verificação de itens atrasados...');
+  const startTime = Date.now();
+
+  try {
+    // Buscar todas as empresas ativas
+    const companies = await this.prisma.company.findMany({
+      where: { status: 'ACTIVE' },
+      select: { id: true, name: true },
+    });
+
+    this.logger.log(`📊 Encontradas ${companies.length} empresas`);
+
+    let totalOverdue = 0;
+    let totalNotified = 0;
+
+    for (const company of companies) {
+      const result = await this.processOverdueItemsByCompany(company.id);
+      totalOverdue += result.overdueCount;
+      totalNotified += result.notificationsSent;
+    }
+
+    const duration = Date.now() - startTime;
+    this.logger.log(
+      `✅ Finalizado em ${duration}ms | Atrasados: ${totalOverdue} | Notificações: ${totalNotified}`,
+    );
+  } catch (error: any) {
+    this.logger.error(`❌ Erro na verificação de atrasados: ${error.message}`);
+  }
+}
+
+/**
+ * Processa itens atrasados de uma empresa específica
+ */
+private async processOverdueItemsByCompany(companyId: string) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  // Buscar itens atrasados (não concluídos)
+  const overdueItems = await this.prisma.flowItem.findMany({
+    where: {
+      companyId,
+      dueDate: { lt: today },
+      status: { not: 'CONCLUIDO' },
+    },
+    include: {
+      flow: { select: { id: true, name: true } },
+      stage: { select: { id: true, name: true } },
+      assignedTo: { select: { id: true, name: true, contact: true } },
+    },
+    orderBy: { dueDate: 'asc' },
+  });
+
+  if (overdueItems.length === 0) {
+    return { overdueCount: 0, notificationsSent: 0 };
+  }
+
+  this.logger.log(
+    `📋 Empresa ${companyId}: ${overdueItems.length} itens atrasados`,
+  );
+
+  // Buscar ADMINs da empresa (MASTER e ADMIN)
+  const admins = await this.prisma.user.findMany({
+    where: {
+      companyId,
+      role: { in: ['MASTER', 'ADMIN'] },
+      status: 'ACTIVE',
+      contact: { not: undefined },
+    },
+    select: {
+      id: true,
+      name: true,
+      contact: true,
+      role: true,
+    },
+  });
+
+  if (admins.length === 0) {
+    this.logger.warn(`⚠️ Nenhum ADMIN com contato na empresa ${companyId}`);
+    return { overdueCount: overdueItems.length, notificationsSent: 0 };
+  }
+
+  // Construir relatório dos itens atrasados
+  const itemsList = overdueItems.map((item) => {
+    const delayDays = Math.ceil(
+      (today.getTime() - new Date(item.dueDate!).getTime()) / (1000 * 60 * 60 * 24),
+    );
+    return `📦 *${item.title}*\n   🔢 Ref: ${item.productRef}\n   📍 Etapa: ${item.stage?.name}\n   📅 Atraso: ${delayDays} dias\n   👤 Resp: ${item.assignedTo?.name || 'Não atribuído'}`;
+  }).join('\n\n');
+
+  const message = `
+🚨 *ALERTA: ITENS ATRASADOS!* 🚨
+
+📋 *Relatório de itens com prazo vencido:*
+
+${itemsList}
+
+📊 *Total de itens atrasados:* ${overdueItems.length}
+
+⚠️ *Ação necessária:* Acesse o sistema e atualize os prazos ou realize as pendências.
+
+---
+*ELO PRODUTIVO* - Sistema de Gestão
+  `.trim();
+
+  // Enviar para todos os ADMINs
+  let notificationsSent = 0;
+  for (const admin of admins) {
+    const cleanedNumber = this.formatPhoneNumberForWhatsApp(admin.contact!);
+    try {
+      await this.whatsappServiceNaoOficial.sendTextMessage(cleanedNumber, message);
+      notificationsSent++;
+      this.logger.log(`✅ Notificação enviada para ${admin.name} (${admin.role})`);
+    } catch (error: any) {
+      this.logger.error(`❌ Falha para ${admin.name}: ${error.message}`);
+    }
+    // Delay de 500ms para não sobrecarregar a API
+    await this.sleep(500);
+  }
+
+  return {
+    overdueCount: overdueItems.length,
+    notificationsSent,
+  };
+}
+
+/**
+ * Formata número de telefone para WhatsApp (remove tudo que não é dígito e adiciona 55)
+ */
+private formatPhoneNumberForWhatsApp(phone: string): string {
+  let cleaned = phone.replace(/\D/g, '');
+  if (!cleaned.startsWith('55')) {
+    cleaned = `55${cleaned}`;
+  }
+  return cleaned;
+}
+
+/**
+ * Delay helper
+ */
+private sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 }

@@ -12,6 +12,8 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Logger,
   NotFoundException,
   Param,
@@ -59,6 +61,7 @@ import {
   DeadlineDashboardQueryDto,
 } from './dto/create-flow.dto';
 import { FlowService } from './flow.service';
+import { Public } from 'src/auth/public.decorator';
 
 @ApiTags('Product Flow (Kanban)')
 @ApiBearerAuth()
@@ -438,7 +441,7 @@ export class FlowController {
       }
 
       return result;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`❌ Erro ao filtrar board: ${error.message}`);
       throw error;
     }
@@ -452,29 +455,32 @@ export class FlowController {
    * Criar item com prazos por etapa (versão completa)
    */
   @Post('items/with-stages')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Cria um novo item com prazos configurados para todas as etapas',
-    description: 'Cria o item e automaticamente gera registros de prazo para cada etapa do fluxo'
+    description:
+      'Cria o item e automaticamente gera registros de prazo para cada etapa do fluxo',
   })
-  async createItemWithStages(
-    @Req() req: any,
-    @Body() body: CreateFlowItemDto,
-  ) {
+  async createItemWithStages(@Req() req: any, @Body() body: CreateFlowItemDto) {
     if (!body.flowId) {
       throw new BadRequestException('flowId é obrigatório');
     }
-    this.logger.log(`🎯 Criando item com prazos por etapa no fluxo ${body.flowId}`);
-    return this.flowService.createFlowItemWithStages(body.flowId, req.user.id, body);
+    this.logger.log(
+      `🎯 Criando item com prazos por etapa no fluxo ${body.flowId}`,
+    );
+    return this.flowService.createFlowItemWithStages(
+      body.flowId,
+      req.user.id,
+      body,
+    );
   }
-
 
   /**
    * Buscar histórico completo de prazos de um item
    */
   @Get('items/:itemId/stages')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Busca histórico de prazos de um item por etapa',
-    description: 'Retorna todos os prazos configurados para cada etapa do item'
+    description: 'Retorna todos os prazos configurados para cada etapa do item',
   })
   async getItemStages(
     @Req() req: any,
@@ -484,68 +490,72 @@ export class FlowController {
     return this.flowService.getItemStages(itemId);
   }
 
-  
-
-/**
+  /**
    * Atualização em massa de prazos por etapa (COM CASCATA AUTOMÁTICA)
    * 🔥 ESTA ROTA VEM ANTES DE /:stageId
    */
   @Patch('items/:itemId/stages/bulk')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Atualiza múltiplos prazos de etapas de um item',
-    description: 'Permite atualizar vários prazos de uma vez e aplica cascata automaticamente'
+    description:
+      'Permite atualizar vários prazos de uma vez e aplica cascata automaticamente',
   })
   @ApiResponse({
     status: 200,
     description: 'Prazos atualizados com sucesso',
     schema: {
       example: {
-        message: "1 atualizações realizadas com sucesso",
+        message: '1 atualizações realizadas com sucesso',
         results: [],
         success: true,
         updatedStages: [
           {
-            id: "stage-id-1",
-            stageId: "stage-id-1",
-            suggestedDeadline: "2026-03-25T00:00:00.000Z",
-            deadline: "2026-03-25T00:00:00.000Z",
-            status: "PENDENTE",
+            id: 'stage-id-1',
+            stageId: 'stage-id-1',
+            suggestedDeadline: '2026-03-25T00:00:00.000Z',
+            deadline: '2026-03-25T00:00:00.000Z',
+            status: 'PENDENTE',
             stage: {
-              id: "stage-id-1",
-              name: "Corte",
-              color: "#FF0000",
-              order: 3
-            }
-          }
+              id: 'stage-id-1',
+              name: 'Corte',
+              color: '#FF0000',
+              order: 3,
+            },
+          },
         ],
         cascade: {
           applied: true,
-          fromStageId: "stage-id-1",
+          fromStageId: 'stage-id-1',
           updatedStages: [
             {
-              stageId: "stage-id-2",
-              stageName: "Costura",
-              oldDeadline: "2026-03-26T00:00:00.000Z",
-              newDeadline: "2026-03-27T00:00:00.000Z"
-            }
-          ]
-        }
-      }
-    }
+              stageId: 'stage-id-2',
+              stageName: 'Costura',
+              oldDeadline: '2026-03-26T00:00:00.000Z',
+              newDeadline: '2026-03-27T00:00:00.000Z',
+            },
+          ],
+        },
+      },
+    },
   })
   async bulkUpdateItemStages(
     @Req() req: any,
     @Param('itemId', ParseUUIDPipe) itemId: string,
-    @Body() bulkUpdateDto: { updates: Array<{ 
-      stageId: string; 
-      suggestedDeadline?: string;
-      actualDeadline?: string;
-      status?: string;
-      notes?: string;
-    }> },
+    @Body()
+    bulkUpdateDto: {
+      updates: Array<{
+        stageId: string;
+        suggestedDeadline?: string;
+        actualDeadline?: string;
+        status?: string;
+        notes?: string;
+      }>;
+    },
   ) {
-    this.logger.log(`📦 Atualizando ${bulkUpdateDto.updates.length} prazos do item ${itemId}`);
-    
+    this.logger.log(
+      `📦 Atualizando ${bulkUpdateDto.updates.length} prazos do item ${itemId}`,
+    );
+
     if (!bulkUpdateDto.updates || bulkUpdateDto.updates.length === 0) {
       throw new BadRequestException('Nenhuma atualização fornecida');
     }
@@ -564,43 +574,46 @@ export class FlowController {
     };
   }
 
-/**
- * Atualizar prazo de uma etapa específica (COM CASCATA AUTOMÁTICA)
- * 🔥 ESTA ROTA VEM DEPOIS DE /bulk
- */
-@Patch('items/:itemId/stages/:stageId')
-async updateItemStageDeadline(
-  @Req() req: any,
-  @Param('itemId', ParseUUIDPipe) itemId: string,
-  @Param('stageId', ParseUUIDPipe) stageId: string,
-  @Body() dto: UpdateItemStageDeadlineDto,
-) {
-  this.logger.log(`🔄 Atualizando prazo da etapa ${stageId} do item ${itemId}`);
-  return this.flowService.updateItemStageDeadline(
-    itemId, 
-    stageId, 
-    dto, 
-    req.user.id
-  );
-}
+  /**
+   * Atualizar prazo de uma etapa específica (COM CASCATA AUTOMÁTICA)
+   * 🔥 ESTA ROTA VEM DEPOIS DE /bulk
+   */
+  @Patch('items/:itemId/stages/:stageId')
+  async updateItemStageDeadline(
+    @Req() req: any,
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+    @Param('stageId', ParseUUIDPipe) stageId: string,
+    @Body() dto: UpdateItemStageDeadlineDto,
+  ) {
+    this.logger.log(
+      `🔄 Atualizando prazo da etapa ${stageId} do item ${itemId}`,
+    );
+    return this.flowService.updateItemStageDeadline(
+      itemId,
+      stageId,
+      dto,
+      req.user.id,
+    );
+  }
 
   @Get('items/:itemId')
-@ApiOperation({ summary: 'Busca um item específico' })
-async getItemById(
-  @Req() req: any,
-  @Param('itemId', ParseUUIDPipe) itemId: string,
-) {
-  this.logger.log(`🔍 Buscando item ${itemId}`);
-  return this.flowService.getItemById(itemId);
-}
+  @ApiOperation({ summary: 'Busca um item específico' })
+  async getItemById(
+    @Req() req: any,
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+  ) {
+    this.logger.log(`🔍 Buscando item ${itemId}`);
+    return this.flowService.getItemById(itemId);
+  }
 
   /**
    * Mover item com atualização automática de prazos
    */
   @Post('items/:itemId/move-with-deadline')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Move item entre colunas e atualiza prazos automaticamente',
-    description: 'Move o item, marca etapa anterior como concluída e atualiza dueDate com prazo da nova etapa'
+    description:
+      'Move o item, marca etapa anterior como concluída e atualiza dueDate com prazo da nova etapa',
   })
   async moveItemWithDeadline(
     @Req() req: any,
@@ -608,34 +621,28 @@ async getItemById(
     @Body() dto: MoveItemWithDeadlineDto,
   ) {
     this.logger.log(`🎯 Movendo item ${itemId} com atualização de prazo`);
-    return this.flowService.moveItemWithDeadline(
-      itemId,
-      dto,
-      req.user.id
-    );
+    return this.flowService.moveItemWithDeadline(itemId, dto, req.user.id);
   }
-
-  
 
   /**
    * Dashboard de prazos
    */
   @Get('deadline-dashboard')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Dashboard completo de prazos',
-    description: 'Retorna estatísticas e timeline de prazos para análise'
+    description: 'Retorna estatísticas e timeline de prazos para análise',
   })
   @ApiQuery({
     name: 'flowId',
     required: false,
     type: String,
-    description: 'Filtrar por fluxo específico'
+    description: 'Filtrar por fluxo específico',
   })
   @ApiQuery({
     name: 'period',
     required: false,
     enum: ['today', 'week', 'month', 'all'],
-    description: 'Período para análise (padrão: week)'
+    description: 'Período para análise (padrão: week)',
   })
   @ApiResponse({
     status: 200,
@@ -644,21 +651,29 @@ async getItemById(
   })
   @ApiResponse({
     status: 400,
-    description: 'Parâmetros inválidos'
+    description: 'Parâmetros inválidos',
   })
   async getDeadlineDashboard(
     @Req() req: any,
     @Query() query: DeadlineDashboardQueryDto,
   ) {
-    this.logger.log(`📊 Buscando dashboard de prazos - flowId: ${query.flowId}, period: ${query.period}`);
+    this.logger.log(
+      `📊 Buscando dashboard de prazos - flowId: ${query.flowId}, period: ${query.period}`,
+    );
 
     // Validação adicional se necessário
-    if (query.period && !['today', 'week', 'month', 'all'].includes(query.period)) {
-      throw new BadRequestException('Período inválido. Use: today, week, month, all');
+    if (
+      query.period &&
+      !['today', 'week', 'month', 'all'].includes(query.period)
+    ) {
+      throw new BadRequestException(
+        'Período inválido. Use: today, week, month, all',
+      );
     }
 
     if (query.flowId) {
-      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const uuidRegex =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       if (!uuidRegex.test(query.flowId)) {
         throw new BadRequestException('ID do fluxo inválido');
       }
@@ -671,9 +686,10 @@ async getItemById(
    * Recalcular prazos de um item (manual)
    */
   @Post('items/:itemId/recalculate-deadlines')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Recalcula os prazos de um item baseado no prazo final atual',
-    description: 'Redistribui os prazos das etapas restantes proporcionalmente ao prazo final'
+    description:
+      'Redistribui os prazos das etapas restantes proporcionalmente ao prazo final',
   })
   async recalculateItemDeadlines(
     @Req() req: any,
@@ -687,20 +703,22 @@ async getItemById(
    * Recalcular prazos de múltiplos itens
    */
   @Post('items/recalculate-deadlines/bulk')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Recalcula prazos de múltiplos itens',
-    description: 'Permite recalcular prazos de vários itens de uma vez'
+    description: 'Permite recalcular prazos de vários itens de uma vez',
   })
   async bulkRecalculateDeadlines(
     @Req() req: any,
     @Body() dto: RecalculateDeadlinesDto,
   ) {
     this.logger.log(`🧮 Recalculando prazos em lote`);
-    
+
     if (dto.allItems === 'true') {
-      throw new BadRequestException('Recálculo em massa ainda não implementado');
+      throw new BadRequestException(
+        'Recálculo em massa ainda não implementado',
+      );
     }
-    
+
     if (!dto.itemIds || dto.itemIds.length === 0) {
       throw new BadRequestException('Nenhum item especificado para recálculo');
     }
@@ -714,26 +732,29 @@ async getItemById(
 
     for (const itemId of dto.itemIds) {
       try {
-        const result = await this.flowService.recalculateItemDeadlines(itemId, req.user.id);
-        results.push({ 
-          itemId, 
-          success: true, 
-          result 
+        const result = await this.flowService.recalculateItemDeadlines(
+          itemId,
+          req.user.id,
+        );
+        results.push({
+          itemId,
+          success: true,
+          result,
         });
-      } catch (error) {
-        results.push({ 
-          itemId, 
-          success: false, 
-          error: error.message 
+      } catch (error: any) {
+        results.push({
+          itemId,
+          success: false,
+          error: error.message,
         });
       }
     }
 
     return {
       total: dto.itemIds.length,
-      success: results.filter(r => r.success).length,
-      failed: results.filter(r => !r.success).length,
-      results
+      success: results.filter((r) => r.success).length,
+      failed: results.filter((r) => !r.success).length,
+      results,
     };
   }
 
@@ -757,7 +778,9 @@ async getItemById(
     @Req() req: any,
     @Param('flowId', ParseUUIDPipe) flowId: string,
     @Body() body: any,
-    @UploadedFile() file?: Express.Multer.File,
+    // @UploadedFile() file?: Express.Multer.File,
+    @UploadedFile() file?: any,
+
   ) {
     let dto: CreateFlowItemDto;
     try {
@@ -772,45 +795,51 @@ async getItemById(
    * Atualizar item (COM REDISTRIBUIÇÃO AUTOMÁTICA se dueDate for alterado)
    */
   @Put('items/:itemId')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Atualiza um item existente',
-    description: 'Se dueDate for alterado por admin, prazos das etapas são redistribuídos automaticamente'
+    description:
+      'Se dueDate for alterado por admin, prazos das etapas são redistribuídos automaticamente',
   })
   @ApiResponse({
     status: 200,
     description: 'Item atualizado com feedback da redistribuição',
     schema: {
       example: {
-        id: "item-123",
-        title: "Vestido Floral",
-        dueDate: "2024-12-11",
-        message: "✅ Item atualizado com sucesso",
+        id: 'item-123',
+        title: 'Vestido Floral',
+        dueDate: '2024-12-11',
+        message: '✅ Item atualizado com sucesso',
         redistribution: {
-          message: "📊 Prazos das etapas redistribuídos automaticamente com base no novo prazo final",
+          message:
+            '📊 Prazos das etapas redistribuídos automaticamente com base no novo prazo final',
           daysPerStage: 2,
           updatedStages: [
             {
-              stageId: "stage-costura",
-              stageName: "Costura",
-              oldDeadline: "2024-12-06",
-              newDeadline: "2024-12-07"
-            }
-          ]
-        }
-      }
-    }
+              stageId: 'stage-costura',
+              stageName: 'Costura',
+              oldDeadline: '2024-12-06',
+              newDeadline: '2024-12-07',
+            },
+          ],
+        },
+      },
+    },
   })
   async updateItem(
     @Req() req: any,
     @Param('itemId', ParseUUIDPipe) itemId: string,
     @Body() body: UpdateFlowItemDto,
   ) {
-    this.logger.log(`📝 Atualizando item ${itemId} pelo usuário ${req.user.id}`);
+    this.logger.log(
+      `📝 Atualizando item ${itemId} pelo usuário ${req.user.id}`,
+    );
     return this.flowService.updateFlowItem(itemId, req.user.id, body);
   }
 
   @Put('items/:itemId/move')
-  @ApiOperation({ summary: 'Move item entre colunas (Drag & Drop) - versão original' })
+  @ApiOperation({
+    summary: 'Move item entre colunas (Drag & Drop) - versão original',
+  })
   async moveItem(
     @Param('itemId', ParseUUIDPipe) itemId: string,
     @Body()
@@ -859,7 +888,8 @@ async getItemById(
     @Req() req: any,
     @Param('itemId', ParseUUIDPipe) itemId: string,
     @Param('type') type: string,
-    @UploadedFile() file: Express.Multer.File,
+    // @UploadedFile() file: Express.Multer.File,
+    @UploadedFile() file: any,
   ) {
     if (!['image', 'audio', 'video'].includes(type)) {
       throw new BadRequestException('Tipo inválido. Use: image, audio, video');
@@ -927,199 +957,273 @@ async getItemById(
     return this.flowService.getKanbanBoardByStageName(flowId, stageName);
   }
 
- @Get('completed-items')
-@ApiOperation({ 
-  summary: 'Lista itens concluídos para dashboard',
-  description: 'Retorna itens com status CONCLUIDO com paginação'
-})
-@ApiQuery({ name: 'page', required: false, type: Number, description: 'Número da página (padrão: 1)' })
-@ApiQuery({ name: 'limit', required: false, type: Number, description: 'Itens por página (padrão: 10)' })
-@ApiQuery({ name: 'flowId', required: false, type: String, description: 'Filtrar por ID do fluxo' })
-@ApiQuery({ name: 'startDate', required: false, type: String, description: 'Data inicial (YYYY-MM-DD)' })
-@ApiQuery({ name: 'endDate', required: false, type: String, description: 'Data final (YYYY-MM-DD)' })
-@ApiQuery({ name: 'productRef', required: false, type: String, description: 'Filtrar por referência do produto' })
-@ApiQuery({ name: 'assignedToId', required: false, type: String, description: 'Filtrar por responsável' })
-@ApiQuery({ name: 'supplierId', required: false, type: String, description: 'Filtrar por fornecedor' })
-@ApiQuery({ name: 'period', required: false, type: String, description: 'Período: today, week, month, year' })
-async getCompletedItems(
-  @Req() req: any,
-  @Query('page') page?: string,
-  @Query('limit') limit?: string,
-  @Query('flowId') flowId?: string,
-  @Query('startDate') startDate?: string,
-  @Query('endDate') endDate?: string,
-  @Query('productRef') productRef?: string,
-  @Query('assignedToId') assignedToId?: string,
-  @Query('supplierId') supplierId?: string,
-  @Query('period') period?: string,
-) {
-  console.log('\n' + '='.repeat(80));
-  console.log('🎯 [CONTROLLER] getCompletedItems');
-  console.log('='.repeat(80));
-  console.log('📥 Query params recebidos:');
-  console.log('   - page:', page);
-  console.log('   - limit:', limit);
-  console.log('   - flowId:', flowId);
-  console.log('   - startDate:', startDate);
-  console.log('   - endDate:', endDate);
-  console.log('   - productRef:', productRef);
-  console.log('   - assignedToId:', assignedToId);
-  console.log('   - supplierId:', supplierId);
-  console.log('   - period:', period);
-  
-  const options: any = {};
-  
-  // Paginação
-  if (page) options.page = parseInt(page);
-  if (limit) options.limit = parseInt(limit);
-  
-  // Filtros básicos
-  if (flowId) options.flowId = flowId;
-  if (productRef) options.productRef = productRef;
-  if (assignedToId) options.assignedToId = assignedToId;
-  if (supplierId) options.supplierId = supplierId;
-  
-  // 🔥 CONVERSÃO DO PERÍODO PARA DATAS
-  if (period && !startDate && !endDate) {
-    console.log('\n📅 CONVERTENDO PERÍODO:', period);
-    const now = new Date();
-    const todayUTC = new Date(Date.UTC(
-      now.getUTCFullYear(),
-      now.getUTCMonth(),
-      now.getUTCDate(),
-      0, 0, 0, 0
-    ));
-    
-    switch (period) {
-      case 'today':
-        options.startDate = new Date(todayUTC);
-        options.endDate = new Date(todayUTC);
-        options.endDate.setUTCHours(23, 59, 59, 999);
-        console.log(`   Hoje: ${options.startDate.toISOString()} até ${options.endDate.toISOString()}`);
-        break;
-        
-      case 'week':
-        options.startDate = new Date(todayUTC);
-        options.startDate.setUTCDate(todayUTC.getUTCDate() - 7);
-        options.endDate = new Date(todayUTC);
-        options.endDate.setUTCHours(23, 59, 59, 999);
-        console.log(`   Últimos 7 dias: ${options.startDate.toISOString()} até ${options.endDate.toISOString()}`);
-        break;
-        
-      case 'month':
-        options.startDate = new Date(todayUTC);
-        options.startDate.setUTCMonth(todayUTC.getUTCMonth() - 1);
-        options.endDate = new Date(todayUTC);
-        options.endDate.setUTCHours(23, 59, 59, 999);
-        console.log(`   Último mês: ${options.startDate.toISOString()} até ${options.endDate.toISOString()}`);
-        break;
-        
-      case 'year':
-        options.startDate = new Date(todayUTC);
-        options.startDate.setUTCFullYear(todayUTC.getUTCFullYear() - 1);
-        options.endDate = new Date(todayUTC);
-        options.endDate.setUTCHours(23, 59, 59, 999);
-        console.log(`   Último ano: ${options.startDate.toISOString()} até ${options.endDate.toISOString()}`);
-        break;
-        
-      default:
-        console.log(`   ⚠️ Período não reconhecido: ${period}, ignorando`);
-    }
-  }
-  
-  // 🔥 DATAS EXPLÍCITAS SOBRESCREVEM O PERÍODO
-  if (startDate) {
-    console.log('\n📅 USANDO START_DATE DIRETO:', startDate);
-    const date = new Date(startDate);
-    date.setUTCHours(0, 0, 0, 0);
-    options.startDate = date;
-    console.log(`   Convertido para: ${options.startDate.toISOString()}`);
-  }
-  
-  if (endDate) {
-    console.log('📅 USANDO END_DATE DIRETO:', endDate);
-    const date = new Date(endDate);
-    date.setUTCHours(23, 59, 59, 999);
-    options.endDate = date;
-    console.log(`   Convertido para: ${options.endDate.toISOString()}`);
-  }
-  
-  // 🔥 LOG DAS DATAS FINAIS
-  console.log('\n📅 DATAS FINAIS PARA FILTRO:');
-  console.log(`   startDate: ${options.startDate ? options.startDate.toISOString() : 'NÃO DEFINIDO'}`);
-  console.log(`   endDate: ${options.endDate ? options.endDate.toISOString() : 'NÃO DEFINIDO'}`);
-  
-  console.log('\n📦 Options finais enviadas para service:', JSON.stringify(options, null, 2));
-  
-  try {
-    const result = await this.flowService.getCompletedItems(options);
-    
-    console.log('\n📤 Resposta do service:');
-    console.log(`   - dataLength: ${result.data.length}`);
-    console.log(`   - total: ${result.total}`);
-    console.log(`   - pages: ${result.pages}`);
-    console.log(`   - currentPage: ${result.currentPage}`);
-    console.log('='.repeat(80) + '\n');
-    
-    return result;
-  } catch (error) {
-    console.error('\n❌ ERRO AO BUSCAR ITENS CONCLUÍDOS:');
-    console.error('   - Message:', error.message);
-    console.error('   - Stack:', error.stack);
-    console.log('='.repeat(80) + '\n');
-    throw error;
-  }
-}
+  @Get('completed-items')
+  @ApiOperation({
+    summary: 'Lista itens concluídos para dashboard',
+    description: 'Retorna itens com status CONCLUIDO com paginação',
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: 'Número da página (padrão: 1)',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Itens por página (padrão: 10)',
+  })
+  @ApiQuery({
+    name: 'flowId',
+    required: false,
+    type: String,
+    description: 'Filtrar por ID do fluxo',
+  })
+  @ApiQuery({
+    name: 'startDate',
+    required: false,
+    type: String,
+    description: 'Data inicial (YYYY-MM-DD)',
+  })
+  @ApiQuery({
+    name: 'endDate',
+    required: false,
+    type: String,
+    description: 'Data final (YYYY-MM-DD)',
+  })
+  @ApiQuery({
+    name: 'productRef',
+    required: false,
+    type: String,
+    description: 'Filtrar por referência do produto',
+  })
+  @ApiQuery({
+    name: 'assignedToId',
+    required: false,
+    type: String,
+    description: 'Filtrar por responsável',
+  })
+  @ApiQuery({
+    name: 'supplierId',
+    required: false,
+    type: String,
+    description: 'Filtrar por fornecedor',
+  })
+  @ApiQuery({
+    name: 'period',
+    required: false,
+    type: String,
+    description: 'Período: today, week, month, year',
+  })
+  async getCompletedItems(
+    @Req() req: any,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('flowId') flowId?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Query('productRef') productRef?: string,
+    @Query('assignedToId') assignedToId?: string,
+    @Query('supplierId') supplierId?: string,
+    @Query('period') period?: string,
+  ) {
+    console.log('\n' + '='.repeat(80));
+    console.log('🎯 [CONTROLLER] getCompletedItems');
+    console.log('='.repeat(80));
+    console.log('📥 Query params recebidos:');
+    console.log('   - page:', page);
+    console.log('   - limit:', limit);
+    console.log('   - flowId:', flowId);
+    console.log('   - startDate:', startDate);
+    console.log('   - endDate:', endDate);
+    console.log('   - productRef:', productRef);
+    console.log('   - assignedToId:', assignedToId);
+    console.log('   - supplierId:', supplierId);
+    console.log('   - period:', period);
 
- @Get('completed-items/stats')
-@ApiOperation({
-  summary: 'Estatísticas de itens concluídos',
-  description: 'Retorna estatísticas agregadas para o dashboard',
-})
-@ApiQuery({
-  name: 'period',
-  required: false,
-  enum: ['today', 'week', 'month', 'year'],
-  description: 'Período para análise (padrão: week)',
-})
-@ApiQuery({
-  name: 'flowId',
-  required: false,
-  type: String,
-  description: 'Filtrar por ID do fluxo específico',
-})
-async getCompletionStats(
-  @Req() req: any,
-  @Query('period') period?: 'today' | 'week' | 'month' | 'year',
-  @Query('flowId') flowId?: string,
-) {
-  console.log('\n' + '='.repeat(80));
-  console.log('📊 [CONTROLLER] getCompletionStats');
-  console.log('='.repeat(80));
-  console.log('📥 Parâmetros recebidos:');
-  console.log('   - period:', period);
-  console.log('   - flowId:', flowId);
-  
-  // Validação do flowId se for fornecido
-  if (flowId) {
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    if (!uuidRegex.test(flowId)) {
-      throw new BadRequestException('ID do fluxo inválido');
+    const options: any = {};
+
+    // Paginação
+    if (page) options.page = parseInt(page);
+    if (limit) options.limit = parseInt(limit);
+
+    // Filtros básicos
+    if (flowId) options.flowId = flowId;
+    if (productRef) options.productRef = productRef;
+    if (assignedToId) options.assignedToId = assignedToId;
+    if (supplierId) options.supplierId = supplierId;
+
+    // 🔥 CONVERSÃO DO PERÍODO PARA DATAS
+    if (period && !startDate && !endDate) {
+      console.log('\n📅 CONVERTENDO PERÍODO:', period);
+      const now = new Date();
+      const todayUTC = new Date(
+        Date.UTC(
+          now.getUTCFullYear(),
+          now.getUTCMonth(),
+          now.getUTCDate(),
+          0,
+          0,
+          0,
+          0,
+        ),
+      );
+
+      switch (period) {
+        case 'today':
+          options.startDate = new Date(todayUTC);
+          options.endDate = new Date(todayUTC);
+          options.endDate.setUTCHours(23, 59, 59, 999);
+          console.log(
+            `   Hoje: ${options.startDate.toISOString()} até ${options.endDate.toISOString()}`,
+          );
+          break;
+
+        case 'week':
+          options.startDate = new Date(todayUTC);
+          options.startDate.setUTCDate(todayUTC.getUTCDate() - 7);
+          options.endDate = new Date(todayUTC);
+          options.endDate.setUTCHours(23, 59, 59, 999);
+          console.log(
+            `   Últimos 7 dias: ${options.startDate.toISOString()} até ${options.endDate.toISOString()}`,
+          );
+          break;
+
+        case 'month':
+          options.startDate = new Date(todayUTC);
+          options.startDate.setUTCMonth(todayUTC.getUTCMonth() - 1);
+          options.endDate = new Date(todayUTC);
+          options.endDate.setUTCHours(23, 59, 59, 999);
+          console.log(
+            `   Último mês: ${options.startDate.toISOString()} até ${options.endDate.toISOString()}`,
+          );
+          break;
+
+        case 'year':
+          options.startDate = new Date(todayUTC);
+          options.startDate.setUTCFullYear(todayUTC.getUTCFullYear() - 1);
+          options.endDate = new Date(todayUTC);
+          options.endDate.setUTCHours(23, 59, 59, 999);
+          console.log(
+            `   Último ano: ${options.startDate.toISOString()} até ${options.endDate.toISOString()}`,
+          );
+          break;
+
+        default:
+          console.log(`   ⚠️ Período não reconhecido: ${period}, ignorando`);
+      }
+    }
+
+    // 🔥 DATAS EXPLÍCITAS SOBRESCREVEM O PERÍODO
+    if (startDate) {
+      console.log('\n📅 USANDO START_DATE DIRETO:', startDate);
+      const date = new Date(startDate);
+      date.setUTCHours(0, 0, 0, 0);
+      options.startDate = date;
+      console.log(`   Convertido para: ${options.startDate.toISOString()}`);
+    }
+
+    if (endDate) {
+      console.log('📅 USANDO END_DATE DIRETO:', endDate);
+      const date = new Date(endDate);
+      date.setUTCHours(23, 59, 59, 999);
+      options.endDate = date;
+      console.log(`   Convertido para: ${options.endDate.toISOString()}`);
+    }
+
+    // 🔥 LOG DAS DATAS FINAIS
+    console.log('\n📅 DATAS FINAIS PARA FILTRO:');
+    console.log(
+      `   startDate: ${options.startDate ? options.startDate.toISOString() : 'NÃO DEFINIDO'}`,
+    );
+    console.log(
+      `   endDate: ${options.endDate ? options.endDate.toISOString() : 'NÃO DEFINIDO'}`,
+    );
+
+    console.log(
+      '\n📦 Options finais enviadas para service:',
+      JSON.stringify(options, null, 2),
+    );
+
+    try {
+      const result = await this.flowService.getCompletedItems(options);
+
+      console.log('\n📤 Resposta do service:');
+      console.log(`   - dataLength: ${result.data.length}`);
+      console.log(`   - total: ${result.total}`);
+      console.log(`   - pages: ${result.pages}`);
+      console.log(`   - currentPage: ${result.currentPage}`);
+      console.log('='.repeat(80) + '\n');
+
+      return result;
+    } catch (error: any) {
+      console.error('\n❌ ERRO AO BUSCAR ITENS CONCLUÍDOS:');
+      console.error('   - Message:', error.message);
+      console.error('   - Stack:', error.stack);
+      console.log('='.repeat(80) + '\n');
+      throw error;
     }
   }
-  
-  this.logger.log(`📊 [CONTROLLER] Buscando estatísticas de conclusão - período: ${period || 'week'}, fluxo: ${flowId || 'todos'}`);
-  
-  const result = await this.flowService.getCompletionStats(period || 'week', flowId);
-  
-  console.log('📤 Resposta das estatísticas:');
-  console.log('   - total:', result.total);
-  console.log('   - por fluxo:', Object.keys(result.byFlow).length);
-  console.log('   - por responsável:', Object.keys(result.byResponsible).length);
-  console.log('='.repeat(80) + '\n');
-  
-  return result;
-}
+
+  @Get('completed-items/stats')
+  @ApiOperation({
+    summary: 'Estatísticas de itens concluídos',
+    description: 'Retorna estatísticas agregadas para o dashboard',
+  })
+  @ApiQuery({
+    name: 'period',
+    required: false,
+    enum: ['today', 'week', 'month', 'year'],
+    description: 'Período para análise (padrão: week)',
+  })
+  @ApiQuery({
+    name: 'flowId',
+    required: false,
+    type: String,
+    description: 'Filtrar por ID do fluxo específico',
+  })
+  async getCompletionStats(
+    @Req() req: any,
+    @Query('period') period?: 'today' | 'week' | 'month' | 'year',
+    @Query('flowId') flowId?: string,
+  ) {
+    console.log('\n' + '='.repeat(80));
+    console.log('📊 [CONTROLLER] getCompletionStats');
+    console.log('='.repeat(80));
+    console.log('📥 Parâmetros recebidos:');
+    console.log('   - period:', period);
+    console.log('   - flowId:', flowId);
+
+    // Validação do flowId se for fornecido
+    if (flowId) {
+      const uuidRegex =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (!uuidRegex.test(flowId)) {
+        throw new BadRequestException('ID do fluxo inválido');
+      }
+    }
+
+    this.logger.log(
+      `📊 [CONTROLLER] Buscando estatísticas de conclusão - período: ${period || 'week'}, fluxo: ${flowId || 'todos'}`,
+    );
+
+    const result = await this.flowService.getCompletionStats(
+      period || 'week',
+      flowId,
+    );
+
+    console.log('📤 Resposta das estatísticas:');
+    console.log('   - total:', result.total);
+    console.log('   - por fluxo:', Object.keys(result.byFlow).length);
+    console.log(
+      '   - por responsável:',
+      Object.keys(result.byResponsible).length,
+    );
+    console.log('='.repeat(80) + '\n');
+
+    return result;
+  }
 
   @Get('completed-items/:itemId')
   @ApiOperation({ summary: 'Busca um item concluído específico' })
@@ -1140,5 +1244,17 @@ async getCompletionStats(
     }
 
     return item;
+  }
+  @Public()
+  @Post('test-overdue-notification')
+  @HttpCode(HttpStatus.OK)
+  async testOverdueNotification() {
+    this.logger.log('📱 Teste manual de notificação de atrasados iniciado');
+    await this.flowService.checkOverdueItemsAndNotify();
+    return { 
+      success: true, 
+      message: 'Verificação de itens atrasados executada manualmente',
+      timestamp: new Date().toISOString()
+    };
   }
 }
