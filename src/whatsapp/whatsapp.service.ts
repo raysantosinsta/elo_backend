@@ -1,60 +1,65 @@
+/* eslint-disable @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable prettier/prettier */
-import { Injectable, OnModuleInit, Logger } from "@nestjs/common";
-import axios from "axios";
+import {
+  Injectable,
+  OnModuleInit,
+  Logger,
+  HttpException,
+} from '@nestjs/common';
+
+import { HttpService } from '@nestjs/axios';
+import { firstValueFrom } from 'rxjs';
+import { AxiosResponse } from 'axios';
 
 @Injectable()
 export class WhatsappService implements OnModuleInit {
   private readonly logger = new Logger(WhatsappService.name);
-  private readonly accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
-  private readonly phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
-  private readonly apiVersion = process.env.WHATSAPP_API_VERSION || 'v22.0';
-  private readonly baseUrl = `https://graph.facebook.com/${this.apiVersion}`;
+
+  private readonly token = process.env.WHATSAPP_TOKEN;
+
+  private readonly baseUrl = 'https://api.atendepro.app/api/messages/send';
+
+  constructor(private readonly httpService: HttpService) {}
 
   onModuleInit() {
-    if (!this.accessToken || !this.phoneNumberId) {
-      this.logger.error('WHATSAPP_ACCESS_TOKEN e/ou WHATSAPP_PHONE_NUMBER_ID não estão definidos no ambiente.');
-      this.logger.warn('O serviço de WhatsApp pode não funcionar corretamente.');
+    if (!this.token) {
+      this.logger.error('WHATSAPP_TOKEN não definido.');
     }
   }
 
   async sendTextMessage(phone: string, text: string) {
-    if (!this.accessToken || !this.phoneNumberId) throw new Error('Credenciais do WhatsApp não configuradas.');
-    const url = `${this.baseUrl}/${this.phoneNumberId}/messages`;
+    try {
+      if (!this.token) {
+        throw new Error('Token do WhatsApp não configurado.');
+      }
 
-    const payload = {
-      messaging_product: 'whatsapp',
-      to: phone.replace(/\D/g, ''),
-      type: 'text',
-      text: { body: text },
-    };
+      const response = await firstValueFrom<AxiosResponse<any>>(
+        this.httpService.post(
+          this.baseUrl,
+          {
+            number: phone.replace(/\D/g, ''),
+            body: text,
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${this.token}`,
+              'Content-Type': 'application/json',
+            },
+          },
+        ),
+      );
 
-    return axios.post(url, payload, {
-      headers: {
-        Authorization: `Bearer ${this.accessToken}`,
-        'Content-Type': 'application/json',
-      },
-    });
-  }
+      return response.data;
+    } catch (error: any) {
+      this.logger.error(error.response?.data || error.message);
 
-  async sendTemplateMessage(phone: string, templateName: string, languageCode: string = 'en_US') {
-    if (!this.accessToken || !this.phoneNumberId) throw new Error('Credenciais do WhatsApp não configuradas.');
-    const url = `${this.baseUrl}/${this.phoneNumberId}/messages`;
-
-    const payload = {
-      messaging_product: 'whatsapp',
-      to: phone.replace(/\D/g, ''),
-      type: 'template',
-      template: {
-        name: templateName,
-        language: { code: languageCode },
-      },
-    };
-
-    return axios.post(url, payload, {
-      headers: {
-        Authorization: `Bearer ${this.accessToken}`,
-        'Content-Type': 'application/json',
-      },
-    });
+      throw new HttpException(
+        error.response?.data || 'Erro ao enviar mensagem',
+        error.response?.status || 500,
+      );
+    }
   }
 }

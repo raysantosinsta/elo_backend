@@ -134,18 +134,18 @@ export class WhatsAppSimpleService {
    * 🔥 Método para formatar número de telefone
    * Aceita: 558584372865, 5585984372865, 5585984372865@c.us, +5585984372865
    */
-  private formatPhoneNumber(phoneNumber: string): string {
-    // Remove todos os caracteres não numéricos
-    let cleaned = phoneNumber.replace(/\D/g, '');
+  // private formatPhoneNumber(phoneNumber: string): string {
+  //   // Remove todos os caracteres não numéricos
+  //   let cleaned = phoneNumber.replace(/\D/g, '');
     
-    // Remove sufixo @c.us se existir (formato do WhatsApp Web)
-    cleaned = cleaned.split('@')[0];
+  //   // Remove sufixo @c.us se existir (formato do WhatsApp Web)
+  //   cleaned = cleaned.split('@')[0];
     
-    // Garante que tenha 55 no início
-    if (!cleaned.startsWith('55')) {
-      cleaned = `55${cleaned}`;
-    }
+  //   // Garante que tenha 55 no início
+  //   if (!cleaned.startsWith('55')) {
+  //     cleaned = `55${cleaned}`;
+  //   }
     
-    return cleaned;
-  }
+  //   return cleaned;
+  // }
 }

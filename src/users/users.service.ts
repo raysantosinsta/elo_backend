@@ -70,12 +70,27 @@ export class UsersService {
       targetRole = UserRole.EMPLOYER;
     }
 
+    // 🔥 FORMATAR O TELEFONE: adicionar 55 se não tiver
+  let formattedContact = rest.contact;
+  if (formattedContact) {
+    // Remove tudo que não é dígito
+    let numbersOnly = formattedContact.replace(/\D/g, '');
+    
+    // Se não começar com 55, adiciona
+    if (!numbersOnly.startsWith('55')) {
+      numbersOnly = `55${numbersOnly}`;
+    }
+    
+    formattedContact = numbersOnly;
+    this.logger.log(`📱 Telefone formatado: ${formattedContact}`);
+  }
+
     try {
       const userData: any = {
         name: rest.name,
         email: rest.email,
         password: hashedPassword,
-        contact: rest.contact,
+        contact: formattedContact,
         status: rest.status || SimpleStatus.ACTIVE,
         role: targetRole,
         companyId: targetCompanyId,

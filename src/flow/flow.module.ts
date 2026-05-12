@@ -9,6 +9,7 @@ import { SupabaseModule } from 'src/supabase/supabase.module';
 import { makeCounterProvider, makeHistogramProvider } from '@willsoto/nestjs-prometheus';
 import { AuditModule } from 'src/audit/audit.module';
 import { WhatsappNotificationModule } from 'src/whatsapp-notification/whatsapp-notification.module';
+import { WhatsappModule } from 'src/whatsapp/whatsapp.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { WhatsappNotificationModule } from 'src/whatsapp-notification/whatsapp-n
     SupabaseModule, 
     AuditModule,
     WhatsappNotificationModule,
+    WhatsappModule,
     CacheModule.register(),
   ],
   controllers: [FlowController],

@@ -46,6 +46,7 @@ import {
   UpdateItemStageDeadlineDto,
 } from './dto/create-flow.dto';
 import { WhatsAppSimpleService } from 'src/whatsapp-notification/whatsapp-notification.service';
+import { WhatsappService } from 'src/whatsapp/whatsapp.service';
 
 // --- MÉTRICAS ---
 const flowOpsCounter = new Counter({
@@ -82,6 +83,7 @@ export class FlowService {
     private supabase: SupabaseService,
     private auditService: AuditService,
     private whatsAppService: WhatsAppSimpleService,
+    private whatsappServiceNaoOficial: WhatsappService,
 
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
     @InjectMetric('flow_item_moves_total')
@@ -1495,7 +1497,7 @@ export class FlowService {
 
     return createdOrUpdated;
   }
-
+// TODO: USO DA API DO WHASTSAPP OFICIAL
   /**
    * 🔥 Envia notificação WhatsApp quando um novo item é criado
    * Modo TESTE: usa número fixo
@@ -1508,7 +1510,7 @@ export class FlowService {
   //   ): Promise<void> {
   //     try {
   //       // 🔥 CONFIGURAÇÃO - MUDE PARA false QUANDO QUISER USAR NÚMERO DO FUNCIONÁRIO
-  //       const USE_FIXED_NUMBER_FOR_TEST = true;
+  //       const USE_FIXED_NUMBER_FOR_TEST = false;
   //       const FIXED_TEST_NUMBER = '5585984372865';
 
   //       let phoneNumber: string | null = null;
@@ -1615,6 +1617,182 @@ export class FlowService {
   /**
    * 🔥 Envia notificação WhatsApp para todos os funcionários com o cargo vinculado à coluna
    */
+  //   private async sendWhatsAppNotificationByColumnRole(
+  //     item: any,
+  //     stage: any,
+  //     companyId: string,
+  //     action: 'CREATED' | 'MOVED',
+  //     previousStageName?: string,
+  //     performedBy?: { id: string; name: string },
+  //   ): Promise<void> {
+  //     try {
+  //       this.logger.log(
+  //         `📢 [NOTIFICATION] Iniciando envio de notificações baseadas no cargo da coluna`,
+  //       );
+  //       this.logger.log(`📋 Item: ${item.title} (ID: ${item.id})`);
+  //       this.logger.log(`📍 Coluna destino: ${stage.name}`);
+  //       this.logger.log(
+  //         `🔑 Cargo requerido para esta coluna: ${stage.allowedRole || 'nenhum'}`,
+  //       );
+
+  //       // 1. Verificar se a coluna tem um cargo definido
+  //       if (
+  //         !stage.allowedRole ||
+  //         stage.allowedRole.trim() === '' ||
+  //         stage.allowedRole === 'all'
+  //       ) {
+  //         this.logger.log(
+  //           `⚠️ Coluna "${stage.name}" não possui cargo específico definido. Nenhuma notificação enviada.`,
+  //         );
+  //         return;
+  //       }
+
+  //       // 2. Buscar todos os usuários da empresa com o cargo correspondente
+  //       const targetRoleName = stage.allowedRole.trim();
+
+  //       // 🔥 CORREÇÃO: Usar where direto com o relacionamento professionalRole
+  //       const usersToNotify = await this.prisma.user.findMany({
+  //         where: {
+  //           companyId,
+  //           status: 'ACTIVE',
+  //           contact: { not: undefined }, // 🔥 Isso funciona no Prisma
+  //           OR: [
+  //             // Usuários com o cargo profissional correspondente via relacionamento
+  //             {
+  //               professionalRole: {
+  //                 name: {
+  //                   contains: targetRoleName,
+  //                   mode: 'insensitive',
+  //                 },
+  //               },
+  //             },
+  //             // ADM/MASTER também recebem
+  //             {
+  //               role: {
+  //                 in: ['MASTER', 'ADMIN'],
+  //               },
+  //             },
+  //           ],
+  //         },
+  //         include: {
+  //           professionalRole: {
+  //             select: { name: true },
+  //           },
+  //         },
+  //       });
+
+  //       // Remover duplicatas (caso um ADM também tenha o cargo)
+  //       const uniqueUsers = Array.from(
+  //         new Map(usersToNotify.map((u) => [u.id, u])).values(),
+  //       );
+
+  //       this.logger.log(
+  //         `👥 Usuários encontrados com cargo "${targetRoleName}" ou ADM: ${uniqueUsers.length}`,
+  //       );
+
+  //       if (uniqueUsers.length === 0) {
+  //         this.logger.log(
+  //           `⚠️ Nenhum usuário encontrado com o cargo "${targetRoleName}"`,
+  //         );
+  //         return;
+  //       }
+
+  //       // 3. Montar a mensagem
+  //       const actionText = action === 'CREATED' ? 'criado' : 'movido';
+  //       const movementText =
+  //         action === 'MOVED' && previousStageName
+  //           ? `da coluna "${previousStageName}" `
+  //           : '';
+
+  //       const flowName = item.flow?.name || 'N/A';
+
+  //       const baseMessage = `
+  // 📢 *ATUALIZAÇÃO NO KANBAN - ${stage.name.toUpperCase()}!*
+
+  // 📦 *Item:* ${item.title}
+  // 🏷️ *Referência:* ${item.productRef || 'N/A'}
+  // 🔢 *Quantidade:* ${item.quantity || 0}
+  // 📍 *Coluna:* ${stage.name}
+  // 📋 *Coleção:* ${flowName}
+
+  // 🔄 *Status:* Item foi ${actionText} ${movementText}para a coluna "${stage.name}"
+
+  // 👤 *Ação realizada por:* ${performedBy?.name || 'Sistema'}
+  // 📅 *Data:* ${new Date().toLocaleString('pt-BR')}
+
+  // ⚠️ *Cargo requisitado:* ${targetRoleName}
+
+  // 👉 Acesse o sistema para mais detalhes.
+  //     `.trim();
+
+  //       // 4. Enviar notificações
+  //       let successCount = 0;
+  //       let failCount = 0;
+  //       const notifiedUsers: string[] = [];
+
+  //       for (const user of uniqueUsers) {
+  //         if (!user.contact) {
+  //           this.logger.warn(
+  //             `⚠️ Usuário ${user.name} não tem contato cadastrado`,
+  //           );
+  //           continue;
+  //         }
+
+  //         // Limpar número de telefone
+  //         let cleanedNumber = user.contact.replace(/\D/g, '');
+  //         if (!cleanedNumber.startsWith('55')) {
+  //           cleanedNumber = `55${cleanedNumber}`;
+  //         }
+
+  //         // 🔥 Acessar o nome do cargo profissional com segurança
+  //         const userRoleName = user.professionalRole?.name || user.role || 'N/A';
+
+  //         const personalizedMessage = `
+  // 👋 Olá *${user.name}*!
+
+  // ${baseMessage}
+
+  // 📌 *Seu cargo:* ${userRoleName}
+  // 🎯 *Cargo requisitado:* ${targetRoleName}
+
+  // ---
+  // *ELO PRODUTIVO* - Sistema de Gestão de Fluxos
+  //       `.trim();
+
+  //         this.logger.log(
+  //           `📱 Enviando notificação para ${user.name} (${userRoleName}) - ${cleanedNumber}`,
+  //         );
+
+  //         const success = await this.whatsAppService.sendSimpleMessage(
+  //           cleanedNumber,
+  //           personalizedMessage,
+  //         );
+
+  //         if (success) {
+  //           successCount++;
+  //           notifiedUsers.push(`${user.name} (${userRoleName})`);
+  //           this.logger.log(`✅ Notificação enviada para ${user.name}`);
+  //         } else {
+  //           failCount++;
+  //           this.logger.warn(`❌ Falha ao enviar para ${user.name}`);
+  //         }
+
+  //         // Delay para não sobrecarregar a API
+  //         await new Promise((resolve) => setTimeout(resolve, 500));
+  //       }
+
+  //       this.logger.log(
+  //         `📢 [NOTIFICATION] Resumo: ${successCount} enviadas, ${failCount} falhas`,
+  //       );
+  //       this.logger.log(`📋 Usuários notificados: ${notifiedUsers.join(', ')}`);
+  //     } catch (error: any) {
+  //       this.logger.error(`❌ [NOTIFICATION] Erro: ${error.message}`);
+  //       this.logger.error(`📚 Stack: ${error.stack}`);
+  //     }
+  //   }
+
+  
+  // TODO: USO DA API DO WHASTSAPP  NAOOFICIAL
   private async sendWhatsAppNotificationByColumnRole(
     item: any,
     stage: any,
@@ -1624,38 +1802,45 @@ export class FlowService {
     performedBy?: { id: string; name: string },
   ): Promise<void> {
     try {
-      this.logger.log(
-        `📢 [NOTIFICATION] Iniciando envio de notificações baseadas no cargo da coluna`,
-      );
-      this.logger.log(`📋 Item: ${item.title} (ID: ${item.id})`);
-      this.logger.log(`📍 Coluna destino: ${stage.name}`);
-      this.logger.log(
-        `🔑 Cargo requerido para esta coluna: ${stage.allowedRole || 'nenhum'}`,
-      );
+      this.logger.log(`📢 Iniciando notificações WhatsApp`);
 
-      // 1. Verificar se a coluna tem um cargo definido
+      this.logger.log(`📢 [NOTIFICATION] ========== INICIANDO ==========`);
+      this.logger.log(`📢 [NOTIFICATION] action: ${action}`);
+      this.logger.log(`📢 [NOTIFICATION] stage name: ${stage?.name}`);
+      this.logger.log(
+        `📢 [NOTIFICATION] stage allowedRole: ${stage?.allowedRole}`,
+      );
+      this.logger.log(`📢 [NOTIFICATION] companyId: ${companyId}`);
+
+      // =====================================================
+      // VALIDAR CARGO DA COLUNA
+      // =====================================================
+
       if (
         !stage.allowedRole ||
         stage.allowedRole.trim() === '' ||
         stage.allowedRole === 'all'
       ) {
-        this.logger.log(
-          `⚠️ Coluna "${stage.name}" não possui cargo específico definido. Nenhuma notificação enviada.`,
-        );
+        this.logger.log(`⚠️ Coluna sem cargo definido.`);
+
         return;
       }
 
-      // 2. Buscar todos os usuários da empresa com o cargo correspondente
       const targetRoleName = stage.allowedRole.trim();
 
-      // 🔥 CORREÇÃO: Usar where direto com o relacionamento professionalRole
+      // =====================================================
+      // BUSCAR USUÁRIOS
+      // =====================================================
+
       const usersToNotify = await this.prisma.user.findMany({
         where: {
           companyId,
           status: 'ACTIVE',
-          contact: { not: undefined }, // 🔥 Isso funciona no Prisma
+          contact: {
+            not: undefined,
+          },
+
           OR: [
-            // Usuários com o cargo profissional correspondente via relacionamento
             {
               professionalRole: {
                 name: {
@@ -1664,7 +1849,7 @@ export class FlowService {
                 },
               },
             },
-            // ADM/MASTER também recebem
+
             {
               role: {
                 in: ['MASTER', 'ADMIN'],
@@ -1672,31 +1857,36 @@ export class FlowService {
             },
           ],
         },
+
         include: {
           professionalRole: {
-            select: { name: true },
+            select: {
+              name: true,
+            },
           },
         },
       });
 
-      // Remover duplicatas (caso um ADM também tenha o cargo)
+      // =====================================================
+      // REMOVER DUPLICADOS
+      // =====================================================
+
       const uniqueUsers = Array.from(
         new Map(usersToNotify.map((u) => [u.id, u])).values(),
       );
 
-      this.logger.log(
-        `👥 Usuários encontrados com cargo "${targetRoleName}" ou ADM: ${uniqueUsers.length}`,
-      );
-
       if (uniqueUsers.length === 0) {
-        this.logger.log(
-          `⚠️ Nenhum usuário encontrado com o cargo "${targetRoleName}"`,
-        );
+        this.logger.warn(`⚠️ Nenhum usuário encontrado.`);
+
         return;
       }
 
-      // 3. Montar a mensagem
+      // =====================================================
+      // TEXTO
+      // =====================================================
+
       const actionText = action === 'CREATED' ? 'criado' : 'movido';
+
       const movementText =
         action === 'MOVED' && previousStageName
           ? `da coluna "${previousStageName}" `
@@ -1704,88 +1894,56 @@ export class FlowService {
 
       const flowName = item.flow?.name || 'N/A';
 
-      const baseMessage = `
-📢 *ATUALIZAÇÃO NO KANBAN - ${stage.name.toUpperCase()}!*
+      // =====================================================
+      // ENVIAR
+      // =====================================================
 
-📦 *Item:* ${item.title}
+      for (const user of uniqueUsers) {
+        try {
+          if (!user.contact) continue;
+
+          let cleanedNumber = user.contact.replace(/\D/g, '');
+
+          if (!cleanedNumber.startsWith('55')) {
+            cleanedNumber = `55${cleanedNumber}`;
+          }
+
+          const message = `
+📢 *ATUALIZAÇÃO NO KANBAN*
+
+📦 *Produto:* ${item.title}
 🏷️ *Referência:* ${item.productRef || 'N/A'}
 🔢 *Quantidade:* ${item.quantity || 0}
+
 📍 *Coluna:* ${stage.name}
 📋 *Coleção:* ${flowName}
 
 🔄 *Status:* Item foi ${actionText} ${movementText}para a coluna "${stage.name}"
 
-👤 *Ação realizada por:* ${performedBy?.name || 'Sistema'}
+👤 *Responsável:* ${performedBy?.name || 'Sistema'}
+
 📅 *Data:* ${new Date().toLocaleString('pt-BR')}
+        `.trim();
 
-⚠️ *Cargo requisitado:* ${targetRoleName}
-
-👉 Acesse o sistema para mais detalhes.
-    `.trim();
-
-      // 4. Enviar notificações
-      let successCount = 0;
-      let failCount = 0;
-      const notifiedUsers: string[] = [];
-
-      for (const user of uniqueUsers) {
-        if (!user.contact) {
-          this.logger.warn(
-            `⚠️ Usuário ${user.name} não tem contato cadastrado`,
+          await this.whatsappServiceNaoOficial.sendTextMessage(
+            cleanedNumber,
+            message,
           );
-          continue;
+
+          this.logger.log(`✅ Enviado para ${user.name}`);
+
+          // Delay opcional
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        } catch (error: any) {
+          this.logger.error(
+            `❌ Erro ao enviar para ${user.name}: ${error.message}`,
+          );
         }
-
-        // Limpar número de telefone
-        let cleanedNumber = user.contact.replace(/\D/g, '');
-        if (!cleanedNumber.startsWith('55')) {
-          cleanedNumber = `55${cleanedNumber}`;
-        }
-
-        // 🔥 Acessar o nome do cargo profissional com segurança
-        const userRoleName = user.professionalRole?.name || user.role || 'N/A';
-
-        const personalizedMessage = `
-👋 Olá *${user.name}*!
-
-${baseMessage}
-
-📌 *Seu cargo:* ${userRoleName}
-🎯 *Cargo requisitado:* ${targetRoleName}
-
----
-*ELO PRODUTIVO* - Sistema de Gestão de Fluxos
-      `.trim();
-
-        this.logger.log(
-          `📱 Enviando notificação para ${user.name} (${userRoleName}) - ${cleanedNumber}`,
-        );
-
-        const success = await this.whatsAppService.sendSimpleMessage(
-          cleanedNumber,
-          personalizedMessage,
-        );
-
-        if (success) {
-          successCount++;
-          notifiedUsers.push(`${user.name} (${userRoleName})`);
-          this.logger.log(`✅ Notificação enviada para ${user.name}`);
-        } else {
-          failCount++;
-          this.logger.warn(`❌ Falha ao enviar para ${user.name}`);
-        }
-
-        // Delay para não sobrecarregar a API
-        await new Promise((resolve) => setTimeout(resolve, 500));
       }
 
-      this.logger.log(
-        `📢 [NOTIFICATION] Resumo: ${successCount} enviadas, ${failCount} falhas`,
-      );
-      this.logger.log(`📋 Usuários notificados: ${notifiedUsers.join(', ')}`);
+      this.logger.log(`📢 Notificações finalizadas.`);
     } catch (error: any) {
-      this.logger.error(`❌ [NOTIFICATION] Erro: ${error.message}`);
-      this.logger.error(`📚 Stack: ${error.stack}`);
+      this.logger.error(error.message);
     }
   }
 
@@ -1918,16 +2076,46 @@ ${baseMessage}
         // =========================================================
         // 🔥 NOTIFICAÇÃO: Enviar WhatsApp para funcionários do cargo da coluna
         // =========================================================
+        // await this.sendWhatsAppNotificationByColumnRole(
+        //   { ...item, flow: { name: flow.name } },
+        //   targetStage,
+        //   companyId,
+        //   'CREATED',
+        //   undefined,
+        //   { id: userId, name: user.name },
+        // );
+
         await this.sendWhatsAppNotificationByColumnRole(
           { ...item, flow: { name: flow.name } },
           targetStage,
           companyId,
           'CREATED',
           undefined,
-          { id: userId, name: user.name },
+          {
+            id: userId,
+            name: user.name,
+          },
         );
 
+        //         await this.whatsappServiceNaoOficial.sendTextMessage(
+        //           '5585984801284',
+        //           `🆕 Novo Produto criado!
+
+        // 📌 ${item.title}
+
+        // 👤 Criado por: ${user.name}
+
+        // 📦 Quantidade: ${item.quantity}
+
+        // 🏷️ Referência: ${item.productRef || 'N/A'}
+
+        // 📂 Coleção: ${flow.name}
+
+        // 📍 Etapa: ${targetStage.name}`,
+        //         );
+
         // 5. Gera os registros de prazo (FlowItemStage) para a nova estrutura
+
         const stages = await tx.flowStage.findMany({
           where: { flowId, companyId },
           orderBy: { order: 'asc' },
@@ -3813,7 +4001,7 @@ ${baseMessage}
             include: {
               assignedTo: { select: { id: true, name: true } },
               supplier: { select: { id: true, name: true } },
-              stage: { select: { id: true, name: true } },
+            stage: { select: { id: true, name: true, allowedRole: true } },
               flow: { select: { id: true, name: true } },
             },
           });
@@ -3863,23 +4051,50 @@ ${baseMessage}
     // ===========================================================================
     // 🔥 NOTIFICAÇÃO: Enviar WhatsApp para funcionários do cargo da coluna DESTINO
     // ===========================================================================
-    if (result && result.stage && itemBeforeMove.stageId !== newStageId) {
-      await this.sendWhatsAppNotificationByColumnRole(
-        {
-          id: result.id,
-          title: result.title,
-          productRef: result.productRef,
-          quantity: result.quantity,
-          flow: result.flow, // 🔥 AGORA result.flow existe porque incluímos no update
-          assignedToId: result.assignedToId,
-        },
-        result.stage,
-        companyId,
-        'MOVED',
-        itemBeforeMove.stage?.name,
-        { id: userId, name: performingUser?.name || 'Sistema' },
-      );
-    }
+    // if (result && result.stage && itemBeforeMove.stageId !== newStageId) {
+    //   await this.sendWhatsAppNotificationByColumnRole(
+    //     {
+    //       id: result.id,
+    //       title: result.title,
+    //       productRef: result.productRef,
+    //       quantity: result.quantity,
+    //       flow: result.flow, // 🔥 AGORA result.flow existe porque incluímos no update
+    //       assignedToId: result.assignedToId,
+    //     },
+    //     result.stage,
+    //     companyId,
+    //     'MOVED',
+    //     itemBeforeMove.stage?.name,
+    //     { id: userId, name: performingUser?.name || 'Sistema' },
+    //   );
+    // }
+
+    this.logger.log(`📢 [MOVE_ITEM] =========================================`);
+    this.logger.log(`📢 [MOVE_ITEM] Preparando para enviar notificação:`);
+    this.logger.log(`📢 [MOVE_ITEM] - stage: ${result.stage?.name}`);
+    this.logger.log(
+      `📢 [MOVE_ITEM] - allowedRole: ${result.stage?.allowedRole}`,
+    );
+    this.logger.log(`📢 [MOVE_ITEM] - flow: ${result.flow?.name}`);
+    this.logger.log(`📢 [MOVE_ITEM] =========================================`);
+
+    await this.sendWhatsAppNotificationByColumnRole(
+      {
+        id: result.id,
+        title: result.title,
+        productRef: result.productRef,
+        quantity: result.quantity,
+        flow: result.flow,
+      },
+      result.stage,
+      companyId,
+      'MOVED',
+      itemBeforeMove.stage?.name,
+      {
+        id: userId,
+        name: performingUser?.name || 'Sistema',
+      },
+    );
 
     // 🔥 AJUSTE: Removida a lógica de setTimeout que concluía o item automaticamente
 
