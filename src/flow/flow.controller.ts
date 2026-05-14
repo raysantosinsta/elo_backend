@@ -1250,7 +1250,7 @@ export class FlowController {
   @HttpCode(HttpStatus.OK)
   async testOverdueNotification() {
     this.logger.log('📱 Teste manual de notificação de atrasados iniciado');
-    await this.flowService.checkOverdueItemsAndNotify();
+    await this.flowService.checkOverdueAndUpcomingItems();
     return { 
       success: true, 
       message: 'Verificação de itens atrasados executada manualmente',

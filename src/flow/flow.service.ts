@@ -1498,7 +1498,7 @@ export class FlowService {
 
     return createdOrUpdated;
   }
-// TODO: USO DA API DO WHASTSAPP OFICIAL
+  // TODO: USO DA API DO WHASTSAPP OFICIAL
   /**
    * 🔥 Envia notificação WhatsApp quando um novo item é criado
    * Modo TESTE: usa número fixo
@@ -1792,7 +1792,6 @@ export class FlowService {
   //     }
   //   }
 
-  
   // TODO: USO DA API DO WHASTSAPP  NAOOFICIAL
   private async sendWhatsAppNotificationByColumnRole(
     item: any,
@@ -2156,7 +2155,7 @@ export class FlowService {
         await this.invalidateFlowCache(companyId, flowId);
         return item;
       },
-      { timeout: 60000 },
+      { timeout: 120000 },  
     );
   }
 
@@ -4002,7 +4001,7 @@ export class FlowService {
             include: {
               assignedTo: { select: { id: true, name: true } },
               supplier: { select: { id: true, name: true } },
-            stage: { select: { id: true, name: true, allowedRole: true } },
+              stage: { select: { id: true, name: true, allowedRole: true } },
               flow: { select: { id: true, name: true } },
             },
           });
@@ -5235,154 +5234,235 @@ export class FlowService {
   }
 
   // ===========================================================================
-// 🔥 NOTIFICAÇÃO DE ITENS ATRASADOS
-// ===========================================================================
+  // 🔥 NOTIFICAÇÃO DE ITENS ATRASADOS
+  // ===========================================================================
 
-/**
- * Executa todos os dias às 8:00 para verificar itens atrasados
- */
-@Cron(CronExpression.EVERY_DAY_AT_8AM)
-async checkOverdueItemsAndNotify() {
-  this.logger.log('🕐 Iniciando verificação de itens atrasados...');
-  const startTime = Date.now();
+  /**
+   * Executa todos os dias às 8:00 para verificar itens atrasados e próximos do vencimento
+   */
+  @Cron(CronExpression.EVERY_DAY_AT_8AM)
+  async checkOverdueAndUpcomingItems() {
+    this.logger.log('🕐 Iniciando verificação de itens com prazo...');
+    const startTime = Date.now();
 
-  try {
-    // Buscar todas as empresas ativas
-    const companies = await this.prisma.company.findMany({
-      where: { status: 'ACTIVE' },
-      select: { id: true, name: true },
+    try {
+      // Buscar todas as empresas ativas
+      const companies = await this.prisma.company.findMany({
+        where: { status: 'ACTIVE' },
+        select: { id: true, name: true, notificationDays: true },
+      });
+
+      this.logger.log(`📊 Encontradas ${companies.length} empresas`);
+
+      let totalOverdue = 0;
+      let totalUpcoming = 0;
+      let totalNotificationsSent = 0;
+
+      for (const company of companies) {
+        const result = await this.processCompanyItemsByDeadline(
+          company.id,
+          company.notificationDays,
+        );
+        totalOverdue += result.overdueCount;
+        totalUpcoming += result.upcomingCount;
+        totalNotificationsSent += result.notificationsSent;
+      }
+
+      const duration = Date.now() - startTime;
+      this.logger.log(
+        `✅ Finalizado em ${duration}ms | Atrasados: ${totalOverdue} | Próximos: ${totalUpcoming} | Notificações: ${totalNotificationsSent}`,
+      );
+    } catch (error: any) {
+      this.logger.error(`❌ Erro na verificação: ${error.message}`);
+    }
+  }
+
+  /**
+   * Processa itens de uma empresa específica (atrasados e próximos)
+   */
+  private async processCompanyItemsByDeadline(
+    companyId: string,
+    notificationDays: number,
+  ) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // Data limite para itens próximos (hoje + notificationDays)
+    const upcomingLimitDate = new Date(today);
+    upcomingLimitDate.setDate(today.getDate() + notificationDays);
+    upcomingLimitDate.setHours(23, 59, 59, 999);
+
+    // 🔥 1. BUSCAR ITENS ATRASADOS
+    const overdueItems = await this.prisma.flowItem.findMany({
+      where: {
+        companyId,
+        dueDate: { lt: today },
+        status: { not: 'CONCLUIDO' },
+      },
+      include: {
+        flow: { select: { id: true, name: true } },
+        stage: { select: { id: true, name: true } },
+        assignedTo: { select: { id: true, name: true, contact: true } },
+      },
+      orderBy: { dueDate: 'asc' },
     });
 
-    this.logger.log(`📊 Encontradas ${companies.length} empresas`);
+    // 🔥 2. BUSCAR ITENS PRÓXIMOS DO VENCIMENTO (exclui os já atrasados)
+    const upcomingItems = await this.prisma.flowItem.findMany({
+      where: {
+        companyId,
+        dueDate: {
+          gte: today,
+          lte: upcomingLimitDate,
+        },
+        status: { not: 'CONCLUIDO' },
+      },
+      include: {
+        flow: { select: { id: true, name: true } },
+        stage: { select: { id: true, name: true } },
+        assignedTo: { select: { id: true, name: true, contact: true } },
+      },
+      orderBy: { dueDate: 'asc' },
+    });
 
-    let totalOverdue = 0;
-    let totalNotified = 0;
+    this.logger.log(
+      `📋 Empresa ${companyId}: ${overdueItems.length} atrasados, ${upcomingItems.length} próximos (antec: ${notificationDays}d)`,
+    );
 
-    for (const company of companies) {
-      const result = await this.processOverdueItemsByCompany(company.id);
-      totalOverdue += result.overdueCount;
-      totalNotified += result.notificationsSent;
+    // Se não tem nada, retorna
+    if (overdueItems.length === 0 && upcomingItems.length === 0) {
+      return { overdueCount: 0, upcomingCount: 0, notificationsSent: 0 };
     }
 
-    const duration = Date.now() - startTime;
-    this.logger.log(
-      `✅ Finalizado em ${duration}ms | Atrasados: ${totalOverdue} | Notificações: ${totalNotified}`,
-    );
-  } catch (error: any) {
-    this.logger.error(`❌ Erro na verificação de atrasados: ${error.message}`);
-  }
-}
+    // Buscar ADMINs da empresa (MASTER e ADMIN)
+    const admins = await this.prisma.user.findMany({
+      where: {
+        companyId,
+        role: { in: ['MASTER', 'ADMIN'] },
+        status: 'ACTIVE',
+        contact: { not: undefined },
+      },
+      select: {
+        id: true,
+        name: true,
+        contact: true,
+        role: true,
+      },
+    });
 
-/**
- * Processa itens atrasados de uma empresa específica
- */
-private async processOverdueItemsByCompany(companyId: string) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+    if (admins.length === 0) {
+      this.logger.warn(`⚠️ Nenhum ADMIN com contato na empresa ${companyId}`);
+      return {
+        overdueCount: overdueItems.length,
+        upcomingCount: upcomingItems.length,
+        notificationsSent: 0,
+      };
+    }
 
-  // Buscar itens atrasados (não concluídos)
-  const overdueItems = await this.prisma.flowItem.findMany({
-    where: {
-      companyId,
-      dueDate: { lt: today },
-      status: { not: 'CONCLUIDO' },
-    },
-    include: {
-      flow: { select: { id: true, name: true } },
-      stage: { select: { id: true, name: true } },
-      assignedTo: { select: { id: true, name: true, contact: true } },
-    },
-    orderBy: { dueDate: 'asc' },
-  });
+    // Construir mensagens separadas
+    let message = '';
 
-  if (overdueItems.length === 0) {
-    return { overdueCount: 0, notificationsSent: 0 };
-  }
+    // 🔥 SEÇÃO DE ITENS ATRASADOS
+    if (overdueItems.length > 0) {
+      const overdueList = overdueItems
+        .map((item) => {
+          const delayDays = Math.ceil(
+            (today.getTime() - new Date(item.dueDate!).getTime()) /
+              (1000 * 60 * 60 * 24),
+          );
+          return `📦 *${item.title}*\n   🔢 Ref: ${item.productRef}\n   📍 Etapa: ${item.stage?.name}\n   📅 Atraso: ${delayDays} dias\n   👤 Resp: ${item.assignedTo?.name || 'Não atribuído'}`;
+        })
+        .join('\n\n');
 
-  this.logger.log(
-    `📋 Empresa ${companyId}: ${overdueItems.length} itens atrasados`,
-  );
-
-  // Buscar ADMINs da empresa (MASTER e ADMIN)
-  const admins = await this.prisma.user.findMany({
-    where: {
-      companyId,
-      role: { in: ['MASTER', 'ADMIN'] },
-      status: 'ACTIVE',
-      contact: { not: undefined },
-    },
-    select: {
-      id: true,
-      name: true,
-      contact: true,
-      role: true,
-    },
-  });
-
-  if (admins.length === 0) {
-    this.logger.warn(`⚠️ Nenhum ADMIN com contato na empresa ${companyId}`);
-    return { overdueCount: overdueItems.length, notificationsSent: 0 };
-  }
-
-  // Construir relatório dos itens atrasados
-  const itemsList = overdueItems.map((item) => {
-    const delayDays = Math.ceil(
-      (today.getTime() - new Date(item.dueDate!).getTime()) / (1000 * 60 * 60 * 24),
-    );
-    return `📦 *${item.title}*\n   🔢 Ref: ${item.productRef}\n   📍 Etapa: ${item.stage?.name}\n   📅 Atraso: ${delayDays} dias\n   👤 Resp: ${item.assignedTo?.name || 'Não atribuído'}`;
-  }).join('\n\n');
-
-  const message = `
+      message += `
 🚨 *ALERTA: ITENS ATRASADOS!* 🚨
 
 📋 *Relatório de itens com prazo vencido:*
 
-${itemsList}
+${overdueList}
 
 📊 *Total de itens atrasados:* ${overdueItems.length}
 
-⚠️ *Ação necessária:* Acesse o sistema e atualize os prazos ou realize as pendências.
+⚠️ *Ação necessária:* Acesse o sistema e regularize os prazos.
 
 ---
+`;
+    }
+
+    // 🔥 SEÇÃO DE ITENS PRÓXIMOS DO VENCIMENTO
+    if (upcomingItems.length > 0) {
+      const upcomingList = upcomingItems
+        .map((item) => {
+          const dueDate = new Date(item.dueDate!);
+          const daysLeft = Math.ceil(
+            (dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
+          );
+          return `📦 *${item.title}*\n   🔢 Ref: ${item.productRef}\n   📍 Etapa: ${item.stage?.name}\n   📅 Vence em: ${daysLeft} dia(s)\n   👤 Resp: ${item.assignedTo?.name || 'Não atribuído'}`;
+        })
+        .join('\n\n');
+
+      message += `
+⚠️ *ATENÇÃO: ITENS PRÓXIMOS DO VENCIMENTO!* ⚠️
+
+📋 *Relatório de itens que vencem nos próximos ${notificationDays} dias:*
+
+${upcomingList}
+
+📊 *Total de itens próximos do vencimento:* ${upcomingItems.length}
+
+⏰ *Prazo limite:* ${upcomingLimitDate.toLocaleDateString('pt-BR')}
+
+📌 *Ação necessária:* Acompanhe e priorize estes itens.
+
+---
+`;
+    }
+
+    message += `
 *ELO PRODUTIVO* - Sistema de Gestão
   `.trim();
 
-  // Enviar para todos os ADMINs
-  let notificationsSent = 0;
-  for (const admin of admins) {
-    const cleanedNumber = this.formatPhoneNumberForWhatsApp(admin.contact!);
-    try {
-      await this.whatsappServiceNaoOficial.sendTextMessage(cleanedNumber, message);
-      notificationsSent++;
-      this.logger.log(`✅ Notificação enviada para ${admin.name} (${admin.role})`);
-    } catch (error: any) {
-      this.logger.error(`❌ Falha para ${admin.name}: ${error.message}`);
+    // Enviar para todos os ADMINs
+    let notificationsSent = 0;
+    for (const admin of admins) {
+      const cleanedNumber = this.formatPhoneNumberForWhatsApp(admin.contact!);
+      try {
+        await this.whatsappServiceNaoOficial.sendTextMessage(
+          cleanedNumber,
+          message,
+        );
+        notificationsSent++;
+        this.logger.log(
+          `✅ Notificação enviada para ${admin.name} (${admin.role})`,
+        );
+      } catch (error: any) {
+        this.logger.error(`❌ Falha para ${admin.name}: ${error.message}`);
+      }
+      await this.sleep(500);
     }
-    // Delay de 500ms para não sobrecarregar a API
-    await this.sleep(500);
+
+    return {
+      overdueCount: overdueItems.length,
+      upcomingCount: upcomingItems.length,
+      notificationsSent,
+    };
   }
 
-  return {
-    overdueCount: overdueItems.length,
-    notificationsSent,
-  };
-}
-
-/**
- * Formata número de telefone para WhatsApp (remove tudo que não é dígito e adiciona 55)
- */
-private formatPhoneNumberForWhatsApp(phone: string): string {
-  let cleaned = phone.replace(/\D/g, '');
-  if (!cleaned.startsWith('55')) {
-    cleaned = `55${cleaned}`;
+  /**
+   * Formata número de telefone para WhatsApp
+   */
+  private formatPhoneNumberForWhatsApp(phone: string): string {
+    let cleaned = phone.replace(/\D/g, '');
+    if (!cleaned.startsWith('55')) {
+      cleaned = `55${cleaned}`;
+    }
+    return cleaned;
   }
-  return cleaned;
-}
 
-/**
- * Delay helper
- */
-private sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+  /**
+   * Delay helper
+   */
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
 }
