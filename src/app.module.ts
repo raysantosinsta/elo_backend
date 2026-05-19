@@ -39,6 +39,8 @@ import { LocationGateway } from './location/location.gateway';
 import { WhatsAppSimpleService } from './whatsapp-notification/whatsapp-notification.service';
 import { WhatsappNotificationModule } from './whatsapp-notification/whatsapp-notification.module';
 import { ScheduleModule } from '@nestjs/schedule';
+import { WhatsappConnectionModule } from './whatsapp-connection/whatsapp-connection.module';
+import { AtendeproAuthModule } from './atendepro-auth/atendepro-auth.module';
 
 
 @Module({
@@ -91,6 +93,8 @@ import { ScheduleModule } from '@nestjs/schedule';
     AuditModule,
     CompanyRolesModule,
     WhatsappNotificationModule,
+    WhatsappConnectionModule,
+    AtendeproAuthModule,
   ],
   // ADICIONE O CONTROLLER AQUI
   controllers: [AppController, MetricsController],

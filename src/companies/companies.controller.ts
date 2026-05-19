@@ -17,9 +17,11 @@ import {
   Patch,
   Post,
   Query,
+  Res,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
+import { Response } from 'express';
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -41,16 +43,16 @@ import {
 import { UpdateCompanyNotificationDto } from './dto/update-company-notification.dto';
 
 // Interface para garantir o contrato de retorno
-interface PaginatedCompaniesResponse {
-  data: Partial<Company>[];
-  total: number;
-  page: number;
-  lastPage: number;
-}
+// interface PaginatedCompaniesResponse {
+//   data: Partial<Company>[];
+//   total: number;
+//   page: number;
+//   lastPage: number;
+// }
 
-interface NotificationSettingsResponse {
-  notificationDays: number;
-}
+// interface NotificationSettingsResponse {
+//   notificationDays: number;
+// }
 
 @ApiTags('Companies')
 @ApiBearerAuth()
@@ -91,7 +93,6 @@ export class CompaniesController {
     await this.companiesService.remove(id);
   }
 
-
   @Get()
   @Roles(UserRole.MASTER, UserRole.ADMIN)
   @ApiOperation({
@@ -101,9 +102,18 @@ export class CompaniesController {
   @ApiQuery({ name: 'limit', required: false, type: Number, example: 10 })
   async findAll(
     @Query() pagination: PaginationDto,
-  ): Promise<PaginatedCompaniesResponse> {
-    // 🔥 O retorno agora está estritamente tipado
-    return this.companiesService.findAll(pagination);
+    @Res() res: any,
+  ): Promise<void> {
+    // 🔥 HEADERS ANTI-CACHE
+    res.setHeader(
+      'Cache-Control',
+      'no-store, no-cache, must-revalidate, private',
+    );
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+
+    const result = await this.companiesService.findAll(pagination);
+    res.json(result);
   }
 
   @Get(':id')
@@ -113,11 +123,21 @@ export class CompaniesController {
   })
   async findOne(
     @Param('id', new ParseUUIDPipe()) id: string,
-  ): Promise<Company> {
-    return this.companiesService.findOne(id);
+    @Res() res: any,
+  ): Promise<void> {
+    // 🔥 HEADERS ANTI-CACHE
+    res.setHeader(
+      'Cache-Control',
+      'no-store, no-cache, must-revalidate, private',
+    );
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+
+    const result = await this.companiesService.findOne(id);
+    res.json(result);
   }
 
-   // ===========================================================================
+  // ===========================================================================
   // 🔥 NOVOS ENDPOINTS PARA CONFIGURAÇÕES DE NOTIFICAÇÃO
   // ===========================================================================
 
@@ -125,7 +145,8 @@ export class CompaniesController {
   @Roles(UserRole.MASTER, UserRole.ADMIN, UserRole.EMPLOYER)
   @ApiOperation({
     summary: 'Busca configurações de notificação da empresa',
-    description: 'Retorna os dias de antecedência configurados para notificações',
+    description:
+      'Retorna os dias de antecedência configurados para notificações',
   })
   @ApiResponse({
     status: 200,
@@ -139,15 +160,26 @@ export class CompaniesController {
   @ApiResponse({ status: 404, description: 'Empresa não encontrada' })
   async getNotificationSettings(
     @Param('id', new ParseUUIDPipe()) id: string,
-  ): Promise<NotificationSettingsResponse> {
-    return this.companiesService.getNotificationSettings(id);
+    @Res() res: any,
+  ): Promise<void> {
+    // 🔥 HEADERS ANTI-CACHE
+    res.setHeader(
+      'Cache-Control',
+      'no-store, no-cache, must-revalidate, private',
+    );
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+
+    const result = await this.companiesService.getNotificationSettings(id);
+    res.json(result);
   }
 
   @Patch(':id/notification-settings')
   @Roles(UserRole.MASTER, UserRole.ADMIN)
   @ApiOperation({
     summary: 'Atualiza configurações de notificação da empresa',
-    description: 'Define com quantos dias de antecedência enviar notificações (1-90 dias)',
+    description:
+      'Define com quantos dias de antecedência enviar notificações (1-90 dias)',
   })
   @ApiResponse({
     status: 200,
@@ -160,12 +192,28 @@ export class CompaniesController {
       },
     },
   })
-  @ApiResponse({ status: 400, description: 'Dados inválidos (fora do range 1-90)' })
+  @ApiResponse({
+    status: 400,
+    description: 'Dados inválidos (fora do range 1-90)',
+  })
   @ApiResponse({ status: 404, description: 'Empresa não encontrada' })
   async updateNotificationSettings(
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: UpdateCompanyNotificationDto,
-  ): Promise<Partial<Company>> {
-    return this.companiesService.updateNotificationSettings(id, dto);
+    @Res() res: any,
+  ): Promise<void> {
+    // 🔥 HEADERS ANTI-CACHE
+    res.setHeader(
+      'Cache-Control',
+      'no-store, no-cache, must-revalidate, private',
+    );
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+
+    const result = await this.companiesService.updateNotificationSettings(
+      id,
+      dto,
+    );
+    res.json(result);
   }
 }

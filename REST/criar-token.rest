@@ -1,0 +1,75 @@
+### Teste direto na API do AtendePro
+POST https://api.atendepro.app/whatsapp
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ODIsInRva2VuVmVyc2lvbiI6MCwiY29tcGFueUlkIjoyOCwiaWF0IjoxNzc5MTE3ODAxLCJleHAiOjE3Nzk3MjI2MDF9.m_BpkjjmZQk56DlP_I6TnlLsK6CBRkV7jPZvxiVpzi0
+Content-Type: application/json
+
+{
+  "botFlowId": null,
+  "complationMessage": "",
+  "expiresInactiveMessage": "",
+  "expiresTicket": 0,
+  "greetingMessage": "",
+  "isDefault": false,
+  "maxUseBotQueues": 3,
+  "metaBusinessId": "",
+  "metaPhoneNumberId": "",
+  "metaWabaId": "",
+  "name": "TesteDirect",
+  "outOfHoursMessage": "",
+  "promptId": null,
+  "provider": "beta",
+  "queueIds": [],
+  "ratingMessage": "",
+  "timeUseBotQueues": 0,
+  "token": "0c28c61653766e81e79c369ff8a2bc02ca3037569350e6a4acb72f2abe0daca8",
+  "transferQueueId": null
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@baseUrl = https://api.atendepro.app/whatsapp
+
+
+@contentType = application/json
+
+@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2FybmFtZSI6IkVsbyBwcm9kdXRpdm8iLCJwcm9maWxlIjoiYWRtaW4iLCJpZCI6ODIsImNvbXBhbnlJZCI6MjgsImlhdCI6MTc3OTExMTY3NCwiZXhwIjoxNzc5MTEyNTc0fQ.UAojq5199v8ZlXwEzhvCOpBsnzRCwju_WL42ON6e_-4
+
+
+### Criar Token JWT para Autenticação
+POST {{baseUrl}}
+Content-Type: {{contentType}}
+Authorization: Bearer {{token}}
+
+{
+  "botFlowId": null,
+  "complationMessage": "",
+  "expiresInactiveMessage": "",
+  "expiresTicket": 0,
+  "greetingMessage": "",
+  "isDefault": false,
+  "maxUseBotQueues": 3,
+  "metaBusinessId": "",
+  "metaPhoneNumberId": "",
+  "metaWabaId": "",
+  "name": "High1",
+  "outOfHoursMessage": "",
+  "promptId": null,
+  "provider": "beta",
+  "queueIds": [],
+  "ratingMessage": "",
+  "timeUseBotQueues": 0,
+  "token": "0c28c61653766e81e79c369ff8a2bc02ca3037569350e6a4acb72f2abe0daca8",
+  "transferQueueId": null
+}

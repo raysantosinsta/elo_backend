@@ -1,9 +1,9 @@
 /* eslint-disable prettier/prettier */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
-import { 
-  Injectable, 
-  NotFoundException, 
-  ForbiddenException 
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { CreateChatDto } from './dto/create-chat.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
@@ -25,15 +25,15 @@ export class ChatService {
   async findOne(id: string, userCompanyId: string): Promise<ChatResponseDto> {
     // Usamos findFirst para forçar a cláusula WHERE com DOIS campos
     const chat = await this.prisma.chat.findFirst({
-      where: { 
+      where: {
         id: id,
-        companyId: userCompanyId // AQUI ESTÁ A TRAVA DE SEGURANÇA
+        companyId: userCompanyId, // AQUI ESTÁ A TRAVA DE SEGURANÇA
       },
-      include: { 
+      include: {
         messages: {
-            include: { sender: { select: { id: true, name: true } } },
-            orderBy: { createdAt: 'asc' }
-        } 
+          include: { sender: { select: { id: true, name: true } } },
+          orderBy: { createdAt: 'asc' },
+        },
       },
     });
 
@@ -49,7 +49,7 @@ export class ChatService {
   async findAll(companyId: string): Promise<ChatResponseDto[]> {
     const chats = await this.prisma.chat.findMany({
       where: { companyId }, // Filtro direto no banco
-      include: { 
+      include: {
         messages: {
           include: {
             sender: { select: { id: true, name: true } },
@@ -60,27 +60,33 @@ export class ChatService {
       orderBy: { createdAt: 'desc' },
     });
 
-    return chats.map(chat => new ChatResponseDto(chat));
+    return chats.map((chat) => new ChatResponseDto(chat));
   }
 
-  async remove(id: string, userCompanyId: string, userRole: string): Promise<void> {
-    // 1. Validação de Cargo
-    const allowedRoles = ['ADM', 'MASTER'];
+  async remove(
+    id: string,
+    userCompanyId: string,
+    userRole: string,
+  ): Promise<void> {
+    // 🔥 CORREÇÃO: Adicionar 'ADMIN' também
+    const allowedRoles = ['ADMIN', 'MASTER'];
     if (!allowedRoles.includes(userRole?.toUpperCase())) {
-      throw new ForbiddenException('Acesso negado: Apenas ADM ou MASTER podem deletar chats.');
+      throw new ForbiddenException(
+        'Acesso negado: Apenas ADM ou MASTER podem deletar chats.',
+      );
     }
 
-    // 2. Validação de Propriedade (Usando findFirst para segurança)
+    // 2. Validação de Propriedade
     const chat = await this.prisma.chat.findFirst({
-      where: { 
-        id, 
-        companyId: userCompanyId // Garante que só acha se for da empresa
+      where: {
+        id,
+        companyId: userCompanyId,
       },
-      select: { id: true }
+      select: { id: true },
     });
 
     if (!chat) {
-        throw new NotFoundException('Chat não encontrado ou permissão negada.');
+      throw new NotFoundException('Chat não encontrado ou permissão negada.');
     }
 
     // 3. Execução da Deleção

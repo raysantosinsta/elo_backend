@@ -142,6 +142,8 @@ model Company {
   suppliers     Supplier[]
   budgetGroups  BudgetGroup[]
   routeStops    RouteStop[]
+  whatsappConnection   WhatsAppConnection? // Uma empresa pode ter UMA conexão WhatsApp (opcional)
+
 
   auditLogs    AuditLog[]
   itemStages   FlowItemStage[] // ou flowItemStages, mas não ambos
@@ -151,6 +153,24 @@ model Company {
   @@index([status])
   @@index([createdAt])
   @@map("empresas")
+}
+
+// Adicione este modelo APÓS o model Company no seu schema.prisma
+
+model WhatsAppConnection {
+  id         String   @id @default(uuid()) @db.Uuid
+  companyId  String   @unique @map("company_id") @db.Uuid
+  name       String   @map("name") @db.VarChar(100)
+  token      String   @map("token") @db.Text
+  status     String   @default("disconnected") @map("status")
+  qrCode     String?  @map("qr_code") @db.Text
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@map("whatsapp_connections")
 }
 
 model User {
