@@ -79,4 +79,36 @@ export class WhatsappService {
       );
     }
   }
+
+  // 🔥 NOVO MÉTODO: Envia usando token específico da empresa
+  // async sendTextMessageWithToken(phone: string, text: string, token: string) {
+  //   try {
+  //     const cleanedPhone = phone.replace(/\D/g, '');
+
+  //     this.logger.log(`📤 Enviando com token: ${token.substring(0, 20)}...`);
+  //     this.logger.log(`📤 Para: ${cleanedPhone}`);
+
+  //     const response = await firstValueFrom(
+  //       this.httpService.post(
+  //         this.baseUrl,
+  //         { number: cleanedPhone, body: text },
+  //         {
+  //           headers: {
+  //             Authorization: `Bearer ${token}`, // 🔥 USA O TOKEN DA EMPRESA
+  //             'Content-Type': 'application/json',
+  //           },
+  //         },
+  //       ),
+  //     );
+
+  //     this.logger.log(`✅ Mensagem enviada com sucesso`);
+  //     return response.data;
+  //   } catch (error: any) {
+  //     this.logger.error(`❌ Erro: ${error.message}`);
+  //     throw new HttpException(
+  //       error.response?.data?.message || 'Erro ao enviar mensagem',
+  //       error.response?.status || 500,
+  //     );
+  //   }
+  // }
 }

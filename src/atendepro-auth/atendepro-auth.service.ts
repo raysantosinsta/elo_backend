@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 // src/atendepro-auth/atendepro-auth.service.ts
@@ -154,5 +155,47 @@ export class AtendeProAuthService {
     this.cachedToken = null;
     this.tokenExpiresAt = null;
     return this.getToken();
+  }
+
+  // 🔥 NOVO MÉTODO: Verifica se o token é válido na API
+  async validateToken(token: string): Promise<boolean> {
+    try {
+      this.logger.debug('🔍 Validando token...');
+
+      const response = await firstValueFrom(
+        this.httpService.get('https://api.atendepro.app/whatsapp', {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          timeout: 10000,
+        }),
+      );
+
+      this.logger.debug('✅ Token válido');
+      return true;
+    } catch (error: any) {
+      if (error.response?.status === 403 || error.response?.status === 401) {
+        this.logger.warn('⚠️ Token inválido ou expirado');
+        return false;
+      }
+      // Outros erros podem ser de rede, considerar como válido para não ficar renovando
+      this.logger.warn(`⚠️ Erro ao validar token: ${error.message}`);
+      return true;
+    }
+  }
+
+  // 🔥 NOVO MÉTODO: Garante que o token é válido, renovando se necessário
+  async ensureValidToken(): Promise<string> {
+    let token = await this.getToken();
+
+    // Verifica se o token é válido fazendo uma requisição de teste
+    const isValid = await this.validateToken(token);
+
+    if (!isValid) {
+      this.logger.warn('⚠️ Token atual inválido. Forçando renovação...');
+      token = await this.forceRenewToken();
+    }
+
+    return token;
   }
 }

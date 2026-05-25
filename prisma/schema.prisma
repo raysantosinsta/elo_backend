@@ -119,31 +119,30 @@ model Company {
   updatedAt    DateTime @updatedAt @map("atualizado_em")
 
   // Relacionamentos Reversos
-  users         User[]         @relation("CompanyMembers")
-  kanbanCols    KanbanColumn[] @relation("CompanyKanbanColumns") // Mantido um nome de relação para KanbanColumn[]
-  tasks         Task[]         @relation("CompanyTasks")
-  notifications Notification[] @relation("CompanyNotifications")
-  materials     Material[]     @relation("CompanyMaterials")
-  products      Product[]      @relation("CompanyProducts")
-  budgets       Budget[]       @relation("CompanyBudgets")
-  routes        Route[]        @relation("CompanyRoutes")
-  taskImages    TaskImage[]    @relation("CompanyTaskImages")
-  taskAudios    TaskAudio[]    @relation("CompanyTaskAudios")
-  taskVideos    TaskVideo[]    @relation("CompanyTaskVideos")
-  taskAddresses TaskAddress[]  @relation("CompanyTaskAddresses")
-  chats         Chat[]         @relation("CompanyChats")
-  productFlows  ProductFlow[]  @relation("CompanyProductFlows")
-  flowStages    FlowStage[]    @relation("CompanyFlowStages")
-  flowItems     FlowItem[]     @relation("CompanyFlowItems")
-  flowImages    FlowImage[]    @relation("CompanyFlowImages")
-  flowAudios    FlowAudio[]    @relation("CompanyFlowAudios")
-  flowVideos    FlowVideo[]    @relation("CompanyFlowVideos")
-  flowTemplates FlowTemplate[] @relation("CompanyFlowTemplates")
-  suppliers     Supplier[]
-  budgetGroups  BudgetGroup[]
-  routeStops    RouteStop[]
-  whatsappConnection   WhatsAppConnection? // Uma empresa pode ter UMA conexão WhatsApp (opcional)
-
+  users              User[]              @relation("CompanyMembers")
+  kanbanCols         KanbanColumn[]      @relation("CompanyKanbanColumns") // Mantido um nome de relação para KanbanColumn[]
+  tasks              Task[]              @relation("CompanyTasks")
+  notifications      Notification[]      @relation("CompanyNotifications")
+  materials          Material[]          @relation("CompanyMaterials")
+  products           Product[]           @relation("CompanyProducts")
+  budgets            Budget[]            @relation("CompanyBudgets")
+  routes             Route[]             @relation("CompanyRoutes")
+  taskImages         TaskImage[]         @relation("CompanyTaskImages")
+  taskAudios         TaskAudio[]         @relation("CompanyTaskAudios")
+  taskVideos         TaskVideo[]         @relation("CompanyTaskVideos")
+  taskAddresses      TaskAddress[]       @relation("CompanyTaskAddresses")
+  chats              Chat[]              @relation("CompanyChats")
+  productFlows       ProductFlow[]       @relation("CompanyProductFlows")
+  flowStages         FlowStage[]         @relation("CompanyFlowStages")
+  flowItems          FlowItem[]          @relation("CompanyFlowItems")
+  flowImages         FlowImage[]         @relation("CompanyFlowImages")
+  flowAudios         FlowAudio[]         @relation("CompanyFlowAudios")
+  flowVideos         FlowVideo[]         @relation("CompanyFlowVideos")
+  flowTemplates      FlowTemplate[]      @relation("CompanyFlowTemplates")
+  suppliers          Supplier[]
+  budgetGroups       BudgetGroup[]
+  routeStops         RouteStop[]
+  whatsappConnection WhatsAppConnection? // Uma empresa pode ter UMA conexão WhatsApp (opcional)
 
   auditLogs    AuditLog[]
   itemStages   FlowItemStage[] // ou flowItemStages, mas não ambos
@@ -158,16 +157,17 @@ model Company {
 // Adicione este modelo APÓS o model Company no seu schema.prisma
 
 model WhatsAppConnection {
-  id         String   @id @default(uuid()) @db.Uuid
-  companyId  String   @unique @map("company_id") @db.Uuid
-  name       String   @map("name") @db.VarChar(100)
-  token      String   @map("token") @db.Text
-  status     String   @default("disconnected") @map("status")
-  qrCode     String?  @map("qr_code") @db.Text
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
+  id         String @id @default(uuid()) @db.Uuid
+  companyId  String @unique @map("company_id") @db.Uuid
+  instanceId Int? // ID da instância na API do AtendePro
+  name      String   @map("name") @db.VarChar(100)
+  token     String   @map("token") @db.Text
+  status    String   @default("connected") @map("status")
+  qrCode    String?  @map("qr_code") @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
-  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@index([companyId])
   @@map("whatsapp_connections")
@@ -177,7 +177,6 @@ model User {
   id     String       @id @default(uuid()) @map("id") @db.Uuid
   status SimpleStatus @default(ACTIVE) @map("status")
   role   UserRole     @map("perfil")
-  
 
   name     String  @map("nome") @db.VarChar(150)
   email    String  @unique @map("email") @db.VarChar(255)
@@ -188,7 +187,7 @@ model User {
   professionalRoleId String?      @map("cargo_profissional_id") @db.Uuid
   professionalRole   CompanyRole? @relation("UserProfessionalRole", fields: [professionalRoleId], references: [id])
 
-   // 🔥 NOVO CAMPO: Armazenar o nome do cargo profissional
+  // 🔥 NOVO CAMPO: Armazenar o nome do cargo profissional
   professionalRoleName String? @map("cargo_profissional_nome") @db.VarChar(100)
 
   resetTokens PasswordResetToken[]
@@ -381,8 +380,8 @@ model Task {
   routeId String? @map("rota_id") @db.Uuid
   route   Route?  @relation(fields: [routeId], references: [id])
 
-   // 🔥 NOVO RELACIONAMENTO COM ROUTESTOP
-  routeStops RouteStop[]  // <--- ADICIONE ESTA LINHA
+  // 🔥 NOVO RELACIONAMENTO COM ROUTESTOP
+  routeStops RouteStop[] // <--- ADICIONE ESTA LINHA
 
   // Empresa
   companyId String  @map("empresa_id") @db.Uuid
@@ -565,7 +564,7 @@ model Route {
 model RouteStop {
   id String @id @default(uuid()) @map("id") @db.Uuid
 
-   // 🔥 NOVO CAMPO: Referência à tarefa
+  // 🔥 NOVO CAMPO: Referência à tarefa
   taskId String? @map("task_id") @db.Uuid
   task   Task?   @relation(fields: [taskId], references: [id], onDelete: SetNull)
 

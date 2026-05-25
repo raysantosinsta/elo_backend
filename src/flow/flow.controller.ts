@@ -47,21 +47,20 @@ import { PermissionsGuard } from '../auth/permissions.guard';
 import { RolesGuard } from '../auth/roles.guard';
 
 // --- Services e DTOs ---
+import { Public } from 'src/auth/public.decorator';
 import {
   CreateFlowDto,
   CreateFlowItemDto,
   CreateStageDto,
   DateFilterType,
+  DeadlineDashboardQueryDto,
   FlowFilterDto,
-  UpdateFlowItemDto,
-  UpdateItemStageDeadlineDto,
-  BulkUpdateItemStagesDto,
   MoveItemWithDeadlineDto,
   RecalculateDeadlinesDto,
-  DeadlineDashboardQueryDto,
+  UpdateFlowItemDto,
+  UpdateItemStageDeadlineDto
 } from './dto/create-flow.dto';
 import { FlowService } from './flow.service';
-import { Public } from 'src/auth/public.decorator';
 
 @ApiTags('Product Flow (Kanban)')
 @ApiBearerAuth()

@@ -1,4 +1,5 @@
 /* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-require-imports */
 /* eslint-disable @typescript-eslint/no-unsafe-enum-comparison */
 /* eslint-disable @typescript-eslint/restrict-template-expressions */
@@ -1792,160 +1793,593 @@ export class FlowService {
   //     }
   //   }
 
-  // TODO: USO DA API DO WHASTSAPP  NAOOFICIAL
+  // TODO: USO DA API DO WHASTSAPP  NAOOFICIAL - funcionando
+  //   private async sendWhatsAppNotificationByColumnRole(
+  //     item: any,
+  //     stage: any,
+  //     companyId: string,
+  //     action: 'CREATED' | 'MOVED',
+  //     previousStageName?: string,
+  //     performedBy?: { id: string; name: string },
+  //   ): Promise<void> {
+  //     try {
+  //       this.logger.log(`📢 Iniciando notificações WhatsApp`);
+
+  //       this.logger.log(`📢 [NOTIFICATION] ========== INICIANDO ==========`);
+  //       this.logger.log(`📢 [NOTIFICATION] action: ${action}`);
+  //       this.logger.log(`📢 [NOTIFICATION] stage name: ${stage?.name}`);
+  //       this.logger.log(
+  //         `📢 [NOTIFICATION] stage allowedRole: ${stage?.allowedRole}`,
+  //       );
+  //       this.logger.log(`📢 [NOTIFICATION] companyId: ${companyId}`);
+
+  //       // =====================================================
+  //       // VALIDAR CARGO DA COLUNA
+  //       // =====================================================
+
+  //       if (
+  //         !stage.allowedRole ||
+  //         stage.allowedRole.trim() === '' ||
+  //         stage.allowedRole === 'all'
+  //       ) {
+  //         this.logger.log(`⚠️ Coluna sem cargo definido.`);
+
+  //         return;
+  //       }
+
+  //       const targetRoleName = stage.allowedRole.trim();
+
+  //       // =====================================================
+  //       // BUSCAR USUÁRIOS
+  //       // =====================================================
+
+  //       const usersToNotify = await this.prisma.user.findMany({
+  //         where: {
+  //           companyId,
+  //           status: 'ACTIVE',
+  //           contact: {
+  //             not: undefined,
+  //           },
+
+  //           OR: [
+  //             {
+  //               professionalRole: {
+  //                 name: {
+  //                   contains: targetRoleName,
+  //                   mode: 'insensitive',
+  //                 },
+  //               },
+  //             },
+
+  //             {
+  //               role: {
+  //                 in: ['MASTER', 'ADMIN'],
+  //               },
+  //             },
+  //           ],
+  //         },
+
+  //         include: {
+  //           professionalRole: {
+  //             select: {
+  //               name: true,
+  //             },
+  //           },
+  //         },
+  //       });
+
+  //       // =====================================================
+  //       // REMOVER DUPLICADOS
+  //       // =====================================================
+
+  //       const uniqueUsers = Array.from(
+  //         new Map(usersToNotify.map((u) => [u.id, u])).values(),
+  //       );
+
+  //       if (uniqueUsers.length === 0) {
+  //         this.logger.warn(`⚠️ Nenhum usuário encontrado.`);
+
+  //         return;
+  //       }
+
+  //       // =====================================================
+  //       // TEXTO
+  //       // =====================================================
+
+  //       const actionText = action === 'CREATED' ? 'criado' : 'movido';
+
+  //       const movementText =
+  //         action === 'MOVED' && previousStageName
+  //           ? `da coluna "${previousStageName}" `
+  //           : '';
+
+  //       const flowName = item.flow?.name || 'N/A';
+
+  //       // =====================================================
+  //       // ENVIAR
+  //       // =====================================================
+
+  //       for (const user of uniqueUsers) {
+  //         try {
+  //           if (!user.contact) continue;
+
+  //           let cleanedNumber = user.contact.replace(/\D/g, '');
+
+  //           if (!cleanedNumber.startsWith('55')) {
+  //             cleanedNumber = `55${cleanedNumber}`;
+  //           }
+
+  //           const message = `
+  // 📢 *ATUALIZAÇÃO NO KANBAN*
+
+  // 📦 *Produto:* ${item.title}
+  // 🏷️ *Referência:* ${item.productRef || 'N/A'}
+  // 🔢 *Quantidade:* ${item.quantity || 0}
+
+  // 📍 *Coluna:* ${stage.name}
+  // 📋 *Coleção:* ${flowName}
+
+  // 🔄 *Status:* Item foi ${actionText} ${movementText}para a coluna "${stage.name}"
+
+  // 👤 *Responsável:* ${performedBy?.name || 'Sistema'}
+
+  // 📅 *Data:* ${new Date().toLocaleString('pt-BR')}
+  //         `.trim();
+
+  //           await this.whatsappServiceNaoOficial.sendTextMessage(
+  //             cleanedNumber,
+  //             message,
+  //           );
+
+  // //           await this.whatsappServiceNaoOficial.sendTextMessageWithToken(
+  // //   cleanedNumber,
+  // //   message,
+  // //   token
+  // // );
+
+  //           this.logger.log(`✅ Enviado para ${user.name}`);
+
+  //           // Delay opcional
+  //           await new Promise((resolve) => setTimeout(resolve, 500));
+  //         } catch (error: any) {
+  //           this.logger.error(
+  //             `❌ Erro ao enviar para ${user.name}: ${error.message}`,
+  //           );
+  //         }
+  //       }
+
+  //       this.logger.log(`📢 Notificações finalizadas.`);
+  //     } catch (error: any) {
+  //       this.logger.error(error.message);
+  //     }
+  //   }
+
   private async sendWhatsAppNotificationByColumnRole(
     item: any,
     stage: any,
     companyId: string,
-    action: 'CREATED' | 'MOVED',
+    action: 'CREATED' | 'MOVED' | 'OVERDUE' | 'UPCOMING',
     previousStageName?: string,
     performedBy?: { id: string; name: string },
+    notificationType?: 'overdue' | 'upcoming',
   ): Promise<void> {
     try {
-      this.logger.log(`📢 Iniciando notificações WhatsApp`);
-
-      this.logger.log(`📢 [NOTIFICATION] ========== INICIANDO ==========`);
-      this.logger.log(`📢 [NOTIFICATION] action: ${action}`);
-      this.logger.log(`📢 [NOTIFICATION] stage name: ${stage?.name}`);
       this.logger.log(
-        `📢 [NOTIFICATION] stage allowedRole: ${stage?.allowedRole}`,
+        `📢 [WHATSAPP] =========================================`,
       );
-      this.logger.log(`📢 [NOTIFICATION] companyId: ${companyId}`);
+      this.logger.log(`📢 [WHATSAPP] Iniciando notificação - Tipo: ${action}`);
+      this.logger.log(`📢 [WHATSAPP] Company ID: ${companyId}`);
+      this.logger.log(`📢 [WHATSAPP] Item ID: ${item.id}`);
+      this.logger.log(`📢 [WHATSAPP] Item Title: ${item.title}`);
 
-      // =====================================================
-      // VALIDAR CARGO DA COLUNA
-      // =====================================================
+      // Usa o companyId recebido, não do CLS
+      this.logger.log(`📢 [WHATSAPP] Company ID: ${companyId}`);
 
-      if (
-        !stage.allowedRole ||
-        stage.allowedRole.trim() === '' ||
-        stage.allowedRole === 'all'
-      ) {
-        this.logger.log(`⚠️ Coluna sem cargo definido.`);
+      // Buscar o token de conexão da empresa
+      const whatsappConnection = await this.prisma.whatsAppConnection.findFirst(
+        {
+          where: {
+            companyId,
+            status: 'connected',
+          },
+        },
+      );
 
+      this.logger.log(
+        `📢 [WHATSAPP] Conexão encontrada: ${!!whatsappConnection}`,
+      );
+
+      if (!whatsappConnection) {
+        this.logger.warn(`⚠️ Empresa ${companyId} não tem WhatsApp conectado`);
+        this.logger.warn(`⚠️ Verifique se o status está como 'connected'`);
         return;
       }
 
-      const targetRoleName = stage.allowedRole.trim();
+      this.logger.log(
+        `📢 [WHATSAPP] Token encontrado: ${whatsappConnection.token.substring(0, 30)}...`,
+      );
 
-      // =====================================================
-      // BUSCAR USUÁRIOS
-      // =====================================================
+      // Lista de destinatários
+      let recipients: Array<{ id: string; name: string; contact: string }> = [];
 
-      const usersToNotify = await this.prisma.user.findMany({
-        where: {
-          companyId,
-          status: 'ACTIVE',
-          contact: {
-            not: undefined,
-          },
+      // =============================================================
+      // CASO 1: NOTIFICAÇÃO PARA RESPONSÁVEL ATRIBUÍDO
+      // =============================================================
+      if (action === 'CREATED' || action === 'MOVED') {
+        this.logger.log(`📢 [WHATSAPP] Buscando responsável para o item...`);
+        this.logger.log(`📢 [WHATSAPP] assignedToId: ${item.assignedToId}`);
 
-          OR: [
-            {
-              professionalRole: {
-                name: {
-                  contains: targetRoleName,
-                  mode: 'insensitive',
-                },
-              },
+        // Buscar o responsável atribuído ao item
+        if (item.assignedToId) {
+          const responsible = await this.prisma.user.findFirst({
+            where: {
+              id: item.assignedToId,
+              companyId,
+              status: 'ACTIVE',
+              contact: { not: undefined },
             },
-
-            {
-              role: {
-                in: ['MASTER', 'ADMIN'],
-              },
-            },
-          ],
-        },
-
-        include: {
-          professionalRole: {
             select: {
+              id: true,
               name: true,
+              contact: true,
             },
-          },
-        },
-      });
+          });
 
-      // =====================================================
-      // REMOVER DUPLICADOS
-      // =====================================================
+          this.logger.log(
+            `📢 [WHATSAPP] Responsável encontrado: ${JSON.stringify(responsible)}`,
+          );
 
-      const uniqueUsers = Array.from(
-        new Map(usersToNotify.map((u) => [u.id, u])).values(),
-      );
+          if (responsible?.contact) {
+            recipients.push({
+              id: responsible.id,
+              name: responsible.name,
+              contact: responsible.contact,
+            });
+            this.logger.log(
+              `✅ Responsável encontrado: ${responsible.name} - ${responsible.contact}`,
+            );
+          } else {
+            this.logger.log(`⚠️ Responsável ${item.assignedToId} sem contato`);
+          }
+        } else {
+          this.logger.log(`ℹ️ Item sem responsável atribuído`);
+        }
 
-      if (uniqueUsers.length === 0) {
-        this.logger.warn(`⚠️ Nenhum usuário encontrado.`);
-
-        return;
+        // Se não tem responsável, não envia notificação
+        if (recipients.length === 0) {
+          this.logger.log(`📢 Nenhum destinatário para notificação ${action}`);
+          return;
+        }
       }
 
-      // =====================================================
-      // TEXTO
-      // =====================================================
+      // =============================================================
+      // CASO 2: NOTIFICAÇÃO PARA ADMINS (ITENS ATRASADOS/PROXIMOS)
+      // =============================================================
+      if (action === 'OVERDUE' || action === 'UPCOMING') {
+        this.logger.log(`📢 [WHATSAPP] Buscando ADMINS para notificação...`);
 
-      const actionText = action === 'CREATED' ? 'criado' : 'movido';
+        // Buscar todos os ADMINS (MASTER, ADMIN) da empresa
+        const admins = await this.prisma.user.findMany({
+          where: {
+            companyId,
+            role: { in: ['MASTER', 'ADMIN'] },
+            status: 'ACTIVE',
+            contact: { not: undefined },
+          },
+          select: {
+            id: true,
+            name: true,
+            contact: true,
+            role: true,
+          },
+        });
 
-      const movementText =
-        action === 'MOVED' && previousStageName
-          ? `da coluna "${previousStageName}" `
-          : '';
+        this.logger.log(`📢 [WHATSAPP] ADMINS encontrados: ${admins.length}`);
 
+        recipients = admins.map((admin) => ({
+          id: admin.id,
+          name: admin.name,
+          contact: admin.contact!,
+        }));
+
+        if (recipients.length === 0) {
+          this.logger.warn(`⚠️ Nenhum ADMIN encontrado para notificação`);
+          return;
+        }
+      }
+
+      // =============================================================
+      // MONTAR MENSAGEM BASEADA NO TIPO
+      // =============================================================
+      let message = '';
       const flowName = item.flow?.name || 'N/A';
+      const today = new Date();
 
-      // =====================================================
-      // ENVIAR
-      // =====================================================
+      this.logger.log(`📢 [WHATSAPP] Montando mensagem para ação: ${action}`);
 
-      for (const user of uniqueUsers) {
-        try {
-          if (!user.contact) continue;
+      switch (action) {
+        case 'CREATED': {
+          message = `
+📢 *NOVO ITEM CRIADO!*
 
-          let cleanedNumber = user.contact.replace(/\D/g, '');
+📦 *Produto:* ${item.title}
+🏷️ *Referência:* ${item.productRef || 'N/A'}
+🔢 *Quantidade:* ${item.quantity || 0}
+📍 *Etapa:* ${stage?.name || 'N/A'}
+📋 *Coleção:* ${flowName}
 
-          if (!cleanedNumber.startsWith('55')) {
-            cleanedNumber = `55${cleanedNumber}`;
-          }
+👤 *Criado por:* ${performedBy?.name || 'Sistema'}
+📅 *Data:* ${new Date().toLocaleString('pt-BR')}
 
-          const message = `
-📢 *ATUALIZAÇÃO NO KANBAN*
+👉 *Você é o responsável por este item!*
+        `.trim();
+          break;
+        }
+
+        case 'MOVED': {
+          message = `
+🔄 *ITEM MOVIDO DE ETAPA!*
 
 📦 *Produto:* ${item.title}
 🏷️ *Referência:* ${item.productRef || 'N/A'}
 🔢 *Quantidade:* ${item.quantity || 0}
 
-📍 *Coluna:* ${stage.name}
+📍 *De:* ${previousStageName || 'Desconhecido'}
+📍 *Para:* ${stage?.name || 'N/A'}
 📋 *Coleção:* ${flowName}
 
-🔄 *Status:* Item foi ${actionText} ${movementText}para a coluna "${stage.name}"
-
-👤 *Responsável:* ${performedBy?.name || 'Sistema'}
-
+👤 *Movido por:* ${performedBy?.name || 'Sistema'}
 📅 *Data:* ${new Date().toLocaleString('pt-BR')}
+
+👉 *Você é o responsável por este item!*
         `.trim();
+          break;
+        }
 
-          await this.whatsappServiceNaoOficial.sendTextMessage(
-            cleanedNumber,
-            message,
+        case 'OVERDUE': {
+          const delayDays = Math.ceil(
+            (today.getTime() - new Date(item.dueDate).getTime()) /
+              (1000 * 60 * 60 * 24),
           );
+          message = `
+🚨 *ALERTA: ITEM ATRASADO!* 🚨
 
-          this.logger.log(`✅ Enviado para ${user.name}`);
+📦 *Produto:* ${item.title}
+🏷️ *Referência:* ${item.productRef || 'N/A'}
+🔢 *Quantidade:* ${item.quantity || 0}
+📍 *Etapa:* ${stage?.name || 'N/A'}
+📋 *Coleção:* ${flowName}
+👤 *Responsável:* ${item.assignedTo?.name || 'Não atribuído'}
 
-          // Delay opcional
-          await new Promise((resolve) => setTimeout(resolve, 500));
-        } catch (error: any) {
-          this.logger.error(
-            `❌ Erro ao enviar para ${user.name}: ${error.message}`,
+⏰ *Atraso:* ${delayDays} dia(s)
+📅 *Prazo original:* ${new Date(item.dueDate).toLocaleDateString('pt-BR')}
+
+⚠️ *Ação necessária:* Regularize este item imediatamente!
+        `.trim();
+          break;
+        }
+
+        case 'UPCOMING': {
+          const daysLeft = Math.ceil(
+            (new Date(item.dueDate).getTime() - today.getTime()) /
+              (1000 * 60 * 60 * 24),
           );
+          message = `
+⚠️ *ATENÇÃO: ITEM PRÓXIMO DO VENCIMENTO!* ⚠️
+
+📦 *Produto:* ${item.title}
+🏷️ *Referência:* ${item.productRef || 'N/A'}
+🔢 *Quantidade:* ${item.quantity || 0}
+📍 *Etapa:* ${stage?.name || 'N/A'}
+📋 *Coleção:* ${flowName}
+👤 *Responsável:* ${item.assignedTo?.name || 'Não atribuído'}
+
+⏰ *Vence em:* ${daysLeft} dia(s)
+📅 *Prazo:* ${new Date(item.dueDate).toLocaleDateString('pt-BR')}
+
+📌 *Ação necessária:* Acompanhe e priorize este item!
+        `.trim();
+          break;
         }
       }
 
-      this.logger.log(`📢 Notificações finalizadas.`);
+      message += `\n\n---\n*ELO PRODUTIVO* - Sistema de Gestão`;
+
+      this.logger.log(
+        `📢 [WHATSAPP] Mensagem montada (${message.length} caracteres)`,
+      );
+      this.logger.log(`📢 [WHATSAPP] Destinatários: ${recipients.length}`);
+
+      // =============================================================
+      // ENVIAR NOTIFICAÇÕES
+      // =============================================================
+      let successCount = 0;
+      let failCount = 0;
+
+      for (const recipient of recipients) {
+        const cleanedNumber = this.formatPhoneNumberForWhatsApp(
+          recipient.contact,
+        );
+        this.logger.log(
+          `📢 [WHATSAPP] Enviando para: ${recipient.name} - ${cleanedNumber}`,
+        );
+
+        try {
+          const result = await this.whatsappServiceNaoOficial.sendTextMessage(
+            cleanedNumber,
+            message,
+          );
+          successCount++;
+          this.logger.log(`✅ Notificação enviada para ${recipient.name}`);
+          this.logger.log(`📢 [WHATSAPP] Resposta: ${JSON.stringify(result)}`);
+        } catch (error: any) {
+          failCount++;
+          this.logger.error(
+            `❌ Falha para ${recipient.name}: ${error.message}`,
+          );
+          this.logger.error(
+            `❌ Detalhes: ${JSON.stringify(error.response?.data || {})}`,
+          );
+        }
+
+        await this.sleep(500);
+      }
+
+      this.logger.log(
+        `📢 [WHATSAPP] Resumo: ${successCount} enviadas, ${failCount} falhas`,
+      );
     } catch (error: any) {
-      this.logger.error(error.message);
+      this.logger.error(`❌ [WHATSAPP] Erro geral: ${error.message}`);
+      this.logger.error(error.stack);
     }
   }
+
+  // No FlowService, modificar o método de notificação
+  // private async sendWhatsAppNotificationByColumnRole(
+  //   item: any,
+  //   stage: any,
+  //   companyId: string,
+  //   action: 'CREATED' | 'MOVED',
+  //   previousStageName?: string,
+  //   performedBy?: { id: string; name: string },
+  // ): Promise<void> {
+  //   try {
+  //     this.logger.log(`📢 Iniciando notificações WhatsApp para empresa ${companyId}`);
+
+  //     // 🔥 1. BUSCAR O TOKEN DA EMPRESA NA TABELA whatsapp_connections
+  //     const whatsappConnection = await this.prisma.whatsapp_connections.findFirst({
+  //       where: {
+  //         company_id: companyId,
+  //         status: 'connect', // 🔥 Status ativo
+  //       },
+  //       orderBy: {
+  //         created_at: 'desc',
+  //       },
+  //     });
+
+  //     if (!whatsappConnection) {
+  //       this.logger.error(`❌ Empresa ${companyId} não tem WhatsApp conectado`);
+  //       this.logger.log(`⚠️ Nenhuma conexão encontrada com status 'connect'`);
+  //       return;
+  //     }
+
+  //     const token = whatsappConnection.token; // 🔥 Bearer token para API
+  //     this.logger.log(`✅ Token encontrado: ${token.substring(0, 30)}...`);
+  //     this.logger.log(`✅ Conexão: ${whatsappConnection.name}`);
+
+  //     // 🔥 2. VALIDAR SE A COLUNA TEM CARGO
+  //     if (!stage.allowedRole || stage.allowedRole.trim() === '' || stage.allowedRole === 'all') {
+  //       this.logger.log(`⚠️ Coluna "${stage.name}" sem cargo definido.`);
+  //       return;
+  //     }
+
+  //     const targetRoleName = stage.allowedRole.trim();
+
+  //     // 🔥 3. BUSCAR USUÁRIOS PARA NOTIFICAR
+  //     const usersToNotify = await this.prisma.user.findMany({
+  //       where: {
+  //         companyId,
+  //         status: 'ACTIVE',
+  //         contact: { not: undefined },
+  //         OR: [
+  //           {
+  //             professionalRole: {
+  //               name: {
+  //                 contains: targetRoleName,
+  //                 mode: 'insensitive',
+  //               },
+  //             },
+  //           },
+  //           {
+  //             role: {
+  //               in: ['MASTER', 'ADMIN'],
+  //             },
+  //           },
+  //         ],
+  //       },
+  //       include: {
+  //         professionalRole: {
+  //           select: { name: true },
+  //         },
+  //       },
+  //     });
+
+  //     const uniqueUsers = Array.from(
+  //       new Map(usersToNotify.map((u) => [u.id, u])).values(),
+  //     );
+
+  //     if (uniqueUsers.length === 0) {
+  //       this.logger.warn(`⚠️ Nenhum usuário encontrado com cargo "${targetRoleName}"`);
+  //       return;
+  //     }
+
+  //     // 🔥 4. MONTAR MENSAGEM
+  //     const actionText = action === 'CREATED' ? 'criado' : 'movido';
+  //     const movementText = action === 'MOVED' && previousStageName
+  //       ? `da coluna "${previousStageName}" `
+  //       : '';
+
+  //     const flowName = item.flow?.name || 'N/A';
+
+  //     // 🔥 5. ENVIAR MENSAGENS USANDO O TOKEN DA EMPRESA
+  //     let successCount = 0;
+  //     let failCount = 0;
+
+  //     for (const user of uniqueUsers) {
+  //       try {
+  //         if (!user.contact) {
+  //           this.logger.warn(`⚠️ Usuário ${user.name} não tem contato`);
+  //           continue;
+  //         }
+
+  //         let cleanedNumber = user.contact.replace(/\D/g, '');
+  //         if (!cleanedNumber.startsWith('55')) {
+  //           cleanedNumber = `55${cleanedNumber}`;
+  //         }
+
+  //         const message = `
+  // 📢 *ATUALIZAÇÃO NO KANBAN*
+
+  // 📦 *Produto:* ${item.title}
+  // 🏷️ *Referência:* ${item.productRef || 'N/A'}
+  // 🔢 *Quantidade:* ${item.quantity || 0}
+
+  // 📍 *Coluna:* ${stage.name}
+  // 📋 *Coleção:* ${flowName}
+
+  // 🔄 *Status:* Item foi ${actionText} ${movementText}para a coluna "${stage.name}"
+
+  // 👤 *Responsável:* ${performedBy?.name || 'Sistema'}
+
+  // 📅 *Data:* ${new Date().toLocaleString('pt-BR')}
+  //         `.trim();
+
+  //         // 🔥 ENVIAR USANDO O MÉTODO COM TOKEN
+  //         await this.whatsappServiceNaoOficial.sendTextMessageWithToken(
+  //           cleanedNumber,
+  //           message,
+  //           token, // ← PASSA O TOKEN DA EMPRESA
+  //         );
+
+  //         successCount++;
+  //         this.logger.log(`✅ Notificação enviada para ${user.name}`);
+
+  //         // Delay para não sobrecarregar
+  //         await new Promise((resolve) => setTimeout(resolve, 500));
+
+  //       } catch (error: any) {
+  //         failCount++;
+  //         this.logger.error(`❌ Erro ao enviar para ${user.name}: ${error.message}`);
+  //       }
+  //     }
+
+  //     this.logger.log(`📢 Resumo: ${successCount} enviadas, ${failCount} falhas`);
+
+  //   } catch (error: any) {
+  //     this.logger.error(`❌ Erro na notificação: ${error.message}`);
+  //     this.logger.error(error.stack);
+  //   }
+  // }
 
   async createFlowItem(flowId: string, userId: string, dto: CreateFlowItemDto) {
     const companyId = this.getCompanyIdFromContext();
@@ -2155,7 +2589,7 @@ export class FlowService {
         await this.invalidateFlowCache(companyId, flowId);
         return item;
       },
-      { timeout: 120000 },  
+      { timeout: 120000 },
     );
   }
 
@@ -5258,15 +5692,20 @@ export class FlowService {
       let totalUpcoming = 0;
       let totalNotificationsSent = 0;
 
-      for (const company of companies) {
+          for (const company of companies) {
+      // 🔥 CRÍTICO: Definir o companyId no CLS para cada empresa
+      await this.cls.run(async () => {
+        this.cls.set('tenantId', company.id);
+        
         const result = await this.processCompanyItemsByDeadline(
-          company.id,
-          company.notificationDays,
+          company.notificationDays
         );
+        
         totalOverdue += result.overdueCount;
         totalUpcoming += result.upcomingCount;
         totalNotificationsSent += result.notificationsSent;
-      }
+      });
+    }
 
       const duration = Date.now() - startTime;
       this.logger.log(
@@ -5280,101 +5719,284 @@ export class FlowService {
   /**
    * Processa itens de uma empresa específica (atrasados e próximos)
    */
-  private async processCompanyItemsByDeadline(
-    companyId: string,
-    notificationDays: number,
-  ) {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+//   private async processCompanyItemsByDeadline(
+//     companyId: string,
+//     notificationDays: number,
+//   ) {
+//     const today = new Date();
+//     today.setHours(0, 0, 0, 0);
 
-    // Data limite para itens próximos (hoje + notificationDays)
-    const upcomingLimitDate = new Date(today);
-    upcomingLimitDate.setDate(today.getDate() + notificationDays);
-    upcomingLimitDate.setHours(23, 59, 59, 999);
+//     // Data limite para itens próximos (hoje + notificationDays)
+//     const upcomingLimitDate = new Date(today);
+//     upcomingLimitDate.setDate(today.getDate() + notificationDays);
+//     upcomingLimitDate.setHours(23, 59, 59, 999);
 
-    // 🔥 1. BUSCAR ITENS ATRASADOS
-    const overdueItems = await this.prisma.flowItem.findMany({
-      where: {
-        companyId,
-        dueDate: { lt: today },
-        status: { not: 'CONCLUIDO' },
+//     // 🔥 1. BUSCAR ITENS ATRASADOS
+//     const overdueItems = await this.prisma.flowItem.findMany({
+//       where: {
+//         companyId,
+//         dueDate: { lt: today },
+//         status: { not: 'CONCLUIDO' },
+//       },
+//       include: {
+//         flow: { select: { id: true, name: true } },
+//         stage: { select: { id: true, name: true } },
+//         assignedTo: { select: { id: true, name: true, contact: true } },
+//       },
+//       orderBy: { dueDate: 'asc' },
+//     });
+
+//     // 🔥 2. BUSCAR ITENS PRÓXIMOS DO VENCIMENTO (exclui os já atrasados)
+//     const upcomingItems = await this.prisma.flowItem.findMany({
+//       where: {
+//         companyId,
+//         dueDate: {
+//           gte: today,
+//           lte: upcomingLimitDate,
+//         },
+//         status: { not: 'CONCLUIDO' },
+//       },
+//       include: {
+//         flow: { select: { id: true, name: true } },
+//         stage: { select: { id: true, name: true } },
+//         assignedTo: { select: { id: true, name: true, contact: true } },
+//       },
+//       orderBy: { dueDate: 'asc' },
+//     });
+
+//     this.logger.log(
+//       `📋 Empresa ${companyId}: ${overdueItems.length} atrasados, ${upcomingItems.length} próximos (antec: ${notificationDays}d)`,
+//     );
+
+//     // Se não tem nada, retorna
+//     if (overdueItems.length === 0 && upcomingItems.length === 0) {
+//       return { overdueCount: 0, upcomingCount: 0, notificationsSent: 0 };
+//     }
+
+//     // Buscar ADMINs da empresa (MASTER e ADMIN)
+//     const admins = await this.prisma.user.findMany({
+//       where: {
+//         companyId,
+//         role: { in: ['MASTER', 'ADMIN'] },
+//         status: 'ACTIVE',
+//         contact: { not: undefined },
+//       },
+//       select: {
+//         id: true,
+//         name: true,
+//         contact: true,
+//         role: true,
+//       },
+//     });
+
+//     if (admins.length === 0) {
+//       this.logger.warn(`⚠️ Nenhum ADMIN com contato na empresa ${companyId}`);
+//       return {
+//         overdueCount: overdueItems.length,
+//         upcomingCount: upcomingItems.length,
+//         notificationsSent: 0,
+//       };
+//     }
+
+//     // Construir mensagens separadas
+//     let message = '';
+
+//     // 🔥 SEÇÃO DE ITENS ATRASADOS
+//     if (overdueItems.length > 0) {
+//       const overdueList = overdueItems
+//         .map((item) => {
+//           const delayDays = Math.ceil(
+//             (today.getTime() - new Date(item.dueDate!).getTime()) /
+//               (1000 * 60 * 60 * 24),
+//           );
+//           return `📦 *${item.title}*\n   🔢 Ref: ${item.productRef}\n   📍 Etapa: ${item.stage?.name}\n   📅 Atraso: ${delayDays} dias\n   👤 Resp: ${item.assignedTo?.name || 'Não atribuído'}`;
+//         })
+//         .join('\n\n');
+
+//       message += `
+// 🚨 *ALERTA: ITENS ATRASADOS!* 🚨
+
+// 📋 *Relatório de itens com prazo vencido:*
+
+// ${overdueList}
+
+// 📊 *Total de itens atrasados:* ${overdueItems.length}
+
+// ⚠️ *Ação necessária:* Acesse o sistema e regularize os prazos.
+
+// ---
+// `;
+//     }
+
+//     // 🔥 SEÇÃO DE ITENS PRÓXIMOS DO VENCIMENTO
+//     if (upcomingItems.length > 0) {
+//       const upcomingList = upcomingItems
+//         .map((item) => {
+//           const dueDate = new Date(item.dueDate!);
+//           const daysLeft = Math.ceil(
+//             (dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
+//           );
+//           return `📦 *${item.title}*\n   🔢 Ref: ${item.productRef}\n   📍 Etapa: ${item.stage?.name}\n   📅 Vence em: ${daysLeft} dia(s)\n   👤 Resp: ${item.assignedTo?.name || 'Não atribuído'}`;
+//         })
+//         .join('\n\n');
+
+//       message += `
+// ⚠️ *ATENÇÃO: ITENS PRÓXIMOS DO VENCIMENTO!* ⚠️
+
+// 📋 *Relatório de itens que vencem nos próximos ${notificationDays} dias:*
+
+// ${upcomingList}
+
+// 📊 *Total de itens próximos do vencimento:* ${upcomingItems.length}
+
+// ⏰ *Prazo limite:* ${upcomingLimitDate.toLocaleDateString('pt-BR')}
+
+// 📌 *Ação necessária:* Acompanhe e priorize estes itens.
+
+// ---
+// `;
+//     }
+
+//     message += `
+// *ELO PRODUTIVO* - Sistema de Gestão
+//   `.trim();
+
+//     // Enviar para todos os ADMINs
+//     let notificationsSent = 0;
+//     for (const admin of admins) {
+//       const cleanedNumber = this.formatPhoneNumberForWhatsApp(admin.contact!);
+//       try {
+//         await this.whatsappServiceNaoOficial.sendTextMessage(
+//           cleanedNumber,
+//           message,
+//         );
+
+//         //         await this.whatsappServiceNaoOficial.sendTextMessageWithToken(
+//         //   cleanedNumber,
+//         //   message,
+//         //   token
+//         // );
+//         notificationsSent++;
+//         this.logger.log(
+//           `✅ Notificação enviada para ${admin.name} (${admin.role})`,
+//         );
+//       } catch (error: any) {
+//         this.logger.error(`❌ Falha para ${admin.name}: ${error.message}`);
+//       }
+//       await this.sleep(500);
+//     }
+
+//     return {
+//       overdueCount: overdueItems.length,
+//       upcomingCount: upcomingItems.length,
+//       notificationsSent,
+//     };
+//   }
+
+/**
+ * Processa itens de uma empresa específica (atrasados e próximos)
+ * 🔥 IMPORTANTE: O companyId deve estar definido no CLS antes de chamar este método
+ */
+private async processCompanyItemsByDeadline(notificationDays: number) {
+  // 🔥 PEGA O COMPANYID DO CLS (NÃO RECEBE COMO PARÂMETRO)
+  const companyId = this.getCompanyIdFromContext();
+  
+  if (!companyId) {
+    this.logger.error('❌ companyId não encontrado no CLS');
+    return { overdueCount: 0, upcomingCount: 0, notificationsSent: 0 };
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  // Data limite para itens próximos (hoje + notificationDays)
+  const upcomingLimitDate = new Date(today);
+  upcomingLimitDate.setDate(today.getDate() + notificationDays);
+  upcomingLimitDate.setHours(23, 59, 59, 999);
+
+  // 🔥 1. BUSCAR ITENS ATRASADOS
+  const overdueItems = await this.prisma.flowItem.findMany({
+    where: {
+      companyId,
+      dueDate: { lt: today },
+      status: { not: 'CONCLUIDO' },
+    },
+    include: {
+      flow: { select: { id: true, name: true } },
+      stage: { select: { id: true, name: true } },
+      assignedTo: { select: { id: true, name: true, contact: true } },
+    },
+    orderBy: { dueDate: 'asc' },
+  });
+
+  // 🔥 2. BUSCAR ITENS PRÓXIMOS DO VENCIMENTO (exclui os já atrasados)
+  const upcomingItems = await this.prisma.flowItem.findMany({
+    where: {
+      companyId,
+      dueDate: {
+        gte: today,
+        lte: upcomingLimitDate,
       },
-      include: {
-        flow: { select: { id: true, name: true } },
-        stage: { select: { id: true, name: true } },
-        assignedTo: { select: { id: true, name: true, contact: true } },
-      },
-      orderBy: { dueDate: 'asc' },
-    });
+      status: { not: 'CONCLUIDO' },
+    },
+    include: {
+      flow: { select: { id: true, name: true } },
+      stage: { select: { id: true, name: true } },
+      assignedTo: { select: { id: true, name: true, contact: true } },
+    },
+    orderBy: { dueDate: 'asc' },
+  });
 
-    // 🔥 2. BUSCAR ITENS PRÓXIMOS DO VENCIMENTO (exclui os já atrasados)
-    const upcomingItems = await this.prisma.flowItem.findMany({
-      where: {
-        companyId,
-        dueDate: {
-          gte: today,
-          lte: upcomingLimitDate,
-        },
-        status: { not: 'CONCLUIDO' },
-      },
-      include: {
-        flow: { select: { id: true, name: true } },
-        stage: { select: { id: true, name: true } },
-        assignedTo: { select: { id: true, name: true, contact: true } },
-      },
-      orderBy: { dueDate: 'asc' },
-    });
+  this.logger.log(
+    `📋 Empresa ${companyId}: ${overdueItems.length} atrasados, ${upcomingItems.length} próximos (antec: ${notificationDays}d)`,
+  );
 
-    this.logger.log(
-      `📋 Empresa ${companyId}: ${overdueItems.length} atrasados, ${upcomingItems.length} próximos (antec: ${notificationDays}d)`,
-    );
+  // Se não tem nada, retorna
+  if (overdueItems.length === 0 && upcomingItems.length === 0) {
+    return { overdueCount: 0, upcomingCount: 0, notificationsSent: 0 };
+  }
 
-    // Se não tem nada, retorna
-    if (overdueItems.length === 0 && upcomingItems.length === 0) {
-      return { overdueCount: 0, upcomingCount: 0, notificationsSent: 0 };
-    }
+  // Buscar ADMINs da empresa (MASTER e ADMIN)
+  const admins = await this.prisma.user.findMany({
+    where: {
+      companyId,
+      role: { in: ['MASTER', 'ADMIN'] },
+      status: 'ACTIVE',
+      contact: { not: undefined },
+    },
+    select: {
+      id: true,
+      name: true,
+      contact: true,
+      role: true,
+    },
+  });
 
-    // Buscar ADMINs da empresa (MASTER e ADMIN)
-    const admins = await this.prisma.user.findMany({
-      where: {
-        companyId,
-        role: { in: ['MASTER', 'ADMIN'] },
-        status: 'ACTIVE',
-        contact: { not: undefined },
-      },
-      select: {
-        id: true,
-        name: true,
-        contact: true,
-        role: true,
-      },
-    });
+  if (admins.length === 0) {
+    this.logger.warn(`⚠️ Nenhum ADMIN com contato na empresa ${companyId}`);
+    return {
+      overdueCount: overdueItems.length,
+      upcomingCount: upcomingItems.length,
+      notificationsSent: 0,
+    };
+  }
 
-    if (admins.length === 0) {
-      this.logger.warn(`⚠️ Nenhum ADMIN com contato na empresa ${companyId}`);
-      return {
-        overdueCount: overdueItems.length,
-        upcomingCount: upcomingItems.length,
-        notificationsSent: 0,
-      };
-    }
+  // Construir mensagens separadas
+  let message = '';
 
-    // Construir mensagens separadas
-    let message = '';
+  // 🔥 SEÇÃO DE ITENS ATRASADOS
+  if (overdueItems.length > 0) {
+    const overdueList = overdueItems
+      .map((item) => {
+        const delayDays = Math.ceil(
+          (today.getTime() - new Date(item.dueDate!).getTime()) /
+            (1000 * 60 * 60 * 24),
+        );
+        return `📦 *${item.title}*\n   🔢 Ref: ${item.productRef}\n   📍 Etapa: ${item.stage?.name}\n   📅 Atraso: ${delayDays} dias\n   👤 Resp: ${item.assignedTo?.name || 'Não atribuído'}`;
+      })
+      .join('\n\n');
 
-    // 🔥 SEÇÃO DE ITENS ATRASADOS
-    if (overdueItems.length > 0) {
-      const overdueList = overdueItems
-        .map((item) => {
-          const delayDays = Math.ceil(
-            (today.getTime() - new Date(item.dueDate!).getTime()) /
-              (1000 * 60 * 60 * 24),
-          );
-          return `📦 *${item.title}*\n   🔢 Ref: ${item.productRef}\n   📍 Etapa: ${item.stage?.name}\n   📅 Atraso: ${delayDays} dias\n   👤 Resp: ${item.assignedTo?.name || 'Não atribuído'}`;
-        })
-        .join('\n\n');
-
-      message += `
+    message += `
 🚨 *ALERTA: ITENS ATRASADOS!* 🚨
 
 📋 *Relatório de itens com prazo vencido:*
@@ -5387,21 +6009,21 @@ ${overdueList}
 
 ---
 `;
-    }
+  }
 
-    // 🔥 SEÇÃO DE ITENS PRÓXIMOS DO VENCIMENTO
-    if (upcomingItems.length > 0) {
-      const upcomingList = upcomingItems
-        .map((item) => {
-          const dueDate = new Date(item.dueDate!);
-          const daysLeft = Math.ceil(
-            (dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
-          );
-          return `📦 *${item.title}*\n   🔢 Ref: ${item.productRef}\n   📍 Etapa: ${item.stage?.name}\n   📅 Vence em: ${daysLeft} dia(s)\n   👤 Resp: ${item.assignedTo?.name || 'Não atribuído'}`;
-        })
-        .join('\n\n');
+  // 🔥 SEÇÃO DE ITENS PRÓXIMOS DO VENCIMENTO
+  if (upcomingItems.length > 0) {
+    const upcomingList = upcomingItems
+      .map((item) => {
+        const dueDate = new Date(item.dueDate!);
+        const daysLeft = Math.ceil(
+          (dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
+        );
+        return `📦 *${item.title}*\n   🔢 Ref: ${item.productRef}\n   📍 Etapa: ${item.stage?.name}\n   📅 Vence em: ${daysLeft} dia(s)\n   👤 Resp: ${item.assignedTo?.name || 'Não atribuído'}`;
+      })
+      .join('\n\n');
 
-      message += `
+    message += `
 ⚠️ *ATENÇÃO: ITENS PRÓXIMOS DO VENCIMENTO!* ⚠️
 
 📋 *Relatório de itens que vencem nos próximos ${notificationDays} dias:*
@@ -5416,37 +6038,39 @@ ${upcomingList}
 
 ---
 `;
-    }
+  }
 
-    message += `
+  message += `
 *ELO PRODUTIVO* - Sistema de Gestão
   `.trim();
 
-    // Enviar para todos os ADMINs
-    let notificationsSent = 0;
-    for (const admin of admins) {
-      const cleanedNumber = this.formatPhoneNumberForWhatsApp(admin.contact!);
-      try {
-        await this.whatsappServiceNaoOficial.sendTextMessage(
-          cleanedNumber,
-          message,
-        );
-        notificationsSent++;
-        this.logger.log(
-          `✅ Notificação enviada para ${admin.name} (${admin.role})`,
-        );
-      } catch (error: any) {
-        this.logger.error(`❌ Falha para ${admin.name}: ${error.message}`);
-      }
-      await this.sleep(500);
-    }
+  // Enviar para todos os ADMINs
+  let notificationsSent = 0;
+  for (const admin of admins) {
+    const cleanedNumber = this.formatPhoneNumberForWhatsApp(admin.contact!);
+    try {
+      // 🔥 O WhatsappService vai conseguir pegar o companyId do CLS agora!
+      await this.whatsappServiceNaoOficial.sendTextMessage(
+        cleanedNumber,
+        message,
+      );
 
-    return {
-      overdueCount: overdueItems.length,
-      upcomingCount: upcomingItems.length,
-      notificationsSent,
-    };
+      notificationsSent++;
+      this.logger.log(
+        `✅ Notificação enviada para ${admin.name} (${admin.role})`,
+      );
+    } catch (error: any) {
+      this.logger.error(`❌ Falha para ${admin.name}: ${error.message}`);
+    }
+    await this.sleep(500);
   }
+
+  return {
+    overdueCount: overdueItems.length,
+    upcomingCount: upcomingItems.length,
+    notificationsSent,
+  };
+}
 
   /**
    * Formata número de telefone para WhatsApp
