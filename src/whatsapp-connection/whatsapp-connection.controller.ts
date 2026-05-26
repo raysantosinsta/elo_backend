@@ -111,9 +111,27 @@ export class WhatsAppConnectionController {
     return this.whatsappService.disconnectInstance();
   }
 
+  // src/whatsapp-connection/whatsapp-connection.controller.ts
+
   @Delete('instance/:id')
   async deleteInstance(@Param('id') id: string) {
     console.log(`🗑️ Recebendo requisição para deletar instância ID: ${id}`);
-    return this.whatsappService.deleteInstance(parseInt(id));
+
+    try {
+      const result = await this.whatsappService.deleteInstance(parseInt(id));
+
+      // Retorna sempre sucesso se chegou aqui
+      return {
+        success: true,
+        message: result.message,
+        data: result,
+      };
+    } catch (error: any) {
+      // Só cai aqui se realmente falhou (erro no banco local)
+      console.error('❌ Erro fatal ao deletar instância:', error.message);
+      throw new BadRequestException(
+        error.message || 'Erro ao deletar instância',
+      );
+    }
   }
 }

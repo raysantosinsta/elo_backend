@@ -242,9 +242,6 @@ export class WhatsAppConnectionService {
     }
   }
 
-  // async getQRCode(instanceId: number) {
-  //   this.logger.log(`📱 Buscando QR Code para instância ${instanceId}...`);
-
   //   try {
   //     // Aguarda 1 segundo para garantir que a instância foi criada
   //     await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -314,11 +311,12 @@ export class WhatsAppConnectionService {
   // }
   // src/whatsapp-connection/whatsapp-connection.service.ts
   // src/whatsapp-connection/whatsapp-connection.service.ts
+  // src/whatsapp-connection/whatsapp-connection.service.ts
+
   async getQRCode(instanceId: number) {
     this.logger.log(`📱 Buscando QR Code para instância ${instanceId}...`);
 
     try {
-      // Busca diretamente na API sem verificar banco local primeiro
       const response = await this.makeRequest<any>(
         'get',
         `/whatsapp/${instanceId}`,
@@ -328,7 +326,6 @@ export class WhatsAppConnectionService {
         `✅ Resposta: status=${response.status}, temQRCode=${!!response.qrcode}`,
       );
 
-      // Se tem QR Code, retorna
       if (response.qrcode) {
         return {
           qrcode: response.qrcode,
@@ -337,7 +334,6 @@ export class WhatsAppConnectionService {
         };
       }
 
-      // Se não tem QR Code mas está conectado
       if (response.status === 'CONNECTED') {
         return {
           qrcode: null,
@@ -346,7 +342,6 @@ export class WhatsAppConnectionService {
         };
       }
 
-      // Se está em qrcode mas sem qrcode, tenta novamente depois
       if (response.status === 'qrcode' && !response.qrcode) {
         throw new Error('QR Code ainda não gerado');
       }
@@ -359,10 +354,34 @@ export class WhatsAppConnectionService {
     } catch (error: any) {
       this.logger.error(`❌ Erro: ${error.message}`);
 
-      // Se for 404, a instância pode não existir ainda
+      // 🔥 TRATAMENTO ESPECÍFICO PARA ERRO 400 COM MENSAGEM "Não é possível acessar registros de outra empresa"
+      if (error.response?.status === 400) {
+        const errorMsg = error.response?.data?.error || '';
+
+        if (
+          errorMsg.includes('Não é possível acessar registros de outra empresa')
+        ) {
+          this.logger.warn(
+            `⚠️ Instância ${instanceId} pertence a outra empresa. Deletando referência local...`,
+          );
+
+          // Deleta a referência local já que não podemos acessar
+          const companyId = this.getCompanyId();
+          await this.prisma.whatsAppConnection
+            .delete({
+              where: { companyId },
+            })
+            .catch(() => {});
+
+          throw new BadRequestException(
+            'Esta instância não pertence à sua empresa. Por favor, crie uma nova conexão.',
+          );
+        }
+      }
+
       if (error.response?.status === 404) {
         throw new BadRequestException(
-          'Instância ainda não disponível, aguarde alguns segundos',
+          'Instância não encontrada. Por favor, crie uma nova conexão.',
         );
       }
 
@@ -510,28 +529,47 @@ export class WhatsAppConnectionService {
     }
   }
 
-  // src/whatsapp-connection/whatsapp-connection.service.ts
   async deleteInstance(instanceId: number) {
     this.logger.log(`🗑️ Deletando instância ${instanceId}...`);
 
+    let apiError: any = null;
+    let deletedFromApi = false;
+
     try {
-      // Primeiro, tenta buscar a instância na API
       const instance = await this.makeRequest<any>(
         'get',
         `/whatsapp/${instanceId}`,
       );
 
-      if (!instance) {
-        this.logger.warn(`⚠️ Instância ${instanceId} não encontrada na API`);
-      } else {
-        // Tenta deletar da API
+      if (instance) {
         await this.makeRequest<any>('delete', `/whatsapp/${instanceId}`);
+        deletedFromApi = true;
         this.logger.log(
           `✅ Instância ${instanceId} deletada da API com sucesso`,
         );
       }
+    } catch (error: any) {
+      apiError = error;
 
-      // Também remove do banco local se existir
+      // 🔥 Verifica se o erro é de acesso negado (instância de outra empresa)
+      if (error.response?.status === 400) {
+        const errorMsg = error.response?.data?.error || '';
+        if (
+          errorMsg.includes('Não é possível acessar registros de outra empresa')
+        ) {
+          this.logger.warn(
+            `⚠️ Instância ${instanceId} pertence a outra empresa. Apenas removendo referência local.`,
+          );
+          // Não consideramos como erro, apenas continuamos para deletar do banco local
+          apiError = null;
+        }
+      } else {
+        this.logger.warn(`⚠️ Erro na API (continuando): ${error.message}`);
+      }
+    }
+
+    // Sempre tenta deletar do banco local
+    try {
       const companyId = this.getCompanyId();
       const localInstance = await this.prisma.whatsAppConnection.findUnique({
         where: { companyId },
@@ -543,43 +581,24 @@ export class WhatsAppConnectionService {
         });
         this.logger.log(`✅ Instância removida do banco local`);
       }
-
-      return {
-        message: 'Instância deletada com sucesso',
-        instanceId: instanceId,
-      };
     } catch (error: any) {
-      this.logger.error(`❌ Erro ao deletar: ${error.message}`);
-
-      if (error.response) {
-        this.logger.error(`Status da API: ${error.response.status}`);
-        this.logger.error(
-          `Resposta da API: ${JSON.stringify(error.response.data)}`,
-        );
-      }
-
-      // Mesmo com erro, tenta remover do banco local
-      try {
-        const companyId = this.getCompanyId();
-        await this.prisma.whatsAppConnection.delete({
-          where: { companyId },
-        });
-        this.logger.log(
-          `✅ Instância removida do banco local mesmo com erro na API`,
-        );
-        return {
-          message: 'Instância removida localmente, mas houve erro na API',
-          instanceId: instanceId,
-        };
-      } catch (e: any) {
-        this.logger.error(
-          `❌ Erro também ao remover do banco local e: ${e.message}`,
-        );
-      }
-
-      throw new BadRequestException(
-        error.response?.data?.message || 'Erro ao deletar instância',
-      );
+      this.logger.error(`❌ Erro ao remover do banco local: ${error.message}`);
+      throw new BadRequestException('Erro ao remover instância do banco local');
     }
+
+    // Sucesso total ou parcial
+    if (!deletedFromApi && apiError) {
+      return {
+        message: 'Instância removida localmente, mas houve erro na API.',
+        instanceId: instanceId,
+        partialSuccess: true,
+      };
+    }
+
+    return {
+      message: 'Instância deletada com sucesso',
+      instanceId: instanceId,
+      success: true,
+    };
   }
 }
