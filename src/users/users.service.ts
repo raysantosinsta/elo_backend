@@ -22,6 +22,7 @@ import { Prisma, SimpleStatus, User, UserRole } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { ClsService } from 'nestjs-cls';
 import { PrismaService } from '../prisma/prisma.service';
+import { MailService } from '../mail/mail.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 
@@ -34,6 +35,7 @@ export class UsersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly cls: ClsService,
+    private readonly mailService: MailService, // 🔥 INJETADO
   ) {}
 
   /**
@@ -41,6 +43,18 @@ export class UsersService {
    */
   private get db() {
     return this.prisma.extended;
+  }
+
+  /**
+   * 🔥 Gera senha temporária aleatória
+   */
+  private generateTemporaryPassword(): string {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    let password = '';
+    for (let i = 0; i < 8; i++) {
+      password += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return password;
   }
 
   // ===========================================================================
@@ -55,13 +69,15 @@ export class UsersService {
   // ============================================================================
 
   public async createUser(data: CreateUserDto): Promise<User> {
-    const { password, ...rest } = data;
+    const { password: providedPassword, ...rest } = data;
     const isMaster = this.cls.get<boolean>('isMaster');
     const tenantId = this.cls.get<string>('tenantId');
 
     this.logger.log(`Iniciando criação de usuário: ${rest.email}`);
 
-    const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
+    // 🔥 Gera senha temporária se não veio no DTO
+    const temporaryPassword = providedPassword || this.generateTemporaryPassword();
+    const hashedPassword = await bcrypt.hash(temporaryPassword, SALT_ROUNDS);
 
     let targetCompanyId = tenantId;
     let targetRole: UserRole;
@@ -69,7 +85,7 @@ export class UsersService {
     // 🔥 REGRA CORRIGIDA
     if (isMaster) {
       // MASTER sempre cria ADMIN (a não ser que explicitamente informe outra role)
-      targetRole = data.role || UserRole.ADMIN; // 🔥 FIX: Padrão ADMIN
+      targetRole = data.role || UserRole.ADMIN;
       if (data.companyId) targetCompanyId = data.companyId;
     } else {
       // ADMIN sempre cria EMPLOYER
@@ -152,6 +168,21 @@ export class UsersService {
 
       this.logger.log(`✅ Usuário criado com sucesso: ${newUser.id}`);
 
+      // 🔥 ENVIA E-MAIL DE BOAS-VINDAS
+      try {
+        await this.mailService.sendWelcomeEmail(
+          newUser.email,
+          newUser.name,
+          temporaryPassword, // Envia a senha original (não o hash)
+        );
+        this.logger.log(`📧 E-mail de boas-vindas enviado para ${newUser.email}`);
+      } catch (emailError: any) {
+        this.logger.error(
+          `❌ Erro ao enviar e-mail de boas-vindas para ${newUser.email}: ${emailError.message}`,
+        );
+        // Não bloqueia a criação do usuário se o e-mail falhar
+      }
+
       return newUser;
     } catch (error: any) {
       if (error.code === 'P2002') {
@@ -226,7 +257,7 @@ export class UsersService {
         const roleFound = await this.prisma.companyRole.findFirst({
           where: {
             id: finalProfessionalRoleId,
-            companyId: companyId, // 🔥 Agora companyId é garantido como string
+            companyId: companyId,
           },
           select: { name: true },
         });
@@ -252,7 +283,7 @@ export class UsersService {
 
         const companyRoleFound = await this.prisma.companyRole.findFirst({
           where: {
-            companyId: companyId, // 🔥 Agora companyId é garantido como string
+            companyId: companyId,
             name: {
               equals: professionalRole,
               mode: 'insensitive',
@@ -364,12 +395,10 @@ export class UsersService {
     // =========================================================================
     const formattedUser = {
       ...updatedUser,
-      // Prioriza professionalRoleName, fallback para professionalRole.name
       professionalRole:
         updatedUser.professionalRoleName ||
         updatedUser.professionalRole?.name ||
         null,
-      // Remove campos aninhados que podem causar confusão
       professionalRoleName: undefined,
     };
 
@@ -406,7 +435,7 @@ export class UsersService {
         },
         status: true,
         role: true,
-        companyId: true, // 🔥 GARANTIR QUE VENHA companyId
+        companyId: true,
         company: { select: { id: true, name: true } },
         companyRole: {
           select: { id: true, name: true, level: true, description: true },
@@ -427,12 +456,10 @@ export class UsersService {
       throw new NotFoundException('Usuário não encontrado ou acesso negado.');
     }
 
-    // 🔥 Garantir que companyId não seja undefined
     if (!user.companyId) {
       throw new BadRequestException('Usuário não está vinculado a uma empresa');
     }
 
-    // 🔥 Transformar para o frontend
     return {
       ...user,
       professionalRole:
@@ -457,7 +484,6 @@ export class UsersService {
 
     const where: any = { ...filters };
 
-    // 🔥 CORREÇÃO: Filtrar pelo nome do cargo (professionalRoleName)
     if (filters.professionalRole) {
       where.professionalRoleName = {
         contains: filters.professionalRole,
@@ -476,7 +502,6 @@ export class UsersService {
 
     this.logger.log(`🔍 findAll - where:`, where);
 
-    // 🔥 USAR this.prisma DIRETAMENTE (não this.db) para garantir o include
     const [total, data] = await Promise.all([
       this.prisma.user.count({ where }),
       this.prisma.user.findMany({
@@ -490,7 +515,7 @@ export class UsersService {
           email: true,
           contact: true,
           document: true,
-          professionalRoleName: true, // 🔥 INCLUIR este campo
+          professionalRoleName: true,
           professionalRole: {
             select: {
               id: true,
@@ -515,7 +540,6 @@ export class UsersService {
 
     this.logger.log(`📦 Total de usuários encontrados: ${data.length}`);
 
-    // 🔥 Transformar para o frontend receber professionalRole como string
     const formattedData = data.map((user) => ({
       ...user,
       professionalRole:
@@ -543,7 +567,7 @@ export class UsersService {
         name: true,
         email: true,
         contact: true,
-        professionalRoleName: true, // 🔥 INCLUIR
+        professionalRoleName: true,
         professionalRole: {
           select: { name: true },
         },
@@ -551,7 +575,6 @@ export class UsersService {
       },
     });
 
-    // 🔥 Transformar para string
     return users.map((user) => ({
       ...user,
       professionalRole:
@@ -573,8 +596,6 @@ export class UsersService {
       where.companyId = tenantId;
     }
 
-    // 🔥 CORREÇÃO: Buscar pelo campo professionalRoleName (texto direto)
-    // E também pelo professionalRoleId (relacionamento)
     const users = await this.db.user.findMany({
       where: {
         ...where,
@@ -628,13 +649,11 @@ export class UsersService {
       `Encontrados ${users.length} usuários com o cargo ${professionalRole}`,
     );
 
-    // 🔥 Transformar para manter compatibilidade com o frontend
     return users.map((user) => ({
       id: user.id,
       name: user.name,
       email: user.email,
       contact: user.contact,
-      // Prioriza professionalRoleName
       professionalRole:
         user.professionalRoleName || user.professionalRole?.name || null,
       status: user.status,
@@ -667,7 +686,6 @@ export class UsersService {
     const tenantId = this.cls.get<string>('tenantId');
     const isMaster = this.cls.get<boolean>('isMaster');
 
-    // Busca cargos únicos dos usuários da empresa
     const users = await this.prisma.user.findMany({
       where: isMaster ? {} : { companyId: tenantId },
       select: {
@@ -680,7 +698,6 @@ export class UsersService {
       .map((u) => u.professionalRoleId)
       .filter((role): role is string => role !== null && role !== '');
 
-    // Ordena alfabeticamente
     roles.sort((a, b) => a.localeCompare(b, 'pt-BR'));
 
     this.logger.log(

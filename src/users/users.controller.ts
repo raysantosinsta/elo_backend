@@ -1,4 +1,6 @@
 /* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/require-await */
@@ -18,6 +20,7 @@ import {
   Query,
   UseGuards,
   UseInterceptors,
+  Req,
 } from '@nestjs/common';
 import { SimpleStatus, UserRole } from '@prisma/client';
 import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
@@ -37,8 +40,20 @@ export class UsersController {
   // --- WRITE OPERATIONS ---
   @Post()
   @Roles(UserRole.MASTER, UserRole.ADMIN)
-  create(@Body() createUserDto: CreateUserDto) {
-    return this.usersService.createUser(createUserDto);
+  async create(@Body() createUserDto: CreateUserDto, @Req() req: any) {
+    // 🔥 Adiciona o ID do usuário que está criando
+    const payload = {
+      ...createUserDto,
+      userCreateId: req.user.id,
+    };
+    
+    const result = await this.usersService.createUser(payload);
+    
+    return {
+      success: true,
+      message: 'Usuário criado com sucesso!',
+      data: result,
+    };
   }
 
   @Patch(':id')
@@ -60,7 +75,7 @@ export class UsersController {
     @Param('status') status: SimpleStatus,
   ) {
     if (!Object.values(SimpleStatus).includes(status)) {
-      throw new Error('Status inválido');
+      throw new BadRequestException('Status inválido');
     }
     return this.usersService.updateUser({
       id,
@@ -75,7 +90,6 @@ export class UsersController {
   }
 
   // --- READ OPERATIONS ---
-
   @Get()
   @Roles(UserRole.MASTER, UserRole.ADMIN, UserRole.EMPLOYER)
   findAll(
@@ -84,13 +98,13 @@ export class UsersController {
     @Query('companyId') companyId?: string,
     @Query('status') status?: SimpleStatus,
     @Query('role') role?: UserRole,
-    @Query('professionalRole') professionalRole?: string, // 🔥 NOVO: Filtro por cargo profissional
+    @Query('professionalRole') professionalRole?: string,
   ) {
     return this.usersService.findAll(page, limit, {
       status,
       role,
       companyId,
-      professionalRole, // 🔥 Passa o filtro
+      professionalRole,
     });
   }
 

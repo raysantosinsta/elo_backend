@@ -12,3 +12,8 @@ npx prisma migrate diff \
 
    npx prisma generate
 
+   testar notificao proximosa vencer e itens atrasados
+
+   curl -X POST http://localhost:3000/flow/test-overdue-notification \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0N2U5YjJkMS0xNDg3LTQxMDktODAyMy1jN2Y5M2MyMjNiYzAiLCJlbWFpbCI6Im1vZGFhZHNhZG1pbkBnbWFpbC5jb20iLCJyb2xlIjoiQURNSU4iLCJjb21wYW55SWQiOiJjYzdmMmRhMC00Y2YzLTQ2ZTgtYjZjZi1jMzgxZmFiNmJiODkiLCJpYXQiOjE3Nzk4MTA2NTIsImV4cCI6MTc3OTgxMTU1Mn0.1KLaCplzjDj_6PhxqANT9NB04CWK_tOPpEuSqpWZxeY"
+
