@@ -30,7 +30,7 @@ export class MailService {
    */
   async sendWelcomeEmail(email: string, name: string, password: string) {
     const loginUrl = `${process.env.FRONTEND_URL}/login`;
-    
+
     const html = this.getWelcomeTemplate(name, email, password, loginUrl);
 
     await this.transporter.sendMail({
@@ -41,7 +41,12 @@ export class MailService {
     });
   }
 
-  private getWelcomeTemplate(name: string, email: string, password: string, loginUrl: string): string {
+  private getWelcomeTemplate(
+    name: string,
+    email: string,
+    password: string,
+    loginUrl: string,
+  ): string {
     return `
 <!DOCTYPE html>
 <html>
@@ -60,7 +65,7 @@ export class MailService {
       margin: 0;
       padding: 0;
       font-family: 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      background: #F5F6FA;
       -webkit-font-smoothing: antialiased;
     }
     
@@ -75,7 +80,7 @@ export class MailService {
       background: #ffffff;
       border-radius: 20px;
       overflow: hidden;
-      box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+      box-shadow: 0 20px 60px rgba(0,0,0,0.1);
       animation: fadeInUp 0.6s ease-out;
     }
     
@@ -91,7 +96,7 @@ export class MailService {
     }
     
     .header {
-      background: linear-gradient(135deg, #2C3E50 0%, #1a252f 100%);
+      background: linear-gradient(135deg, #2F80ED 0%, #1E5CB8 100%);
       padding: 40px 30px;
       text-align: center;
       position: relative;
@@ -110,7 +115,7 @@ export class MailService {
     }
     
     .header p {
-      color: rgba(255,255,255,0.8);
+      color: rgba(255,255,255,0.85);
       font-size: 14px;
       margin-top: 8px;
     }
@@ -121,28 +126,28 @@ export class MailService {
     
     .greeting {
       font-size: 24px;
-      color: #2C3E50;
+      color: #353A40;
       margin-bottom: 20px;
       font-weight: 600;
     }
     
     .greeting span {
-      color: #D35400;
+      color: #2F80ED;
     }
     
     .message {
-      color: #4a5568;
+      color: #7A7E83;
       line-height: 1.8;
       margin-bottom: 30px;
       font-size: 16px;
     }
     
     .credentials-box {
-      background: linear-gradient(135deg, #f8f9fa 0%, #f1f3f5 100%);
+      background: #F8FAFC;
       border-radius: 16px;
       padding: 25px;
       margin: 25px 0;
-      border-left: 4px solid #D35400;
+      border-left: 4px solid #2F80ED;
     }
     
     .credential-item {
@@ -154,7 +159,7 @@ export class MailService {
     
     .credential-label {
       font-weight: 700;
-      color: #2C3E50;
+      color: #353A40;
       min-width: 70px;
       font-size: 14px;
     }
@@ -165,22 +170,22 @@ export class MailService {
       border-radius: 8px;
       font-family: 'Courier New', monospace;
       font-size: 14px;
-      color: #D35400;
+      color: #2F80ED;
       font-weight: 600;
       letter-spacing: 0.5px;
-      border: 1px solid #e2e8f0;
+      border: 1px solid #E2E8F0;
       flex: 1;
     }
     
     .alert-box {
-      background: #fff3e0;
+      background: #FEF3C7;
       border-radius: 12px;
       padding: 15px 20px;
       margin: 25px 0;
       display: flex;
       align-items: center;
       gap: 12px;
-      border: 1px solid #ffe0b3;
+      border: 1px solid #FDE68A;
     }
     
     .alert-icon {
@@ -190,13 +195,13 @@ export class MailService {
     .alert-text {
       flex: 1;
       font-size: 14px;
-      color: #e67e22;
+      color: #D97706;
       font-weight: 500;
     }
     
     .button {
       display: inline-block;
-      background: linear-gradient(135deg, #D35400 0%, #e67e22 100%);
+      background: #2F80ED;
       color: #ffffff !important;
       text-decoration: none;
       padding: 16px 32px;
@@ -205,14 +210,14 @@ export class MailService {
       font-size: 16px;
       margin: 20px 0;
       transition: all 0.3s ease;
-      box-shadow: 0 4px 15px rgba(211, 84, 0, 0.3);
+      box-shadow: 0 4px 15px rgba(47, 128, 237, 0.3);
       text-align: center;
     }
     
     .button:hover {
       transform: translateY(-2px);
-      box-shadow: 0 6px 20px rgba(211, 84, 0, 0.4);
-      background: linear-gradient(135deg, #b54500 0%, #d35400 100%);
+      box-shadow: 0 6px 20px rgba(47, 128, 237, 0.4);
+      background: #1E5CB8;
     }
     
     .features {
@@ -221,8 +226,8 @@ export class MailService {
       gap: 15px;
       margin: 30px 0;
       padding: 20px 0;
-      border-top: 1px solid #e2e8f0;
-      border-bottom: 1px solid #e2e8f0;
+      border-top: 1px solid #E2E8F0;
+      border-bottom: 1px solid #E2E8F0;
     }
     
     .feature {
@@ -237,26 +242,26 @@ export class MailService {
     
     .feature-text {
       font-size: 12px;
-      color: #4a5568;
+      color: #7A7E83;
       font-weight: 500;
     }
     
     .footer {
-      background: #f8f9fa;
+      background: #F8FAFC;
       padding: 25px 35px;
       text-align: center;
-      border-top: 1px solid #e2e8f0;
+      border-top: 1px solid #E2E8F0;
     }
     
     .footer p {
-      color: #95A5A6;
+      color: #7A7E83;
       font-size: 12px;
       margin: 5px 0;
       line-height: 1.5;
     }
     
     .support-link {
-      color: #D35400;
+      color: #2F80ED;
       text-decoration: none;
       font-weight: 500;
     }
@@ -367,36 +372,41 @@ export class MailService {
 <head>
   <meta charset="utf-8">
   <style>
-    body { margin: 0; padding: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #F5F0E6; }
+    body { margin: 0; padding: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #F5F6FA; }
     .container { width: 100%; max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.05); }
-    .header { background-color: #2C3E50; padding: 30px 40px; text-align: center; }
-    .content { padding: 40px; color: #2D3436; line-height: 1.6; }
-    .button { display: inline-block; padding: 14px 32px; background-color: #D35400; color: #ffffff !important; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px; margin: 20px 0; transition: background-color 0.3s; }
-    .button:hover { background-color: #b54500; }
-    .footer { background-color: #f8f9fa; padding: 20px; text-align: center; font-size: 12px; color: #95A5A6; border-top: 1px solid #eee; }
-    .link-text { color: #D35400; word-break: break-all; font-size: 12px; }
+    .header { background: linear-gradient(135deg, #2F80ED 0%, #1E5CB8 100%); padding: 30px 40px; text-align: center; }
+    .content { padding: 40px; color: #353A40; line-height: 1.6; }
+    .button { display: inline-block; padding: 14px 32px; background-color: #2F80ED; color: #ffffff !important; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px; margin: 20px 0; transition: background-color 0.3s; }
+    .button:hover { background-color: #1E5CB8; }
+    .footer { background-color: #F8FAFC; padding: 20px; text-align: center; font-size: 12px; color: #7A7E83; border-top: 1px solid #E2E8F0; }
+    .link-text { color: #2F80ED; word-break: break-all; font-size: 12px; }
   </style>
 </head>
 <body>
   <br><br>
   <div class="container">
-    <div style="height: 6px; background-color: #D35400; width: 100%;"></div>
+    <div style="height: 6px; background: linear-gradient(90deg, #2F80ED 0%, #1E5CB8 100%); width: 100%;"></div>
     <div class="header">
       <div style="font-size: 40px;">🔐</div>
+      <h1 style="color: #ffffff; margin: 15px 0 0 0; font-size: 24px;">ELOSPRO</h1>
+      <p style="color: rgba(255,255,255,0.85); margin: 8px 0 0 0; font-size: 14px;">Sistema de Gestão Inteligente</p>
     </div>
     <div class="content">
-      <h2 style="color: #2C3E50; margin-top: 0;">Recuperação de Senha</h2>
-      <p>Olá,</p>
-      <p>Recebemos uma solicitação para redefinir a senha da sua conta. Clique no botão abaixo para criar uma nova senha:</p>
+      <h2 style="color: #353A40; margin-top: 0; font-weight: 600;">Recuperação de Senha</h2>
+      <p style="color: #353A40;">Olá,</p>
+      <p style="color: #7A7E83;">Recebemos uma solicitação para redefinir a senha da sua conta. Clique no botão abaixo para criar uma nova senha:</p>
       <div style="text-align: center;">
         <a href="${link}" class="button">Redefinir Minha Senha</a>
       </div>
-      <p style="font-size: 14px; color: #636e72;">Este link é válido por apenas <strong>30 minutos</strong>.</p>
-      <hr style="border: 0; border-top: 1px solid #eee; margin: 30px 0;">
-      <p style="font-size: 13px; color: #999;">Se você não fez essa solicitação, ignore este e-mail.</p>
+      <p style="font-size: 14px; color: #7A7E83;">Este link é válido por apenas <strong style="color: #2F80ED;">30 minutos</strong>.</p>
+      <hr style="border: 0; border-top: 1px solid #E2E8F0; margin: 30px 0;">
+      <p style="font-size: 13px; color: #7A7E83;">Se você não fez essa solicitação, ignore este e-mail.</p>
+      <p style="font-size: 13px; color: #7A7E83; margin-top: 15px;">Se o botão não funcionar, copie e cole o link abaixo no seu navegador:</p>
+      <p style="font-size: 12px; color: #2F80ED; word-break: break-all; background: #F8FAFC; padding: 10px; border-radius: 6px; text-decoration: none;">${link}</p>
     </div>
     <div class="footer">
       <p>© ${new Date().getFullYear()} ELOSPRO. Todos os direitos reservados.</p>
+      <p style="margin-top: 8px; font-size: 11px;">ELOSPRO | Sistema de Gestão de Fluxos de Produção</p>
     </div>
   </div>
   <br><br>
