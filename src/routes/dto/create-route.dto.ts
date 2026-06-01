@@ -1,7 +1,4 @@
 /* eslint-disable prettier/prettier */
-// src/routes/dto/optimize-route.dto.ts
-
-/* eslint-disable prettier/prettier */
 import { Type } from 'class-transformer';
 import {
   IsArray,
@@ -9,8 +6,7 @@ import {
   IsEnum,
   IsNumber,
   IsOptional,
-  isString,
-  IsString,
+  IsString,          // 🔥 CORRIGIDO: antes estava 'isString' minúsculo
   IsUUID,
   ValidateNested,
 } from 'class-validator';
@@ -33,12 +29,17 @@ export interface RouteStats {
   totalDistanceMeters: number;
   formattedDuration: string;
   formattedDistance: string;
+  // 🔥 NOVO: consumo de combustível
+  fuelConsumptionLitres?: number | null;
+  formattedFuelConsumption?: string;
 }
 
 // Interface para estatísticas simples (rotas sem tarefas)
 export interface SimpleRouteStats {
   totalDurationSeconds: number;
   totalDistanceMeters: number;
+  // 🔥 NOVO: consumo de combustível
+  fuelConsumptionLitres?: number | null;
 }
 
 // DTO existente para otimização com tarefas
@@ -102,9 +103,9 @@ export class RouteStopDto {
   @IsString()
   zipCode: string;
 
-   @IsOptional()
+  @IsOptional()
   @IsString()
-  numero?: string;  // ✅ JÁ ESTÁ CORRETO
+  numero?: string;
 
   @IsNumber()
   latitude: number;
@@ -116,15 +117,12 @@ export class RouteStopDto {
   @IsString()
   notes?: string;
 
-  // 🔥 SE PRECISAR DE BAIRRO, USE:
   @IsOptional()
   @IsString()
   bairro?: string;
 }
 
-// src/routes/dto/optimize-route.dto.ts
-
-// DTO para criar rota sem tarefas - REMOVIDO driverLatitude e driverLongitude
+// DTO para criar rota sem tarefas
 export class CreateRouteDto {
   @IsString()
   title: string;
@@ -178,7 +176,6 @@ export class UpdateRouteDto {
   @IsUUID()
   userAssignedId?: string;
 
-  // ADICIONE ESTA LINHA ABAIXO:
   @IsOptional()
   @IsEnum(RouteOrderType)
   orderBy?: RouteOrderType;
@@ -193,4 +190,22 @@ export class ConvertRouteToTasksDto {
   @IsOptional()
   @IsUUID()
   userAssignedId?: string;
+}
+
+// 🔥 NOVO DTO PARA RESPOSTA DE ROTA (opcional, mas recomendado)
+export class RouteResponseDto {
+  id: string;
+  title: string;
+  description?: string;
+  routeDate?: Date;
+  status: RouteStatus;
+  orderBy?: string;
+  totalDistanceMeters?: number;
+  totalDurationSeconds?: number;
+  fuelConsumptionLitres?: number | null;
+  stops?: RouteStopDto[];
+  userAssigned?: { id: string; name: string; contact?: string };
+  formattedDistance?: string;
+  formattedDuration?: string;
+  formattedFuelConsumption?: string;
 }

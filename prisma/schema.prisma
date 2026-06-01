@@ -157,15 +157,15 @@ model Company {
 // Adicione este modelo APÓS o model Company no seu schema.prisma
 
 model WhatsAppConnection {
-  id         String @id @default(uuid()) @db.Uuid
-  companyId  String @unique @map("company_id") @db.Uuid
+  id         String   @id @default(uuid()) @db.Uuid
+  companyId  String   @unique @map("company_id") @db.Uuid
   instanceId Int? // ID da instância na API do AtendePro
-  name      String   @map("name") @db.VarChar(100)
-  token     String   @map("token") @db.Text
-  status    String   @default("connected") @map("status")
-  qrCode    String?  @map("qr_code") @db.Text
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  name       String   @map("name") @db.VarChar(100)
+  token      String   @map("token") @db.Text
+  status     String   @default("connected") @map("status")
+  qrCode     String?  @map("qr_code") @db.Text
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
@@ -530,6 +530,8 @@ model Route {
   totalDistanceMeters  Float?    @map("distancia_total_metros")
   totalDurationSeconds Int?      @map("duracao_total_segundos")
   optimizedAt          DateTime? @map("otimizado_em")
+
+  fuelConsumptionLitres Float? @map("consumo_combustivel_litros") // em litros
 
   // NOVO RELACIONAMENTO
   stops RouteStop[]
