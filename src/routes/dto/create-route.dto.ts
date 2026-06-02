@@ -126,6 +126,10 @@ export class RouteStopDto {
 
 // DTO para criar rota sem tarefas - REMOVIDO driverLatitude e driverLongitude
 export class CreateRouteDto {
+   @IsOptional()
+  @IsNumber()
+  combustivelPrevisto?: number; // Litros previstos
+
   @IsString()
   title: string;
 
@@ -152,6 +156,10 @@ export class CreateRouteDto {
 }
 
 export class UpdateRouteDto {
+   @IsOptional()
+  @IsNumber()
+  combustivelPrevisto?: number;
+  
   @IsOptional()
   @IsString()
   title?: string;

@@ -531,6 +531,17 @@ model Route {
   totalDurationSeconds Int?      @map("duracao_total_segundos")
   optimizedAt          DateTime? @map("otimizado_em")
 
+  // NOVO: Consumo de combustível previsto (litros)
+  estimatedFuel Float? @map("combustivel_previsto") 
+
+    // ROTA REALIZADA (executada)
+  actualDistance Float?   @map("distancia_real")      // Km de fato rodados
+  actualTime     Int?     @map("tempo_real")          // Minutos de fato levou
+  actualFuel     Float?   @map("combustivel_real")    // Litros de fato consumidos
+  startedAt      DateTime? @map("iniciado_em")
+  completedAt    DateTime? @map("finalizado_em")
+
+
   // NOVO RELACIONAMENTO
   stops RouteStop[]
 

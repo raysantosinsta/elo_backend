@@ -6,9 +6,9 @@ npx prisma migrate diff \
   --to-schema-datamodel prisma/schema.prisma \
   --script 
 
-  mkdir prisma/migrations/20260101_whatsapp_status_connected
+  mkdir prisma/migrations/20260101_rota-realizada
 
-  npx prisma migrate resolve --applied 20260101_whatsapp_status_connected
+  npx prisma migrate resolve --applied 20260101_rota-realizada
 
    npx prisma generate
 

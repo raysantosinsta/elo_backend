@@ -66,14 +66,19 @@ export class LocationGateway
   // 🔥 LIMPEZA PERIÓDICA DE MEMÓRIA (a cada 5 minutos)
   private cleanupInterval: NodeJS.Timeout;
 
+  // 🔥 CONFIGURAÇÕES DE LIMPEZA
+  private readonly THROTTLE_EXPIRY_MS = 10 * 60 * 1000; // 10 minutos sem atualização
+  private readonly LOCATION_EXPIRY_MS = 30 * 60 * 1000; // 30 minutos sem atualização
+  private readonly CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // 5 minutos
+
   constructor() {
     // Iniciar limpeza periódica de memória
     this.cleanupInterval = setInterval(
       () => {
         this.cleanupMemory();
       },
-      5 * 60 * 1000,
-    ); // 5 minutos
+      this.CLEANUP_INTERVAL_MS,
+    );
   }
 
   handleConnection(client: Socket) {
@@ -99,6 +104,12 @@ export class LocationGateway
 
       // Entrar na sala da rota
       client.join(`route:${routeId}`);
+
+      // Registrar sala
+      if (!this.routeRooms.has(routeId)) {
+        this.routeRooms.set(routeId, new Set());
+      }
+      this.routeRooms.get(routeId)!.add(client.id);
 
       if (isDriver) {
         this.driverSessions.set(driverId, client.id);
@@ -140,15 +151,15 @@ export class LocationGateway
       this.driverSessions.delete(driverId);
       this.logger.log(`🚗 Motorista ${driverId} desconectado`);
 
-      // 🔥 Limpar throttle e cache do motorista desconectado
-      const throttleKey = `${driverId}_${routeId}`;
-      this.lastUpdateTime.delete(throttleKey);
-      this.updateThrottle.delete(throttleKey);
+      // 🔥 NÃO LIMPAR O CACHE IMEDIATAMENTE
+      // Manter por um tempo para reconexão rápida
+      // A limpeza será feita pelo cleanupMemory() após expirar
 
       // Notificar observadores que o motorista está offline
       this.server?.to(`route:${routeId}`).emit('driver-offline', {
         driverId,
         message: 'Motorista está offline',
+        timestamp: new Date(),
       });
     }
   }
@@ -282,8 +293,6 @@ export class LocationGateway
     }
   }
 
-  // Adicione este método no LocationGateway
-
   // 🔥 MÉTODO PARA NOTIFICAR QUE A ROTA FOI FINALIZADA
   @SubscribeMessage('route-finished')
   handleRouteFinished(
@@ -305,10 +314,52 @@ export class LocationGateway
       timestamp: new Date(),
     });
 
-    // Limpar cache do motorista
-    const throttleKey = `${driverId}_${routeId}`;
-    this.lastUpdateTime.delete(throttleKey);
-    this.updateThrottle.delete(throttleKey);
+    // 🔥 NÃO LIMPAR O CACHE IMEDIATAMENTE
+    // A limpeza será feita pelo cleanupMemory() após expirar
+  }
+
+  // 🔥 MÉTODO PARA NOTIFICAR QUE A ROTA FOI INICIADA
+  @SubscribeMessage('route-started')
+  handleRouteStarted(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { routeId: string; message?: string },
+  ) {
+    const { routeId } = data;
+    const { driverId } = client.data;
+
+    this.logger.log(`🚀 Rota iniciada: ${routeId} pelo motorista ${driverId}`);
+
+    // Notificar TODOS os observadores na sala
+    this.server?.to(`route:${routeId}`).emit('route-started', {
+      routeId,
+      driverId,
+      message: data.message || 'Rota iniciada!',
+      timestamp: new Date(),
+    });
+  }
+
+  // 🔥 MÉTODO PARA NOTIFICAR MUDANÇA DE STATUS DA ROTA
+  @SubscribeMessage('route-status-update')
+  handleRouteStatusUpdate(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: {
+      routeId: string;
+      status: 'SCHEDULED' | 'IN_PROGRESS' | 'FINISHED' | 'CANCELED';
+      message?: string;
+    },
+  ) {
+    const { routeId, status, message } = data;
+    const { driverId } = client.data;
+
+    this.logger.log(`📢 Status da rota ${routeId}: ${status}`);
+
+    this.server?.to(`route:${routeId}`).emit('route-status-changed', {
+      routeId,
+      driverId,
+      status,
+      message: message || `Status alterado para ${status}`,
+      timestamp: new Date(),
+    });
   }
 
   // 🔥 MÉTODO PARA TRANSMITIR LOCALIZAÇÃO EM MASSA (para simulações)
@@ -359,33 +410,96 @@ export class LocationGateway
     });
   }
 
-  // 🔥 MÉTODO PARA LIMPEZA DE MEMÓRIA
+  // 🔥 MÉTODO PÚBLICO PARA NOTIFICAR QUE UMA ROTA FOI FINALIZADA (via API)
+  notifyRouteCompleted(routeId: string, driverId: string, message?: string) {
+    this.logger.log(`🏁 [API] Notificando finalização da rota ${routeId}`);
+    
+    this.server?.to(`route:${routeId}`).emit('route-completed', {
+      routeId,
+      driverId,
+      message: message || 'Rota finalizada com sucesso!',
+      timestamp: new Date(),
+    });
+  }
+
+  // 🔥 MÉTODO PÚBLICO PARA NOTIFICAR QUE UMA ROTA FOI INICIADA (via API)
+  notifyRouteStarted(routeId: string, driverId: string, message?: string) {
+    this.logger.log(`🚀 [API] Notificando início da rota ${routeId}`);
+    
+    this.server?.to(`route:${routeId}`).emit('route-started', {
+      routeId,
+      driverId,
+      message: message || 'Rota iniciada!',
+      timestamp: new Date(),
+    });
+  }
+
+  // 🔥 MÉTODO PARA LIMPEZA DE MEMÓRIA (MELHORADO)
   private cleanupMemory() {
     const now = Date.now();
     let cleanedThrottle = 0;
     let cleanedLocations = 0;
+    let cleanedUpdateTime = 0;
 
-    // Limpar throttle antigo (mais de 10 minutos sem atualização)
+    // 1. Limpar throttle antigo (mais de THROTTLE_EXPIRY_MS sem atualização)
     for (const [key, info] of this.updateThrottle.entries()) {
-      if (now - info.lastUpdateTime > 10 * 60 * 1000) {
+      if (now - info.lastUpdateTime > this.THROTTLE_EXPIRY_MS) {
         this.updateThrottle.delete(key);
         cleanedThrottle++;
       }
     }
 
-    // Limpar lastUpdateTime antigo
+    // 2. Limpar lastUpdateTime antigo
     for (const [key, lastTime] of this.lastUpdateTime.entries()) {
-      if (now - lastTime > 10 * 60 * 1000) {
+      if (now - lastTime > this.THROTTLE_EXPIRY_MS) {
         this.lastUpdateTime.delete(key);
+        cleanedUpdateTime++;
       }
     }
 
-    // Limpar localizações antigas (motoristas desconectados há mais de 30 min)
-    // Nota: Não estamos limpando lastLocations para não perder histórico recente
+    // 3. Limpar localizações antigas (motoristas inativos há mais de LOCATION_EXPIRY_MS)
+    for (const [key, location] of this.lastLocations.entries()) {
+      const timeSinceLastUpdate = now - location.timestamp.getTime();
+      
+      if (timeSinceLastUpdate > this.LOCATION_EXPIRY_MS) {
+        // Verificar se o motorista ainda está conectado
+        const isStillConnected = this.driverSessions.has(location.driverId);
+        
+        if (!isStillConnected) {
+          this.lastLocations.delete(key);
+          cleanedLocations++;
+          this.logger.debug(
+            `🧹 Removida localização antiga do motorista ${location.driverId} (${Math.round(timeSinceLastUpdate / 60000)}min sem atualização)`,
+          );
+        }
+      }
+    }
 
-    if (cleanedThrottle > 0) {
+    // 4. Limpar salas vazias (segurança extra)
+    for (const [routeId, sockets] of this.routeRooms.entries()) {
+      if (sockets.size === 0) {
+        this.routeRooms.delete(routeId);
+        this.logger.debug(`🧹 Removida sala vazia: route:${routeId}`);
+      }
+    }
+
+    // Log do resultado da limpeza
+    const totalCleaned = cleanedThrottle + cleanedLocations + cleanedUpdateTime;
+    if (totalCleaned > 0) {
       this.logger.log(
-        `🧹 Limpeza de memória: ${cleanedThrottle} entradas de throttle removidas`,
+        `🧹 Limpeza de memória concluída: ` +
+        `${cleanedThrottle} throttle, ` +
+        `${cleanedUpdateTime} updateTime, ` +
+        `${cleanedLocations} locations removidos. ` +
+        `Memória atual: ${this.updateThrottle.size} throttle, ` +
+        `${this.lastLocations.size} locations, ` +
+        `${this.driverSessions.size} motoristas ativos.`,
+      );
+    } else {
+      this.logger.debug(
+        `🧹 Limpeza de memória: nenhum item expirado encontrado. ` +
+        `Status: ${this.driverSessions.size} motoristas ativos, ` +
+        `${this.lastLocations.size} locations em cache.`,
       );
     }
   }
@@ -429,6 +543,70 @@ export class LocationGateway
       activeRooms: this.routeRooms.size,
       cachedLocations: this.lastLocations.size,
       throttledDrivers: this.updateThrottle.size,
+      lastUpdateTimes: this.lastUpdateTime.size,
+      config: {
+        throttleMs: this.THROTTLE_MS,
+        maxUpdatesPerMinute: this.MAX_UPDATES_PER_MINUTE,
+        throttleExpiryMs: this.THROTTLE_EXPIRY_MS,
+        locationExpiryMs: this.LOCATION_EXPIRY_MS,
+        cleanupIntervalMs: this.CLEANUP_INTERVAL_MS,
+      },
     };
+  }
+
+  // 🔥 MÉTODO PARA LIMPAR MANUALMENTE (para admin)
+  forceCleanup(): {
+    cleanedThrottle: number;
+    cleanedLocations: number;
+    cleanedUpdateTime: number;
+  } {
+    const beforeThrottle = this.updateThrottle.size;
+    const beforeLocations = this.lastLocations.size;
+    const beforeUpdateTime = this.lastUpdateTime.size;
+
+    this.cleanupMemory();
+
+    return {
+      cleanedThrottle: beforeThrottle - this.updateThrottle.size,
+      cleanedLocations: beforeLocations - this.lastLocations.size,
+      cleanedUpdateTime: beforeUpdateTime - this.lastUpdateTime.size,
+    };
+  }
+
+  // 🔥 MÉTODO PARA LIMPAR CACHE DE UM MOTORISTA ESPECÍFICO
+  clearDriverCache(driverId: string, routeId: string): boolean {
+    const key = `${driverId}_${routeId}`;
+    const hadLocation = this.lastLocations.has(key);
+    const hadThrottle = this.updateThrottle.has(key);
+    const hadUpdateTime = this.lastUpdateTime.has(key);
+
+    this.lastLocations.delete(key);
+    this.updateThrottle.delete(key);
+    this.lastUpdateTime.delete(key);
+
+    const cleaned = hadLocation || hadThrottle || hadUpdateTime;
+    
+    if (cleaned) {
+      this.logger.log(`🧹 Cache do motorista ${driverId} (rota ${routeId}) limpo manualmente`);
+    }
+
+    return cleaned;
+  }
+
+  // 🔥 MÉTODO PARA DESTRUIÇÃO DO GATEWAY (limpeza final)
+  onModuleDestroy() {
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.logger.log('🧹 Intervalo de limpeza de memória removido');
+    }
+    
+    // Limpar todos os caches
+    this.driverSessions.clear();
+    this.routeRooms.clear();
+    this.lastLocations.clear();
+    this.lastUpdateTime.clear();
+    this.updateThrottle.clear();
+    
+    this.logger.log('🧹 Todos os caches foram limpos (gateway destruído)');
   }
 }

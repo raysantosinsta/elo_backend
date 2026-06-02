@@ -26,6 +26,7 @@ import {
   UpdateRouteDto,
   RouteStats,
 } from './dto/create-route.dto';
+import { CompleteRouteDto } from './dto/optimize-route.dto'; // 🔥 NOVO IMPORT
 import { RouteStatus } from '@prisma/client';
 
 // Descomente a linha abaixo se você tiver um Guard de Autenticação (ex: JwtAuthGuard)
@@ -67,11 +68,6 @@ export class RouteController {
    * Recebe a lista de IDs de tarefas e a localização do motorista.
    * Retorna a lista de tarefas reordenada pela rota mais econômica.
    */
-  /**
-   * 2. POST /routes/calculate-best-path
-   * Recebe a lista de IDs de tarefas e a localização do motorista.
-   * Retorna a lista de tarefas reordenada pela rota mais econômica.
-   */
   @Post('calculate-best-path')
   async calculateBestPath(@Body() dto: OptimizeRouteDto): Promise<{
     route: any[];
@@ -108,30 +104,6 @@ export class RouteController {
   /**
    * 4. POST /routes
    * Cria uma nova rota sem criar tarefas
-   *
-   * @example
-   * POST /routes
-   * {
-   *   "title": "Visitas Zona Sul",
-   *   "description": "Rota de visitas a clientes",
-   *   "routeDate": "2026-04-15T08:00:00Z",
-   *   "driverLatitude": -23.5505,
-   *   "driverLongitude": -46.6333,
-   *   "userAssignedId": "uuid-do-motorista",
-   *   "orderBy": "DISTANCE",
-   *   "stops": [
-   *     {
-   *       "name": "Cliente João",
-   *       "address": "Av. Paulista, 1000",
-   *       "city": "São Paulo",
-   *       "state": "SP",
-   *       "zipCode": "01310-100",
-   *       "latitude": -23.5615,
-   *       "longitude": -46.6558,
-   *       "notes": "Entregar amostras"
-   *     }
-   *   ]
-   * }
    */
   @Post()
   async createRoute(@Body() dto: CreateRouteDto, @Req() req: any) {
@@ -147,16 +119,6 @@ export class RouteController {
   /**
    * 5. GET /routes
    * Lista todas as rotas salvas da empresa com suporte a múltiplos filtros
-   *
-   * @example
-   * GET /routes?status=SCHEDULED&startDate=2026-04-01&endDate=2026-04-30
-   * GET /routes?userAssignedId=uuid&orderBy=DISTANCE
-   * GET /routes?search=entrega&minStops=2&maxStops=5
-   * GET /routes?isOverdue=true
-   * GET /routes?isUpcoming=true
-   * GET /routes?minDistance=10&maxDistance=50
-   * GET /routes?minDuration=30&maxDuration=120
-   * GET /routes?createdStartDate=2026-04-01&createdEndDate=2026-04-30
    */
   @Get()
   async findAllRoutes(
@@ -188,44 +150,22 @@ export class RouteController {
     const companyId = req.user?.companyId;
 
     this.logger.log(`[GET /routes] Buscando rotas da empresa`);
-    this.logger.log(
-      `   📅 Filtros de data: startDate=${startDate}, endDate=${endDate}, createdStartDate=${createdStartDate}, createdEndDate=${createdEndDate}`,
-    );
-    this.logger.log(
-      `   👤 Filtros de usuário: userAssignedId=${userAssignedId}, search=${search}`,
-    );
-    this.logger.log(
-      `   🎯 Filtros de rota: status=${status}, orderBy=${orderBy}`,
-    );
-    this.logger.log(
-      `   📊 Filtros de métricas: minStops=${minStops}, maxStops=${maxStops}, minDistance=${minDistance}, maxDistance=${maxDistance}, minDuration=${minDuration}, maxDuration=${maxDuration}`,
-    );
-    this.logger.log(
-      `   ⚠️ Filtros especiais: isOverdue=${isOverdue}, isUpcoming=${isUpcoming}`,
-    );
 
     return this.routeService.findAllRoutes(companyId, {
-      // Filtros de Data
       startDate,
       endDate,
       createdStartDate,
       createdEndDate,
-
-      // Filtros de Status e Ordenação
       status,
       orderBy: orderBy === 'all' ? undefined : orderBy,
       userAssignedId: userAssignedId === 'none' ? 'none' : userAssignedId,
       search,
-
-      // Filtros de Métricas
       minStops: minStops ? parseInt(minStops) : undefined,
       maxStops: maxStops ? parseInt(maxStops) : undefined,
       minDistance: minDistance ? parseFloat(minDistance) : undefined,
       maxDistance: maxDistance ? parseFloat(maxDistance) : undefined,
       minDuration: minDuration ? parseInt(minDuration) : undefined,
       maxDuration: maxDuration ? parseInt(maxDuration) : undefined,
-
-      // Filtros Especiais
       isOverdue: isOverdue === 'true',
       isUpcoming: isUpcoming === 'true',
     });
@@ -234,30 +174,17 @@ export class RouteController {
   /**
    * 6. GET /routes/:id
    * Busca uma rota específica com todos os detalhes
-   *
-   * @example
-   * GET /routes/abc-123-def
    */
   @Get(':id')
   async findRouteById(@Param('id') id: string, @Req() req: any) {
     const companyId = req.user?.companyId;
-
     this.logger.log(`[GET /routes/${id}] Buscando rota`);
-
     return this.routeService.findRouteById(id, companyId);
   }
 
   /**
    * 7. PATCH /routes/:id
    * Atualiza uma rota existente
-   *
-   * @example
-   * PATCH /routes/abc-123-def
-   * {
-   *   "title": "Visitas Zona Sul - ATUALIZADO",
-   *   "status": "IN_PROGRESS",
-   *   "userAssignedId": "novo-uuid-do-motorista"
-   * }
    */
   @Patch(':id')
   async updateRoute(
@@ -267,38 +194,24 @@ export class RouteController {
   ) {
     const companyId = req.user?.companyId;
     const userId = req.user?.id;
-
     this.logger.log(`[PATCH /routes/${id}] Atualizando rota`);
-    this.logger.log(`   Dados: ${JSON.stringify(dto)}`);
-
     return this.routeService.updateRoute(id, dto, companyId, userId);
   }
 
   /**
    * 8. DELETE /routes/:id
    * Remove uma rota (delete físico)
-   *
-   * @example
-   * DELETE /routes/abc-123-def
    */
   @Delete(':id')
   async deleteRoute(@Param('id') id: string, @Req() req: any) {
     const companyId = req.user?.companyId;
-
     this.logger.log(`[DELETE /routes/${id}] Removendo rota`);
-
     return this.routeService.deleteRoute(id, companyId);
   }
 
   /**
    * 9. PATCH /routes/:routeId/stops/:stopId/visit
    * Marca uma parada como visitada
-   *
-   * @example
-   * PATCH /routes/abc-123-def/stops/stop-456/visit
-   * {
-   *   "notes": "Cliente atendido com sucesso"
-   * }
    */
   @Patch(':routeId/stops/:stopId/visit')
   async markStopAsVisited(
@@ -308,11 +221,7 @@ export class RouteController {
     @Req() req: any,
   ) {
     const companyId = req.user?.companyId;
-
     this.logger.log(`[PATCH] Marcando parada ${stopId} como visitada`);
-    this.logger.log(`   Rota: ${routeId}`);
-    this.logger.log(`   Observações: ${body.notes || 'N/A'}`);
-
     return this.routeService.markStopAsVisited(
       routeId,
       stopId,
@@ -324,13 +233,6 @@ export class RouteController {
   /**
    * 10. POST /routes/:id/convert-to-tasks
    * Converte uma rota salva em tarefas reais no kanban
-   *
-   * @example
-   * POST /routes/abc-123-def/convert-to-tasks
-   * {
-   *   "columnId": "uuid-da-coluna-destino",
-   *   "userAssignedId": "uuid-do-motorista"
-   * }
    */
   @Post(':id/convert-to-tasks')
   async convertRouteToTasks(
@@ -340,11 +242,7 @@ export class RouteController {
   ) {
     const companyId = req.user?.companyId;
     const userId = req.user?.id;
-
     this.logger.log(`[POST] Convertendo rota ${routeId} em tarefas`);
-    this.logger.log(`   ColumnId: ${dto.columnId || 'usando coluna padrão'}`);
-    this.logger.log(`   AssignedTo: ${dto.userAssignedId || 'não atribuído'}`);
-
     return this.routeService.convertRouteToTasks(
       routeId,
       companyId,
@@ -356,14 +254,10 @@ export class RouteController {
   /**
    * 11. GET /routes/stats/summary
    * Retorna estatísticas resumidas de todas as rotas
-   *
-   * @example
-   * GET /routes/stats/summary
    */
   @Get('stats/summary')
   async getRoutesSummary(@Req() req: any) {
     const companyId = req.user?.companyId;
-
     this.logger.log(`[GET /routes/stats/summary] Gerando resumo de rotas`);
 
     const routes = await this.routeService.findAllRoutes(companyId);
@@ -417,33 +311,180 @@ export class RouteController {
   ) {
     const companyId = req.user?.companyId;
     const userId = req.user?.id;
-
-    this.logger.log(
-      `[POST] Duplicando rota ${routeId} com criação de novas tasks`,
-    );
-
-    const result = await this.routeService.duplicateRouteWithTasks(
+    this.logger.log(`[POST] Duplicando rota ${routeId}`);
+    return this.routeService.duplicateRouteWithTasks(
       routeId,
       companyId,
       userId,
       body,
     );
-
-    return result;
   }
+
+  // =============================================
+  // 🔥 NOVOS ENDPOINTS PARA ROTA REALIZADA
+  // =============================================
+
   /**
-   * 13. GET /routes/:id/tasks
-   * Busca todas as tarefas associadas a uma rota
+   * 13. POST /routes/:id/start
+   * Motorista inicia a execução da rota
    *
    * @example
-   * GET /routes/abc-123-def/tasks
+   * POST /routes/abc-123-def/start
    */
-  @Get(':id/tasks')
-  async getRouteTasks(@Param('id') id: string, @Req() req: any) {
+  @Post(':id/start')
+  async startRoute(@Param('id') routeId: string, @Req() req: any) {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.id;
+
+    this.logger.log(`[POST /routes/${routeId}/start] Iniciando rota`);
+
+    return this.routeService.startRoute(routeId, companyId, userId);
+  }
+
+  /**
+   * 14. POST /routes/:id/complete
+   * Motorista finaliza a rota e informa os dados reais
+   *
+   * @example
+   * POST /routes/abc-123-def/complete
+   * {
+   *   "distanciaReal": 52.3,
+   *   "combustivelReal": 12.5,
+   *   "observacoes": "Trânsito intenso na volta"
+   * }
+   */
+  @Post(':id/complete')
+  async completeRoute(
+    @Param('id') routeId: string,
+    @Body() dto: CompleteRouteDto,
+    @Req() req: any,
+  ) {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.id;
+
+    this.logger.log(`[POST /routes/${routeId}/complete] Finalizando rota`);
+    this.logger.log(`   Distância real: ${dto.distanciaReal ?? 'N/A'} km`);
+    this.logger.log(`   Combustível real: ${dto.combustivelReal ?? 'N/A'} L`);
+
+    return this.routeService.completeRoute(routeId, companyId, userId, dto);
+  }
+
+  /**
+   * 15. GET /routes/performance
+   * Lista rotas com dados de performance (previsto x realizado)
+   *
+   * @example
+   * GET /routes/performance?onlyFinished=true
+   * GET /routes/performance?startDate=2026-01-01&endDate=2026-01-31
+   */
+  @Get('performance/reports')
+  async getRoutesPerformance(
+    @Req() req: any,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Query('onlyFinished') onlyFinished?: string,
+  ) {
     const companyId = req.user?.companyId;
 
-    this.logger.log(`[GET /routes/${id}/tasks] Buscando tasks da rota`);
+    this.logger.log(`[GET /routes/performance] Buscando performance das rotas`);
 
-    return this.routeService.getTasksByRoute(id, companyId);
+    return this.routeService.findAllRoutesWithPerformance(companyId, {
+      startDate,
+      endDate,
+      onlyFinished: onlyFinished === 'true',
+    });
+  }
+
+  /**
+   * 16. PATCH /routes/:id/fuel-estimate
+   * Atualiza apenas o combustível previsto de uma rota
+   *
+   * @example
+   * PATCH /routes/abc-123-def/fuel-estimate
+   * {
+   *   "combustivelPrevisto": 10.5
+   * }
+   */
+  @Patch(':id/fuel-estimate')
+  async updateFuelEstimate(
+    @Param('id') routeId: string,
+    @Body() body: { combustivelPrevisto: number },
+    @Req() req: any,
+  ) {
+    const companyId = req.user?.companyId;
+
+    this.logger.log(
+      `[PATCH /routes/${routeId}/fuel-estimate] Atualizando combustível previsto para ${body.combustivelPrevisto} L`,
+    );
+
+    return this.routeService.updateFuelEstimate(
+      routeId,
+      companyId,
+      body.combustivelPrevisto,
+    );
+  }
+
+  /**
+   * 17. GET /routes/:id/comparison
+   * Retorna a comparação detalhada entre previsto e realizado
+   *
+   * @example
+   * GET /routes/abc-123-def/comparison
+   */
+  @Get(':id/comparison')
+  async getRouteComparison(@Param('id') routeId: string, @Req() req: any) {
+    const companyId = req.user?.companyId;
+
+    this.logger.log(`[GET /routes/${routeId}/comparison] Buscando comparação`);
+
+    const route = await this.routeService.findRouteById(routeId, companyId);
+
+    const comparacao = {
+      distancia: {
+        prevista: route.totalDistanceMeters
+          ? `${(route.totalDistanceMeters / 1000).toFixed(1)} km`
+          : 'Não calculada',
+        realizada: route.actualDistance
+          ? `${route.actualDistance.toFixed(1)} km`
+          : 'Não realizada',
+        diferenca: route.totalDistanceMeters && route.actualDistance
+          ? `${(route.actualDistance - route.totalDistanceMeters / 1000).toFixed(1)} km`
+          : null,
+      },
+      tempo: {
+        previsto: route.totalDurationSeconds
+          ? this.formatDuration(route.totalDurationSeconds)
+          : 'Não calculado',
+        realizado: route.actualTime
+          ? this.formatDuration(route.actualTime)
+          : 'Não realizado',
+        diferenca: route.totalDurationSeconds && route.actualTime
+          ? `${((route.actualTime - route.totalDurationSeconds) / 60).toFixed(0)} min`
+          : null,
+      },
+      combustivel: {
+        previsto: route.estimatedFuel ? `${route.estimatedFuel.toFixed(1)} L` : 'Não previsto',
+        realizado: route.actualFuel ? `${route.actualFuel.toFixed(1)} L` : 'Não realizado',
+        diferenca: route.estimatedFuel && route.actualFuel
+          ? `${(route.actualFuel - route.estimatedFuel).toFixed(1)} L`
+          : null,
+      },
+      eficiencia: route.actualDistance && route.actualFuel
+        ? `${(route.actualDistance / route.actualFuel).toFixed(1)} km/L`
+        : null,
+    };
+
+    return comparacao;
+  }
+
+  // =============================================
+  // MÉTODO AUXILIAR
+  // =============================================
+
+  private formatDuration(seconds: number): string {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    if (h > 0) return `${h}h ${m}min`;
+    return `${m}min`;
   }
 }
