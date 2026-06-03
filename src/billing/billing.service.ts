@@ -207,6 +207,7 @@ export class BillingService {
     if (!company) throw new NotFoundException('Empresa nao encontrada');
     const plan = await this.prisma.billingPlan.findUnique({ where: { id: dto.planId } });
     if (!plan || !plan.isActive) throw new NotFoundException('Plano ativo nao encontrado');
+    const trialPeriod = this.buildTrialPeriod(plan.trialDays);
 
     const pending = await this.prisma.billingSubscription.create({
       data: {
@@ -215,6 +216,15 @@ export class BillingService {
         value: plan.price,
         cycle: plan.period,
         status: BillingSubscriptionStatus.PENDING,
+      },
+    });
+
+    await this.prisma.company.update({
+      where: { id: dto.companyId },
+      data: {
+        billingStatus: BillingAccountStatus.TRIAL_ACTIVE,
+        trialStart: company.trialStart || trialPeriod.trialStart,
+        trialEnd: company.trialEnd || trialPeriod.trialEnd,
       },
     });
 
@@ -380,7 +390,20 @@ export class BillingService {
     });
 
     if (status === BillingPaymentStatus.RECEIVED || status === BillingPaymentStatus.CONFIRMED) {
-      await this.prisma.company.update({ where: { id: resolvedCompanyId }, data: { billingStatus: BillingAccountStatus.ACTIVE } });
+      const trialPeriod = subscription?.planId ? await this.buildTrialPeriodFromSubscription(subscription.id) : null;
+      await this.prisma.company.update({
+        where: { id: resolvedCompanyId },
+        data: {
+          billingStatus: BillingAccountStatus.ACTIVE,
+          asaasCustomerId: payment.customer || undefined,
+          ...(trialPeriod
+            ? {
+                trialStart: trialPeriod.trialStart,
+                trialEnd: trialPeriod.trialEnd,
+              }
+            : {}),
+        },
+      });
       if (subscription) {
         await this.prisma.billingSubscription.update({
           where: { id: subscription.id },
@@ -795,5 +818,25 @@ export class BillingService {
 
   private formatDate(date: Date) {
     return date.toISOString().slice(0, 10);
+  }
+
+  private buildTrialPeriod(trialDays = 7) {
+    const trialStart = new Date();
+    const trialEnd = new Date(trialStart);
+    trialEnd.setDate(trialEnd.getDate() + trialDays);
+    return { trialStart, trialEnd };
+  }
+
+  private async buildTrialPeriodFromSubscription(subscriptionId: string) {
+    const subscription = await this.prisma.billingSubscription.findUnique({
+      where: { id: subscriptionId },
+      include: { plan: true, company: true },
+    });
+    if (!subscription) return null;
+    const trialPeriod = this.buildTrialPeriod(subscription.plan.trialDays);
+    return {
+      trialStart: subscription.company.trialStart || trialPeriod.trialStart,
+      trialEnd: subscription.company.trialEnd || trialPeriod.trialEnd,
+    };
   }
 }
