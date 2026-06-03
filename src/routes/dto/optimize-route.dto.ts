@@ -65,8 +65,7 @@ export class OptimizeRouteDto {
 }
 
 export class FinalizeTaskDto {
-  @IsString()
-  @IsIn(['COMPLETED', 'FAILED', 'RESCHEDULED'])
+  @IsEnum(['COMPLETED', 'FAILED', 'RESCHEDULED'])
   status: 'COMPLETED' | 'FAILED' | 'RESCHEDULED';
 
   @IsOptional()
@@ -74,12 +73,12 @@ export class FinalizeTaskDto {
   finalComment?: string;
 
   @IsOptional()
-  @IsDateString()
-  scheduledAt?: string;
+  @IsString()
+  dueDate?: string;
 
   @IsOptional()
-  @IsDateString()
-  dueDate?: string;
+  @IsString()
+  scheduledAt?: string;
 }
 
 // ============================================
@@ -89,15 +88,19 @@ export class FinalizeTaskDto {
 export class CompleteRouteDto {
   @IsOptional()
   @IsNumber()
-  distanciaReal?: number; // Km rodados
+  actualDistance?: number;  // distancia_real
 
   @IsOptional()
   @IsNumber()
-  combustivelReal?: number; // Litros consumidos
+  actualFuel?: number;      // combustivel_real
+
+  @IsOptional()
+  @IsNumber()
+  actualTime?: number;      // tempo_real
 
   @IsOptional()
   @IsString()
-  observacoes?: string;
+  observations?: string;    // observacoes
 }
 
 // ============================================

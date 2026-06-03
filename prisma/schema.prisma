@@ -17,6 +17,65 @@ enum SubscriptionStatus {
   EXPIRED
 }
 
+enum BillingAccountStatus {
+  TRIAL_ACTIVE
+  TRIAL_EXPIRED
+  ACTIVE
+  OVERDUE
+  BLOCKED
+  CANCELED
+}
+
+enum BillingSubscriptionStatus {
+  PENDING
+  ACTIVE
+  OVERDUE
+  CANCELED
+  EXPIRED
+}
+
+enum BillingPaymentStatus {
+  PENDING
+  RECEIVED
+  CONFIRMED
+  OVERDUE
+  REFUNDED
+  CHARGEBACK
+  CANCELED
+}
+
+enum BillingWebhookStatus {
+  RECEIVED
+  PROCESSED
+  DUPLICATED
+  FAILED
+}
+
+enum PartnerStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  BLOCKED
+}
+
+enum PartnerCommissionStatus {
+  PENDING
+  AVAILABLE
+  BLOCKED
+  PAID
+  CANCELED
+  REVERSED
+}
+
+enum PartnerWithdrawalStatus {
+  REQUESTED
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  PAID
+  CANCELED
+}
+
 enum PlanPeriod {
   MONTHLY
   YEARLY
@@ -109,6 +168,13 @@ model Company {
 
   notificationDays Int @default(7) @map("dias_antecedencia_notificacao")
 
+  billingStatus        BillingAccountStatus @default(TRIAL_ACTIVE) @map("status_financeiro")
+  trialStart           DateTime?            @map("inicio_teste")
+  trialEnd             DateTime?            @map("fim_teste")
+  asaasCustomerId      String?              @unique @map("asaas_customer_id") @db.VarChar(120)
+  referredByPartnerId  String?              @map("parceiro_indicador_id") @db.Uuid
+  referredByPartner    Partner?             @relation("PartnerReferredCompanies", fields: [referredByPartnerId], references: [id])
+
   // Controle de Criação/Atualização
   userCreate   User?    @relation("CompanyCreatedBy", fields: [userCreateId], references: [id])
   userCreateId String?  @map("user_create_id") @db.Uuid
@@ -147,9 +213,18 @@ model Company {
   auditLogs    AuditLog[]
   itemStages   FlowItemStage[] // ou flowItemStages, mas não ambos
   companyRoles CompanyRole[]
+  subscriptions BillingSubscription[]
+  payments      BillingPayment[]
+  webhookEvents AsaasWebhookEvent[]
+  partnerProfile Partner?
+  partnerCommissions PartnerCommission[]
+  partnerWithdrawals PartnerWithdrawal[]
 
   @@index([cnpj])
   @@index([status])
+  @@index([billingStatus])
+  @@index([trialEnd])
+  @@index([referredByPartnerId])
   @@index([createdAt])
   @@map("empresas")
 }
@@ -232,6 +307,9 @@ model User {
   assignedRoutes Route[] @relation("RouteAssignedUser")
 
   notifications UserNotification[]
+  partnerProfile Partner? @relation("PartnerUser")
+  approvedPartners Partner[] @relation("PartnerApprovedBy")
+  reviewedWithdrawals PartnerWithdrawal[] @relation("WithdrawalReviewedBy")
 
   createdSuppliers         Supplier[]         @relation("SupplierCreatedBy")
   updatedSuppliers         Supplier[]         @relation("SupplierUpdatedBy")
@@ -1296,6 +1374,221 @@ model AuditLog {
   @@index([companyId])
   @@index([createdAt])
   @@map("auditoria")
+}
+
+model BillingPlan {
+  id          String     @id @default(uuid()) @map("id") @db.Uuid
+  name        String     @map("nome") @db.VarChar(100)
+  description String?    @map("descricao") @db.Text
+  price       Decimal    @map("preco") @db.Decimal(10, 2)
+  period      PlanPeriod @default(MONTHLY) @map("periodo")
+  trialDays   Int        @default(7) @map("dias_teste")
+  userLimit   Int?       @map("limite_usuarios")
+  features    Json?      @map("recursos")
+  isActive    Boolean    @default(true) @map("ativo")
+  createdAt   DateTime   @default(now()) @map("criado_em")
+  updatedAt   DateTime   @updatedAt @map("atualizado_em")
+
+  subscriptions BillingSubscription[]
+
+  @@index([isActive])
+  @@index([period])
+  @@map("billing_plans")
+}
+
+model BillingSubscription {
+  id                 String                    @id @default(uuid()) @map("id") @db.Uuid
+  status             BillingSubscriptionStatus @default(PENDING) @map("status")
+  asaasSubscriptionId String?                   @unique @map("asaas_subscription_id") @db.VarChar(120)
+  value              Decimal                   @map("valor") @db.Decimal(10, 2)
+  cycle              PlanPeriod                @default(MONTHLY) @map("ciclo")
+  nextDueDate        DateTime?                 @map("proximo_vencimento")
+  startedAt          DateTime                  @default(now()) @map("inicio_em")
+  canceledAt         DateTime?                 @map("cancelado_em")
+  createdAt          DateTime                  @default(now()) @map("criado_em")
+  updatedAt          DateTime                  @updatedAt @map("atualizado_em")
+
+  companyId String  @map("empresa_id") @db.Uuid
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  planId String      @map("plano_id") @db.Uuid
+  plan   BillingPlan @relation(fields: [planId], references: [id])
+
+  payments BillingPayment[]
+
+  @@index([companyId])
+  @@index([planId])
+  @@index([status])
+  @@index([nextDueDate])
+  @@map("billing_subscriptions")
+}
+
+model BillingPayment {
+  id             String               @id @default(uuid()) @map("id") @db.Uuid
+  status         BillingPaymentStatus @default(PENDING) @map("status")
+  asaasPaymentId String?              @unique @map("asaas_payment_id") @db.VarChar(120)
+  billingType    String?              @map("tipo_cobranca") @db.VarChar(40)
+  value          Decimal              @map("valor") @db.Decimal(10, 2)
+  netValue       Decimal?             @map("valor_liquido") @db.Decimal(10, 2)
+  dueDate        DateTime?            @map("vencimento")
+  paymentDate    DateTime?            @map("data_pagamento")
+  invoiceUrl     String?              @map("invoice_url") @db.Text
+  bankSlipUrl    String?              @map("bank_slip_url") @db.Text
+  pixQrCode      String?              @map("pix_qr_code") @db.Text
+  rawPayload     Json?                @map("payload_bruto")
+  createdAt      DateTime             @default(now()) @map("criado_em")
+  updatedAt      DateTime             @updatedAt @map("atualizado_em")
+
+  companyId String  @map("empresa_id") @db.Uuid
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  subscriptionId String?              @map("assinatura_id") @db.Uuid
+  subscription   BillingSubscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+
+  commissions PartnerCommission[]
+
+  @@index([companyId])
+  @@index([subscriptionId])
+  @@index([status])
+  @@index([dueDate])
+  @@map("billing_payments")
+}
+
+model AsaasWebhookEvent {
+  id           String               @id @default(uuid()) @map("id") @db.Uuid
+  eventId      String               @unique @map("asaas_event_id") @db.VarChar(160)
+  eventType    String               @map("tipo_evento") @db.VarChar(120)
+  status       BillingWebhookStatus @default(RECEIVED) @map("status")
+  rawPayload   Json                 @map("payload_bruto")
+  processedAt  DateTime?            @map("processado_em")
+  errorMessage String?              @map("erro") @db.Text
+  createdAt    DateTime             @default(now()) @map("criado_em")
+
+  companyId String?  @map("empresa_id") @db.Uuid
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+
+  @@index([eventType])
+  @@index([status])
+  @@index([companyId])
+  @@index([createdAt])
+  @@map("asaas_webhook_events")
+}
+
+model Partner {
+  id              String        @id @default(uuid()) @map("id") @db.Uuid
+  status          PartnerStatus @default(PENDING) @map("status")
+  code            String        @unique @map("codigo") @db.VarChar(40)
+  commissionRate  Decimal       @default(10.00) @map("percentual_comissao") @db.Decimal(5, 2)
+  approvedAt      DateTime?     @map("aprovado_em")
+  rejectedReason  String?       @map("motivo_rejeicao") @db.Text
+  createdAt       DateTime      @default(now()) @map("criado_em")
+  updatedAt       DateTime      @updatedAt @map("atualizado_em")
+
+  companyId String  @unique @map("empresa_id") @db.Uuid
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  userId String? @unique @map("usuario_id") @db.Uuid
+  user   User?   @relation("PartnerUser", fields: [userId], references: [id], onDelete: SetNull)
+
+  approvedById String? @map("aprovado_por_id") @db.Uuid
+  approvedBy   User?   @relation("PartnerApprovedBy", fields: [approvedById], references: [id])
+
+  referredCompanies Company[] @relation("PartnerReferredCompanies")
+  referrals          PartnerReferral[]
+  commissions        PartnerCommission[]
+  withdrawals        PartnerWithdrawal[]
+
+  @@index([status])
+  @@index([companyId])
+  @@index([userId])
+  @@map("partners")
+}
+
+model PartnerReferral {
+  id        String   @id @default(uuid()) @map("id") @db.Uuid
+  leadName  String   @map("nome_lead") @db.VarChar(150)
+  document  String?  @map("documento") @db.VarChar(20)
+  email     String?  @map("email") @db.VarChar(255)
+  phone     String?  @map("telefone") @db.VarChar(30)
+  status    String   @default("TRIAL") @map("status") @db.VarChar(40)
+  companyId String?  @map("empresa_convertida_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("criado_em")
+  updatedAt DateTime @updatedAt @map("atualizado_em")
+
+  partnerId String  @map("parceiro_id") @db.Uuid
+  partner   Partner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  @@index([partnerId])
+  @@index([companyId])
+  @@index([status])
+  @@map("partner_referrals")
+}
+
+model PartnerCommission {
+  id           String                  @id @default(uuid()) @map("id") @db.Uuid
+  status       PartnerCommissionStatus @default(PENDING) @map("status")
+  baseValue    Decimal                 @map("valor_base") @db.Decimal(10, 2)
+  rate         Decimal                 @map("percentual") @db.Decimal(5, 2)
+  amount       Decimal                 @map("valor_comissao") @db.Decimal(10, 2)
+  availableAt  DateTime?               @map("disponivel_em")
+  paidAt       DateTime?               @map("pago_em")
+  canceledAt   DateTime?               @map("cancelado_em")
+  reason       String?                 @map("motivo") @db.Text
+  createdAt    DateTime                @default(now()) @map("criado_em")
+  updatedAt    DateTime                @updatedAt @map("atualizado_em")
+
+  partnerId String  @map("parceiro_id") @db.Uuid
+  partner   Partner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  companyId String  @map("empresa_id") @db.Uuid
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  paymentId String         @map("pagamento_id") @db.Uuid
+  payment   BillingPayment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  withdrawalId String?             @map("saque_id") @db.Uuid
+  withdrawal   PartnerWithdrawal?  @relation(fields: [withdrawalId], references: [id], onDelete: SetNull)
+
+  @@unique([partnerId, paymentId])
+  @@index([partnerId])
+  @@index([companyId])
+  @@index([paymentId])
+  @@index([status])
+  @@index([availableAt])
+  @@map("partner_commissions")
+}
+
+model PartnerWithdrawal {
+  id              String                  @id @default(uuid()) @map("id") @db.Uuid
+  status          PartnerWithdrawalStatus @default(REQUESTED) @map("status")
+  amount          Decimal                 @map("valor") @db.Decimal(10, 2)
+  nfseUrl         String?                 @map("nfse_url") @db.Text
+  nfseNumber      String?                 @map("nfse_numero") @db.VarChar(80)
+  nfseDocument    String?                 @map("nfse_documento") @db.VarChar(20)
+  nfseIssuedAt    DateTime?               @map("nfse_emitida_em")
+  reviewedAt      DateTime?               @map("revisado_em")
+  rejectionReason String?                 @map("motivo_reprovacao") @db.Text
+  paidAt          DateTime?               @map("pago_em")
+  paymentReceipt  String?                 @map("comprovante_pagamento") @db.Text
+  createdAt       DateTime                @default(now()) @map("criado_em")
+  updatedAt       DateTime                @updatedAt @map("atualizado_em")
+
+  partnerId String  @map("parceiro_id") @db.Uuid
+  partner   Partner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  companyId String  @map("empresa_id") @db.Uuid
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  reviewedById String? @map("revisado_por_id") @db.Uuid
+  reviewedBy   User?   @relation("WithdrawalReviewedBy", fields: [reviewedById], references: [id])
+
+  commissions PartnerCommission[]
+
+  @@index([partnerId])
+  @@index([companyId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("partner_withdrawals")
 }
 
 // model Subscription {

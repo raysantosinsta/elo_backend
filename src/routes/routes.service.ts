@@ -70,10 +70,14 @@ interface RouteComparison {
   };
 }
 
-// DTO para finalizar rota
+// No arquivo dto/optimize-route.dto.ts
 export interface CompleteRouteDto {
   actualDistance?: number;
   actualFuel?: number;
+  actualTime?: number;
+  distanciaReal?: number;
+  combustivelReal?: number;
+  duracaoReal?: number;
   observacoes?: string;
 }
 
@@ -89,7 +93,7 @@ export class RouteService {
   constructor(
     private prisma: PrismaService,
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
-  ) {}
+  ) { }
 
   private readonly FUEL_EFFICIENCY_KM_PER_L = 30; // 20 km por litro (você pode ajustar)
 
@@ -140,24 +144,77 @@ export class RouteService {
   }
 
   /**
-   * Finaliza uma rota (motorista concluiu)
-   * Registra distância real, tempo real e consumo real
-   */
+ * Retorna estatísticas resumidas de todas as rotas
+ */
+  async getRoutesSummary(companyId: string): Promise<any> {
+    this.logger.log(`[getRoutesSummary] Gerando resumo para empresa ${companyId}`);
+
+    const routes = await this.prisma.route.findMany({
+      where: { companyId },
+      include: {
+        _count: {
+          select: { stops: true }
+        }
+      }
+    });
+
+    const summary = {
+      total: routes.length,
+      byStatus: {
+        scheduled: routes.filter((r) => r.status === 'SCHEDULED').length,
+        inProgress: routes.filter((r) => r.status === 'IN_PROGRESS').length,
+        finished: routes.filter((r) => r.status === 'FINISHED').length,
+        canceled: routes.filter((r) => r.status === 'CANCELED').length,
+      },
+      totalStops: routes.reduce(
+        (acc, route) => acc + (route._count?.stops || 0),
+        0,
+      ),
+      totalDistance: routes.reduce(
+        (acc, route) => acc + (route.totalDistanceMeters || 0),
+        0,
+      ),
+      averageDistancePerRoute:
+        routes.length > 0
+          ? routes.reduce(
+            (acc, route) => acc + (route.totalDistanceMeters || 0),
+            0,
+          ) /
+          routes.length /
+          1000
+          : 0,
+      lastRoutes: routes.slice(0, 5).map((r) => ({
+        id: r.id,
+        title: r.title,
+        status: r.status,
+        stopsCount: r._count?.stops || 0,
+        createdAt: r.createdAt,
+      })),
+    };
+
+    return summary;
+  }
+
   async completeRoute(
     routeId: string,
     companyId: string,
     userId: string,
     dto: CompleteRouteDto,
   ): Promise<any> {
-    this.logger.log(`[completeRoute] Finalizando rota ${routeId}`);
-    this.logger.log(`   Distância real: ${dto.actualDistance ?? 'N/A'} km`);
-    this.logger.log(`   Combustível real: ${dto.actualFuel ?? 'N/A'} L`);
+    // 🔥 USA OS NOMES EM INGLÊS
+    const distReal = dto.actualDistance;
+    const fuelReal = dto.actualFuel;
+    const timeReal = dto.actualTime;
+
+    this.logger.log(`[completeRoute] ========== FINALIZANDO ROTA ==========`);
+    this.logger.log(`   Rota ID: ${routeId}`);
+    this.logger.log(`   actualDistance: ${distReal ?? 'N/A'} km`);
+    this.logger.log(`   actualFuel: ${fuelReal ?? 'N/A'} L`);
+    this.logger.log(`   actualTime: ${timeReal ?? 'N/A'} minutos`);
 
     const route = await this.prisma.route.findFirst({
       where: { id: routeId, companyId },
-      include: {
-        stops: true,
-      },
+      include: { stops: true },
     });
 
     if (!route) {
@@ -165,23 +222,10 @@ export class RouteService {
     }
 
     if (route.status !== RouteStatus.IN_PROGRESS) {
-      throw new BadRequestException(
-        'Apenas rotas em andamento podem ser finalizadas',
-      );
+      throw new BadRequestException('Apenas rotas em andamento podem ser finalizadas');
     }
 
     const now = new Date();
-    let tempoRealSegundos: number | null = null;
-
-    // Calcula tempo real se a rota foi iniciada
-    if (route.startedAt) {
-      tempoRealSegundos = Math.floor(
-        (now.getTime() - new Date(route.startedAt).getTime()) / 1000,
-      );
-      this.logger.log(
-        `   Tempo real: ${tempoRealSegundos} segundos (${this.formatDuration(tempoRealSegundos)})`,
-      );
-    }
 
     // Prepara os dados para atualização
     const updateData: any = {
@@ -189,61 +233,52 @@ export class RouteService {
       completedAt: now,
     };
 
-    // Adiciona campos de rota realizada se fornecidos
-    if (dto.actualDistance !== undefined && dto.actualDistance !== null) {
-      updateData.actualDistance = dto.actualDistance;
+    // 🔥 SALVA DISTÂNCIA REAL
+    if (distReal !== undefined && distReal !== null && distReal > 0) {
+      updateData.actualDistance = distReal;
+      this.logger.log(`   ✅ Salvando actualDistance: ${distReal} km`);
     }
 
-    if (dto.actualFuel !== undefined && dto.actualFuel !== null) {
-      updateData.actualFuel = dto.actualFuel;
+    // 🔥 SALVA COMBUSTÍVEL REAL
+    if (fuelReal !== undefined && fuelReal !== null && fuelReal > 0) {
+      updateData.actualFuel = fuelReal;
+      this.logger.log(`   ✅ Salvando actualFuel: ${fuelReal} L`);
     }
 
-    if (tempoRealSegundos !== null) {
-      updateData.actualTime = tempoRealSegundos;
+    // 🔥 SALVA TEMPO REAL (se veio no DTO)
+    if (timeReal !== undefined && timeReal !== null && timeReal > 0) {
+      updateData.actualTime = timeReal;
+      this.logger.log(`   ✅ Salvando actualTime: ${timeReal} minutos`);
+    } else if (route.startedAt) {
+      // Se não veio, calcula baseado no startedAt
+      const tempoRealSegundos = Math.floor((now.getTime() - new Date(route.startedAt).getTime()) / 1000);
+      const tempoRealMinutos = Math.floor(tempoRealSegundos / 60);
+      updateData.actualTime = tempoRealMinutos;
+      this.logger.log(`   ✅ Salvando actualTime (calculado): ${tempoRealMinutos} minutos`);
     }
 
-    // Adiciona observações na descrição
+    // Adiciona observações
     if (dto.observacoes) {
       updateData.description = route.description
-        ? `${route.description}\n\n📝 Observações da execução: ${dto.observacoes}`
-        : `📝 Observações da execução: ${dto.observacoes}`;
+        ? `${route.description}\n\n📝 ${dto.observacoes}`
+        : `📝 ${dto.observacoes}`;
     }
 
+    // 🔥 EXECUTA A ATUALIZAÇÃO
     const updatedRoute = await this.prisma.route.update({
       where: { id: routeId },
       data: updateData,
     });
 
-    // Marca todas as paradas não visitadas como não finalizadas (opcional)
-    const unvisitedStops = route.stops.filter((stop) => !stop.visited);
-    if (unvisitedStops.length > 0) {
-      this.logger.warn(
-        `   ⚠️ ${unvisitedStops.length} paradas não foram visitadas`,
-      );
-
-      await this.prisma.routeStop.updateMany({
-        where: {
-          routeId,
-          visited: false,
-        },
-        data: {
-          notes: `[AUTOMÁTICO] Parada não visitada - rota finalizada em ${now.toISOString()}`,
-        },
-      });
-    }
-
-    const comparacao = this.calcularComparacaoRota(route, updatedRoute);
-
-    this.logger.log(`[completeRoute] Rota ${routeId} finalizada!`);
-    this.logger.log(
-      `   Distância real: ${updatedRoute.actualDistance ?? 'N/A'} km`,
-    );
-    this.logger.log(`   Consumo real: ${updatedRoute.actualFuel ?? 'N/A'} L`);
+    this.logger.log(`[completeRoute] ROTA FINALIZADA COM SUCESSO!`);
+    this.logger.log(`   📊 RESULTADO SALVO:`);
+    this.logger.log(`   - actualDistance: ${updatedRoute.actualDistance ?? 'NÃO SALVO'} km`);
+    this.logger.log(`   - actualTime: ${updatedRoute.actualTime ?? 'NÃO SALVO'} min`);
+    this.logger.log(`   - actualFuel: ${updatedRoute.actualFuel ?? 'NÃO SALVO'} L`);
 
     return {
       message: 'Rota finalizada com sucesso',
       route: updatedRoute,
-      comparacao,
     };
   }
 
@@ -773,353 +808,353 @@ export class RouteService {
     };
   }
 
-/**
- * Cria uma nova rota
- */
-async createRoute(dto: CreateRouteDto, companyId: string, userId: string) {
-  this.logger.log('='.repeat(80));
-  this.logger.log(`🚀 [createRoute] INICIANDO CRIAÇÃO DE ROTA`);
-  this.logger.log(`📝 Título: ${dto.title}`);
-  this.logger.log(`📅 Data recebida (raw): ${dto.routeDate}`);
-  this.logger.log(`📦 Quantidade de paradas: ${dto.stops.length}`);
-  this.logger.log(`🎯 Tipo de ordenação: ${dto.orderBy || 'DISTANCE'}`);
+  /**
+   * Cria uma nova rota
+   */
+  async createRoute(dto: CreateRouteDto, companyId: string, userId: string) {
+    this.logger.log('='.repeat(80));
+    this.logger.log(`🚀 [createRoute] INICIANDO CRIAÇÃO DE ROTA`);
+    this.logger.log(`📝 Título: ${dto.title}`);
+    this.logger.log(`📅 Data recebida (raw): ${dto.routeDate}`);
+    this.logger.log(`📦 Quantidade de paradas: ${dto.stops.length}`);
+    this.logger.log(`🎯 Tipo de ordenação: ${dto.orderBy || 'DISTANCE'}`);
 
-  let routeDate: Date | null = null;
+    let routeDate: Date | null = null;
 
-  if (dto.routeDate) {
-    if (
-      typeof dto.routeDate === 'string' &&
-      dto.routeDate.match(/^\d{4}-\d{2}-\d{2}$/)
-    ) {
-      const [year, month, day] = dto.routeDate.split('-');
-      routeDate = new Date(
-        Date.UTC(
-          parseInt(year),
-          parseInt(month) - 1,
-          parseInt(day),
-          12,
-          0,
-          0,
-        ),
-      );
-    } else if (typeof dto.routeDate === 'string') {
-      routeDate = new Date(dto.routeDate);
-    } else if ((dto.routeDate as any) instanceof Date) {
-      routeDate = dto.routeDate;
-    }
-  }
-
-  const finalRouteDate = routeDate;
-  let optimizedStops = [...dto.stops];
-  let totalDistanceMeters = 0;
-  let totalDurationSeconds = 0;
-
-  // 🔥 FUNÇÃO PARA VALIDAR E CORRIGIR COORDENADAS
-  const validateAndFixCoordinates = (lat: number, lng: number, name: string = 'sem nome'): { latitude: number; longitude: number; fixed: boolean } => {
-    let latitude = lat;
-    let longitude = lng;
-    let fixed = false;
-
-    this.logger.log(`🔍 [validateCoordinates] Validando parada: ${name}`);
-    this.logger.log(`   Original: lat=${latitude}, lng=${longitude}`);
-
-    // Verificar se é NaN
-    if (isNaN(latitude) || isNaN(longitude)) {
-      this.logger.error(`   ❌ Coordenada NaN!`);
-      return { latitude: 0, longitude: 0, fixed: true };
-    }
-
-    // Verificar se é zero
-    if (latitude === 0 && longitude === 0) {
-      this.logger.error(`   ❌ Coordenada zero!`);
-      return { latitude: 0, longitude: 0, fixed: true };
-    }
-
-    // 🔥 CORREÇÃO: Se latitude > 90 e longitude <= 90, estão trocadas
-    if (Math.abs(latitude) > 90 && Math.abs(longitude) <= 90) {
-      this.logger.warn(`   ⚠️ Coordenadas parecem trocadas! Corrigindo...`);
-      const temp = latitude;
-      latitude = longitude;
-      longitude = temp;
-      fixed = true;
-      this.logger.log(`   ✅ Corrigido: lat=${latitude}, lng=${longitude}`);
-    }
-
-    // 🔥 CORREÇÃO: Se latitude é positiva e longitude negativa, mas valor absoluto da latitude é pequeno (possível Brasil)
-    // Brasil tem latitude negativa (Sul), então se for positiva, pode estar errada
-    if (latitude > 0 && latitude < 10 && longitude < 0 && longitude > -80) {
-      this.logger.warn(`   ⚠️ Latitude positiva (${latitude}) detectada para endereço no Brasil. Verificar se está correta.`);
-    }
-
-    // Validar se está dentro do Brasil (aproximadamente)
-    const isValidLat = latitude >= -34 && latitude <= 5;
-    const isValidLng = longitude >= -74 && longitude <= -34;
-
-    if (!isValidLat) {
-      this.logger.warn(`   ⚠️ Latitude (${latitude}) fora do intervalo esperado para Brasil (-34 a 5)`);
-    }
-    if (!isValidLng) {
-      this.logger.warn(`   ⚠️ Longitude (${longitude}) fora do intervalo esperado para Brasil (-74 a -34)`);
-    }
-
-    if (isValidLat && isValidLng) {
-      this.logger.log(`   ✅ Coordenada válida para o Brasil!`);
-    }
-
-    return { latitude, longitude, fixed };
-  };
-
-  // 🔥 VALIDAR E CORRIGIR COORDENADAS DAS PARADAS ANTES DE PROCESSAR
-  const validatedStops = dto.stops.map(stop => {
-    const stopName = stop.name || `Parada sem nome`;
-    const validated = validateAndFixCoordinates(stop.latitude, stop.longitude, stopName);
-    
-    // Se foi corrigido, atualizar o objeto
-    if (validated.fixed) {
-      this.logger.warn(`   🔧 Parada "${stopName}" teve coordenadas corrigidas!`);
-    }
-    
-    return {
-      ...stop,
-      latitude: validated.latitude,
-      longitude: validated.longitude,
-    };
-  });
-
-  if (validatedStops.length > 0) {
-    if (validatedStops.length === 1) {
-      totalDistanceMeters = 0;
-      totalDurationSeconds = 0;
-      optimizedStops = validatedStops;
-      this.logger.log(`📋 Rota com 1 parada - distância será 0`);
-    } else {
-      const startPos = {
-        lat: validatedStops[0].latitude,
-        lng: validatedStops[0].longitude,
-      };
-
-      this.logger.log(`📍 [startPos] Ponto de partida: lat=${startPos.lat}, lng=${startPos.lng}`);
-
-      if (dto.orderBy === RouteOrderType.DISTANCE) {
-        this.logger.log(
-          `🎯 Otimizando rota por DISTÂNCIA com ${validatedStops.length} paradas`,
+    if (dto.routeDate) {
+      if (
+        typeof dto.routeDate === 'string' &&
+        dto.routeDate.match(/^\d{4}-\d{2}-\d{2}$/)
+      ) {
+        const [year, month, day] = dto.routeDate.split('-');
+        routeDate = new Date(
+          Date.UTC(
+            parseInt(year),
+            parseInt(month) - 1,
+            parseInt(day),
+            12,
+            0,
+            0,
+          ),
         );
-        optimizedStops = this.optimizeStopsByDistance(startPos, validatedStops);
-      } else {
-        this.logger.log(
-          `📋 Mantendo ordem original (${validatedStops.length} parada(s))`,
-        );
-        optimizedStops = validatedStops;
+      } else if (typeof dto.routeDate === 'string') {
+        routeDate = new Date(dto.routeDate);
+      } else if ((dto.routeDate as any) instanceof Date) {
+        routeDate = dto.routeDate;
+      }
+    }
+
+    const finalRouteDate = routeDate;
+    let optimizedStops = [...dto.stops];
+    let totalDistanceMeters = 0;
+    let totalDurationSeconds = 0;
+
+    // 🔥 FUNÇÃO PARA VALIDAR E CORRIGIR COORDENADAS
+    const validateAndFixCoordinates = (lat: number, lng: number, name: string = 'sem nome'): { latitude: number; longitude: number; fixed: boolean } => {
+      let latitude = lat;
+      let longitude = lng;
+      let fixed = false;
+
+      this.logger.log(`🔍 [validateCoordinates] Validando parada: ${name}`);
+      this.logger.log(`   Original: lat=${latitude}, lng=${longitude}`);
+
+      // Verificar se é NaN
+      if (isNaN(latitude) || isNaN(longitude)) {
+        this.logger.error(`   ❌ Coordenada NaN!`);
+        return { latitude: 0, longitude: 0, fixed: true };
       }
 
-      const stats = this.calculateRouteStatsFromStops(
-        startPos,
-        optimizedStops,
-      );
-      totalDistanceMeters = stats.totalDistanceMeters;
-      totalDurationSeconds = stats.totalDurationSeconds;
-      const estimatedFuelFromStats = stats.estimatedFuel;
+      // Verificar se é zero
+      if (latitude === 0 && longitude === 0) {
+        this.logger.error(`   ❌ Coordenada zero!`);
+        return { latitude: 0, longitude: 0, fixed: true };
+      }
 
-      this.logger.log(
-        `⛽ [createRoute] Combustível calculado pelo stats: ${estimatedFuelFromStats.toFixed(2)} L`,
-      );
-    }
-  }
+      // 🔥 CORREÇÃO: Se latitude > 90 e longitude <= 90, estão trocadas
+      if (Math.abs(latitude) > 90 && Math.abs(longitude) <= 90) {
+        this.logger.warn(`   ⚠️ Coordenadas parecem trocadas! Corrigindo...`);
+        const temp = latitude;
+        latitude = longitude;
+        longitude = temp;
+        fixed = true;
+        this.logger.log(`   ✅ Corrigido: lat=${latitude}, lng=${longitude}`);
+      }
 
-  // 🔥 CALCULAR COMBUSTÍVEL PREVISTO BASEADO NA DISTÂNCIA
-  let calculatedFuel: number | null = null;
+      // 🔥 CORREÇÃO: Se latitude é positiva e longitude negativa, mas valor absoluto da latitude é pequeno (possível Brasil)
+      // Brasil tem latitude negativa (Sul), então se for positiva, pode estar errada
+      if (latitude > 0 && latitude < 10 && longitude < 0 && longitude > -80) {
+        this.logger.warn(`   ⚠️ Latitude positiva (${latitude}) detectada para endereço no Brasil. Verificar se está correta.`);
+      }
 
-  if (totalDistanceMeters > 0) {
-    const distanciaKm = totalDistanceMeters / 1000;
-    calculatedFuel = distanciaKm / this.FUEL_EFFICIENCY_KM_PER_L;
+      // Validar se está dentro do Brasil (aproximadamente)
+      const isValidLat = latitude >= -34 && latitude <= 5;
+      const isValidLng = longitude >= -74 && longitude <= -34;
 
-    this.logger.log(`⛽ [createRoute] Cálculo automático de combustível:`);
-    this.logger.log(`   Distância: ${distanciaKm.toFixed(2)} km`);
-    this.logger.log(`   Eficiência: ${this.FUEL_EFFICIENCY_KM_PER_L} km/L`);
-    this.logger.log(
-      `   Combustível calculado: ${calculatedFuel.toFixed(2)} L`,
-    );
-  } else {
-    this.logger.log(
-      `⛽ [createRoute] Distância zero, combustível não calculado`,
-    );
-  }
+      if (!isValidLat) {
+        this.logger.warn(`   ⚠️ Latitude (${latitude}) fora do intervalo esperado para Brasil (-34 a 5)`);
+      }
+      if (!isValidLng) {
+        this.logger.warn(`   ⚠️ Longitude (${longitude}) fora do intervalo esperado para Brasil (-74 a -34)`);
+      }
 
-  // 🔥 USAR O VALOR DO DTO SE FOI ENVIADO, SENÃO USA O CALCULADO
-  const finalEstimatedFuel = (dto as any).estimatedFuel ?? calculatedFuel;
+      if (isValidLat && isValidLng) {
+        this.logger.log(`   ✅ Coordenada válida para o Brasil!`);
+      }
 
-  this.logger.log(
-    `⛽ [createRoute] Combustível final: ${finalEstimatedFuel !== null ? finalEstimatedFuel.toFixed(2) + ' L' : 'Não definido'}`,
-  );
+      return { latitude, longitude, fixed };
+    };
 
-  const stopTitles = validatedStops
-    .map((stop) => stop.name)
-    .filter(
-      (name): name is string =>
-        name !== null && name !== undefined && name !== '',
-    );
+    // 🔥 VALIDAR E CORRIGIR COORDENADAS DAS PARADAS ANTES DE PROCESSAR
+    const validatedStops = dto.stops.map(stop => {
+      const stopName = stop.name || `Parada sem nome`;
+      const validated = validateAndFixCoordinates(stop.latitude, stop.longitude, stopName);
 
-  let existingTasks: any[] = [];
-  if (stopTitles.length > 0) {
-    existingTasks = await this.prisma.task.findMany({
-      where: { companyId: companyId, title: { in: stopTitles } },
-      include: { taskAddress: true },
+      // Se foi corrigido, atualizar o objeto
+      if (validated.fixed) {
+        this.logger.warn(`   🔧 Parada "${stopName}" teve coordenadas corrigidas!`);
+      }
+
+      return {
+        ...stop,
+        latitude: validated.latitude,
+        longitude: validated.longitude,
+      };
     });
-  }
 
-  this.logger.log(`📊 Tasks encontradas: ${existingTasks.length}`);
+    if (validatedStops.length > 0) {
+      if (validatedStops.length === 1) {
+        totalDistanceMeters = 0;
+        totalDurationSeconds = 0;
+        optimizedStops = validatedStops;
+        this.logger.log(`📋 Rota com 1 parada - distância será 0`);
+      } else {
+        const startPos = {
+          lat: validatedStops[0].latitude,
+          lng: validatedStops[0].longitude,
+        };
 
-  const taskByTitle = new Map();
-  existingTasks.forEach((task) => {
-    taskByTitle.set(task.title, task);
-  });
+        this.logger.log(`📍 [startPos] Ponto de partida: lat=${startPos.lat}, lng=${startPos.lng}`);
 
-  // 🔥 LOG DAS COORDENADAS QUE SERÃO SALVAS
-  this.logger.log(`\n📦 [STOPS] Paradas que serão salvas:`);
-  optimizedStops.forEach((stop, index) => {
-    const stopName = stop.name || `Parada ${index + 1}`;
-    this.logger.log(`   ${index + 1}. ${stopName}`);
-    this.logger.log(`      Endereço: ${stop.address}, ${stop.city}/${stop.state}`);
-    this.logger.log(`      Coordenadas: lat=${stop.latitude}, lng=${stop.longitude}`);
-  });
+        if (dto.orderBy === RouteOrderType.DISTANCE) {
+          this.logger.log(
+            `🎯 Otimizando rota por DISTÂNCIA com ${validatedStops.length} paradas`,
+          );
+          optimizedStops = this.optimizeStopsByDistance(startPos, validatedStops);
+        } else {
+          this.logger.log(
+            `📋 Mantendo ordem original (${validatedStops.length} parada(s))`,
+          );
+          optimizedStops = validatedStops;
+        }
 
-  // 🔥 CRIA A ROTA COM O COMBUSTÍVEL CALCULADO
-  const route = await this.prisma.route.create({
-    data: {
-      title: dto.title,
-      description: dto.description || '',
-      routeDate: finalRouteDate,
-      status: RouteStatus.SCHEDULED,
-      totalDistanceMeters: totalDistanceMeters,
-      totalDurationSeconds: totalDurationSeconds,
-      estimatedFuel: finalEstimatedFuel,
-      optimizedAt: new Date(),
-      companyId: companyId,
-      userCreateId: userId,
-      userAssignedId: dto.userAssignedId || null,
-      orderBy: dto.orderBy || 'DISTANCE',
-      stops: {
-        create: await Promise.all(
-          optimizedStops.map(async (stop, index) => {
-            const existingTask = taskByTitle.get(stop.name);
-            let zipCode = '';
-            let bairro = '';
+        const stats = this.calculateRouteStatsFromStops(
+          startPos,
+          optimizedStops,
+        );
+        totalDistanceMeters = stats.totalDistanceMeters;
+        totalDurationSeconds = stats.totalDurationSeconds;
+        const estimatedFuelFromStats = stats.estimatedFuel;
 
-            if (existingTask) {
-              const taskAddress = await this.prisma.taskAddress.findFirst({
-                where: { taskId: existingTask.id },
-              });
-              if (taskAddress) {
-                zipCode = taskAddress.cep || '';
-                bairro = taskAddress.bairro || '';
-                this.logger.log(
-                  `📦 Parada ${index + 1}: Dados copiados da task "${existingTask.title}": CEP=${zipCode}, Bairro=${bairro}`,
-                );
-              }
-            }
-
-            if (!zipCode && stop.zipCode) zipCode = stop.zipCode;
-            if (!bairro && stop.bairro) bairro = stop.bairro;
-
-            const stopName = stop.name || `Parada ${index + 1}`;
-
-            return {
-              name: stopName,
-              address: stop.address,
-              complement: stop.complement || '',
-              neighborhood: (bairro || stop.neighborhood || '').toString(),
-              city: stop.city,
-              state: stop.state,
-              zipCode: (zipCode || '').toString(),
-              latitude: stop.latitude,
-              longitude: stop.longitude,
-              order: index + 1,
-              notes: stop.notes || '',
-              companyId: companyId,
-              taskId: existingTask?.id || null,
-            };
-          }),
-        ),
-      },
-    },
-    include: { stops: { orderBy: { order: 'asc' } } },
-  });
-
-  this.logger.log(`✅ [createRoute] Rota criada com ID: ${route.id}`);
-  this.logger.log(`   Distância total: ${route.totalDistanceMeters} metros`);
-  this.logger.log(`   Duração total: ${route.totalDurationSeconds} segundos`);
-  this.logger.log(
-    `   Combustível previsto: ${route.estimatedFuel !== null ? route.estimatedFuel.toFixed(2) + ' L' : 'Não definido'}`,
-  );
-
-  // 🔥 VERIFICAR COORDENADAS SALVAS
-  const savedStops = await this.prisma.routeStop.findMany({
-    where: { routeId: route.id },
-    select: { name: true, latitude: true, longitude: true, address: true, city: true, state: true },
-  });
-  
-  this.logger.log(`\n🔍 [VERIFICAÇÃO] Coordenadas salvas no banco:`);
-  savedStops.forEach((stop) => {
-    this.logger.log(`   📍 ${stop.name}`);
-    this.logger.log(`      Endereço: ${stop.address}, ${stop.city}/${stop.state}`);
-    this.logger.log(`      Coordenadas salvas: lat=${stop.latitude}, lng=${stop.longitude}`);
-  });
-
-  if (existingTasks.length > 0) {
-    this.logger.log(
-      `🔄 Vinculando ${existingTasks.length} tasks à rota ${route.id}`,
-    );
-    for (const task of existingTasks) {
-      await this.prisma.task.update({
-        where: { id: task.id },
-        data: { routeId: route.id },
-      });
-      this.logger.log(`   ✅ Task "${task.title}" vinculada à rota`);
+        this.logger.log(
+          `⛽ [createRoute] Combustível calculado pelo stats: ${estimatedFuelFromStats.toFixed(2)} L`,
+        );
+      }
     }
+
+    // 🔥 CALCULAR COMBUSTÍVEL PREVISTO BASEADO NA DISTÂNCIA
+    let calculatedFuel: number | null = null;
+
+    if (totalDistanceMeters > 0) {
+      const distanciaKm = totalDistanceMeters / 1000;
+      calculatedFuel = distanciaKm / this.FUEL_EFFICIENCY_KM_PER_L;
+
+      this.logger.log(`⛽ [createRoute] Cálculo automático de combustível:`);
+      this.logger.log(`   Distância: ${distanciaKm.toFixed(2)} km`);
+      this.logger.log(`   Eficiência: ${this.FUEL_EFFICIENCY_KM_PER_L} km/L`);
+      this.logger.log(
+        `   Combustível calculado: ${calculatedFuel.toFixed(2)} L`,
+      );
+    } else {
+      this.logger.log(
+        `⛽ [createRoute] Distância zero, combustível não calculado`,
+      );
+    }
+
+    // 🔥 USAR O VALOR DO DTO SE FOI ENVIADO, SENÃO USA O CALCULADO
+    const finalEstimatedFuel = (dto as any).estimatedFuel ?? calculatedFuel;
+
+    this.logger.log(
+      `⛽ [createRoute] Combustível final: ${finalEstimatedFuel !== null ? finalEstimatedFuel.toFixed(2) + ' L' : 'Não definido'}`,
+    );
+
+    const stopTitles = validatedStops
+      .map((stop) => stop.name)
+      .filter(
+        (name): name is string =>
+          name !== null && name !== undefined && name !== '',
+      );
+
+    let existingTasks: any[] = [];
+    if (stopTitles.length > 0) {
+      existingTasks = await this.prisma.task.findMany({
+        where: { companyId: companyId, title: { in: stopTitles } },
+        include: { taskAddress: true },
+      });
+    }
+
+    this.logger.log(`📊 Tasks encontradas: ${existingTasks.length}`);
+
+    const taskByTitle = new Map();
+    existingTasks.forEach((task) => {
+      taskByTitle.set(task.title, task);
+    });
+
+    // 🔥 LOG DAS COORDENADAS QUE SERÃO SALVAS
+    this.logger.log(`\n📦 [STOPS] Paradas que serão salvas:`);
+    optimizedStops.forEach((stop, index) => {
+      const stopName = stop.name || `Parada ${index + 1}`;
+      this.logger.log(`   ${index + 1}. ${stopName}`);
+      this.logger.log(`      Endereço: ${stop.address}, ${stop.city}/${stop.state}`);
+      this.logger.log(`      Coordenadas: lat=${stop.latitude}, lng=${stop.longitude}`);
+    });
+
+    // 🔥 CRIA A ROTA COM O COMBUSTÍVEL CALCULADO
+    const route = await this.prisma.route.create({
+      data: {
+        title: dto.title,
+        description: dto.description || '',
+        routeDate: finalRouteDate,
+        status: RouteStatus.SCHEDULED,
+        totalDistanceMeters: totalDistanceMeters,
+        totalDurationSeconds: totalDurationSeconds,
+        estimatedFuel: finalEstimatedFuel,
+        optimizedAt: new Date(),
+        companyId: companyId,
+        userCreateId: userId,
+        userAssignedId: dto.userAssignedId || null,
+        orderBy: dto.orderBy || 'DISTANCE',
+        stops: {
+          create: await Promise.all(
+            optimizedStops.map(async (stop, index) => {
+              const existingTask = taskByTitle.get(stop.name);
+              let zipCode = '';
+              let bairro = '';
+
+              if (existingTask) {
+                const taskAddress = await this.prisma.taskAddress.findFirst({
+                  where: { taskId: existingTask.id },
+                });
+                if (taskAddress) {
+                  zipCode = taskAddress.cep || '';
+                  bairro = taskAddress.bairro || '';
+                  this.logger.log(
+                    `📦 Parada ${index + 1}: Dados copiados da task "${existingTask.title}": CEP=${zipCode}, Bairro=${bairro}`,
+                  );
+                }
+              }
+
+              if (!zipCode && stop.zipCode) zipCode = stop.zipCode;
+              if (!bairro && stop.bairro) bairro = stop.bairro;
+
+              const stopName = stop.name || `Parada ${index + 1}`;
+
+              return {
+                name: stopName,
+                address: stop.address,
+                complement: stop.complement || '',
+                neighborhood: (bairro || stop.neighborhood || '').toString(),
+                city: stop.city,
+                state: stop.state,
+                zipCode: (zipCode || '').toString(),
+                latitude: stop.latitude,
+                longitude: stop.longitude,
+                order: index + 1,
+                notes: stop.notes || '',
+                companyId: companyId,
+                taskId: existingTask?.id || null,
+              };
+            }),
+          ),
+        },
+      },
+      include: { stops: { orderBy: { order: 'asc' } } },
+    });
+
+    this.logger.log(`✅ [createRoute] Rota criada com ID: ${route.id}`);
+    this.logger.log(`   Distância total: ${route.totalDistanceMeters} metros`);
+    this.logger.log(`   Duração total: ${route.totalDurationSeconds} segundos`);
+    this.logger.log(
+      `   Combustível previsto: ${route.estimatedFuel !== null ? route.estimatedFuel.toFixed(2) + ' L' : 'Não definido'}`,
+    );
+
+    // 🔥 VERIFICAR COORDENADAS SALVAS
+    const savedStops = await this.prisma.routeStop.findMany({
+      where: { routeId: route.id },
+      select: { name: true, latitude: true, longitude: true, address: true, city: true, state: true },
+    });
+
+    this.logger.log(`\n🔍 [VERIFICAÇÃO] Coordenadas salvas no banco:`);
+    savedStops.forEach((stop) => {
+      this.logger.log(`   📍 ${stop.name}`);
+      this.logger.log(`      Endereço: ${stop.address}, ${stop.city}/${stop.state}`);
+      this.logger.log(`      Coordenadas salvas: lat=${stop.latitude}, lng=${stop.longitude}`);
+    });
+
+    if (existingTasks.length > 0) {
+      this.logger.log(
+        `🔄 Vinculando ${existingTasks.length} tasks à rota ${route.id}`,
+      );
+      for (const task of existingTasks) {
+        await this.prisma.task.update({
+          where: { id: task.id },
+          data: { routeId: route.id },
+        });
+        this.logger.log(`   ✅ Task "${task.title}" vinculada à rota`);
+      }
+    }
+
+    const completeRoute = await this.prisma.route.findUnique({
+      where: { id: route.id },
+      include: {
+        stops: { orderBy: { order: 'asc' } },
+        userAssigned: { select: { id: true, name: true, contact: true } },
+      },
+    });
+
+    const formattedDistance =
+      totalDistanceMeters > 0
+        ? `${(totalDistanceMeters / 1000).toFixed(1)} km`
+        : dto.stops.length === 1
+          ? '0 km'
+          : 'Distância não calculada';
+
+    const formattedDuration =
+      totalDurationSeconds > 0
+        ? this.formatDuration(totalDurationSeconds)
+        : dto.stops.length === 1
+          ? '0 min'
+          : 'Duração não calculada';
+
+    const formattedFuel =
+      route.estimatedFuel !== null
+        ? `${route.estimatedFuel.toFixed(1)} L`
+        : 'Não calculado';
+
+    this.logger.log(`📤 Retorno formatado:`);
+    this.logger.log(`   formattedDistance: ${formattedDistance}`);
+    this.logger.log(`   formattedDuration: ${formattedDuration}`);
+    this.logger.log(`   formattedFuel: ${formattedFuel}`);
+
+    return {
+      ...completeRoute,
+      formattedDistance,
+      formattedDuration,
+      formattedFuel,
+      totalDistanceMeters,
+      totalDurationSeconds,
+      estimatedFuel: route.estimatedFuel,
+    };
   }
-
-  const completeRoute = await this.prisma.route.findUnique({
-    where: { id: route.id },
-    include: {
-      stops: { orderBy: { order: 'asc' } },
-      userAssigned: { select: { id: true, name: true, contact: true } },
-    },
-  });
-
-  const formattedDistance =
-    totalDistanceMeters > 0
-      ? `${(totalDistanceMeters / 1000).toFixed(1)} km`
-      : dto.stops.length === 1
-        ? '0 km'
-        : 'Distância não calculada';
-
-  const formattedDuration =
-    totalDurationSeconds > 0
-      ? this.formatDuration(totalDurationSeconds)
-      : dto.stops.length === 1
-        ? '0 min'
-        : 'Duração não calculada';
-
-  const formattedFuel =
-    route.estimatedFuel !== null
-      ? `${route.estimatedFuel.toFixed(1)} L`
-      : 'Não calculado';
-
-  this.logger.log(`📤 Retorno formatado:`);
-  this.logger.log(`   formattedDistance: ${formattedDistance}`);
-  this.logger.log(`   formattedDuration: ${formattedDuration}`);
-  this.logger.log(`   formattedFuel: ${formattedFuel}`);
-
-  return {
-    ...completeRoute,
-    formattedDistance,
-    formattedDuration,
-    formattedFuel,
-    totalDistanceMeters,
-    totalDurationSeconds,
-    estimatedFuel: route.estimatedFuel,
-  };
-}
 
   /**
    * Otimiza a ordem das paradas
@@ -2007,9 +2042,9 @@ async createRoute(dto: CreateRouteDto, companyId: string, userId: string) {
     const a =
       Math.sin(dLat / 2) * Math.sin(dLat / 2) +
       Math.cos(this.deg2rad(lat1)) *
-        Math.cos(this.deg2rad(lat2)) *
-        Math.sin(dLon / 2) *
-        Math.sin(dLon / 2);
+      Math.cos(this.deg2rad(lat2)) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
 
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c;

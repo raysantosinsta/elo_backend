@@ -41,6 +41,7 @@ import { WhatsappNotificationModule } from './whatsapp-notification/whatsapp-not
 import { ScheduleModule } from '@nestjs/schedule';
 import { WhatsappConnectionModule } from './whatsapp-connection/whatsapp-connection.module';
 import { AtendeproAuthModule } from './atendepro-auth/atendepro-auth.module';
+import { BillingModule } from './billing/billing.module';
 
 
 @Module({
@@ -95,6 +96,7 @@ import { AtendeproAuthModule } from './atendepro-auth/atendepro-auth.module';
     WhatsappNotificationModule,
     WhatsappConnectionModule,
     AtendeproAuthModule,
+    BillingModule,
   ],
   // ADICIONE O CONTROLLER AQUI
   controllers: [AppController, MetricsController],
