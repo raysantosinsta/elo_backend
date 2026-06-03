@@ -9,12 +9,71 @@ datasource db {
 }
 
 // Enums
-// Removida CompanyStatus por ser idêntica a SimpleStatus
+// Removida CompanyStatus por ser idÃªntica a SimpleStatus
 enum SubscriptionStatus {
   ACTIVE
   INACTIVE
   CANCELED
   EXPIRED
+}
+
+enum BillingAccountStatus {
+  TRIAL_ACTIVE
+  TRIAL_EXPIRED
+  ACTIVE
+  OVERDUE
+  BLOCKED
+  CANCELED
+}
+
+enum BillingSubscriptionStatus {
+  PENDING
+  ACTIVE
+  OVERDUE
+  CANCELED
+  EXPIRED
+}
+
+enum BillingPaymentStatus {
+  PENDING
+  RECEIVED
+  CONFIRMED
+  OVERDUE
+  REFUNDED
+  CHARGEBACK
+  CANCELED
+}
+
+enum BillingWebhookStatus {
+  RECEIVED
+  PROCESSED
+  DUPLICATED
+  FAILED
+}
+
+enum PartnerStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  BLOCKED
+}
+
+enum PartnerCommissionStatus {
+  PENDING
+  AVAILABLE
+  BLOCKED
+  PAID
+  CANCELED
+  REVERSED
+}
+
+enum PartnerWithdrawalStatus {
+  REQUESTED
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  PAID
+  CANCELED
 }
 
 enum PlanPeriod {
@@ -109,7 +168,14 @@ model Company {
 
   notificationDays Int @default(7) @map("dias_antecedencia_notificacao")
 
-  // Controle de Criação/Atualização
+  billingStatus        BillingAccountStatus @default(TRIAL_ACTIVE) @map("status_financeiro")
+  trialStart           DateTime?            @map("inicio_teste")
+  trialEnd             DateTime?            @map("fim_teste")
+  asaasCustomerId      String?              @unique @map("asaas_customer_id") @db.VarChar(120)
+  referredByPartnerId  String?              @map("parceiro_indicador_id") @db.Uuid
+  referredByPartner    Partner?             @relation("PartnerReferredCompanies", fields: [referredByPartnerId], references: [id])
+
+  // Controle de CriaÃ§Ã£o/AtualizaÃ§Ã£o
   userCreate   User?    @relation("CompanyCreatedBy", fields: [userCreateId], references: [id])
   userCreateId String?  @map("user_create_id") @db.Uuid
   createdAt    DateTime @default(now()) @map("data_de_criacao")
@@ -120,7 +186,7 @@ model Company {
 
   // Relacionamentos Reversos
   users              User[]              @relation("CompanyMembers")
-  kanbanCols         KanbanColumn[]      @relation("CompanyKanbanColumns") // Mantido um nome de relação para KanbanColumn[]
+  kanbanCols         KanbanColumn[]      @relation("CompanyKanbanColumns") // Mantido um nome de relaÃ§Ã£o para KanbanColumn[]
   tasks              Task[]              @relation("CompanyTasks")
   notifications      Notification[]      @relation("CompanyNotifications")
   materials          Material[]          @relation("CompanyMaterials")
@@ -142,24 +208,33 @@ model Company {
   suppliers          Supplier[]
   budgetGroups       BudgetGroup[]
   routeStops         RouteStop[]
-  whatsappConnection WhatsAppConnection? // Uma empresa pode ter UMA conexão WhatsApp (opcional)
+  whatsappConnection WhatsAppConnection? // Uma empresa pode ter UMA conexÃ£o WhatsApp (opcional)
 
   auditLogs    AuditLog[]
-  itemStages   FlowItemStage[] // ou flowItemStages, mas não ambos
+  itemStages   FlowItemStage[] // ou flowItemStages, mas nÃ£o ambos
   companyRoles CompanyRole[]
+  subscriptions BillingSubscription[]
+  payments      BillingPayment[]
+  webhookEvents AsaasWebhookEvent[]
+  partnerProfile Partner?
+  partnerCommissions PartnerCommission[]
+  partnerWithdrawals PartnerWithdrawal[]
 
   @@index([cnpj])
   @@index([status])
+  @@index([billingStatus])
+  @@index([trialEnd])
+  @@index([referredByPartnerId])
   @@index([createdAt])
   @@map("empresas")
 }
 
-// Adicione este modelo APÓS o model Company no seu schema.prisma
+// Adicione este modelo APÃ“S o model Company no seu schema.prisma
 
 model WhatsAppConnection {
   id         String   @id @default(uuid()) @db.Uuid
   companyId  String   @unique @map("company_id") @db.Uuid
-  instanceId Int? // ID da instância na API do AtendePro
+  instanceId Int? // ID da instÃ¢ncia na API do AtendePro
   name       String   @map("name") @db.VarChar(100)
   token      String   @map("token") @db.Text
   status     String   @default("connected") @map("status")
@@ -187,7 +262,7 @@ model User {
   professionalRoleId String?      @map("cargo_profissional_id") @db.Uuid
   professionalRole   CompanyRole? @relation("UserProfessionalRole", fields: [professionalRoleId], references: [id])
 
-  // 🔥 NOVO CAMPO: Armazenar o nome do cargo profissional
+  // ðŸ”¥ NOVO CAMPO: Armazenar o nome do cargo profissional
   professionalRoleName String? @map("cargo_profissional_nome") @db.VarChar(100)
 
   resetTokens PasswordResetToken[]
@@ -195,14 +270,14 @@ model User {
   createdAt DateTime @default(now()) @map("criado_em")
   updatedAt DateTime @updatedAt @map("atualizado_em")
 
-  // --- NOVOS CAMPOS: Auditoria de Usuários (Self-Relation) ---
+  // --- NOVOS CAMPOS: Auditoria de UsuÃ¡rios (Self-Relation) ---
   userCreateId String? @map("user_create_id") @db.Uuid
   userCreate   User?   @relation("UserCreatedBy", fields: [userCreateId], references: [id])
 
   userUpdateId String? @map("user_update_id") @db.Uuid
   userUpdate   User?   @relation("UserUpdatedBy", fields: [userUpdateId], references: [id])
 
-  // Relacionamentos Reversos (Usuários criados/editados por este usuário)
+  // Relacionamentos Reversos (UsuÃ¡rios criados/editados por este usuÃ¡rio)
   createdUsers User[] @relation("UserCreatedBy")
   updatedUsers User[] @relation("UserUpdatedBy")
   // -----------------------------------------------------------
@@ -232,6 +307,9 @@ model User {
   assignedRoutes Route[] @relation("RouteAssignedUser")
 
   notifications UserNotification[]
+  partnerProfile Partner? @relation("PartnerUser")
+  approvedPartners Partner[] @relation("PartnerApprovedBy")
+  reviewedWithdrawals PartnerWithdrawal[] @relation("WithdrawalReviewedBy")
 
   createdSuppliers         Supplier[]         @relation("SupplierCreatedBy")
   updatedSuppliers         Supplier[]         @relation("SupplierUpdatedBy")
@@ -262,7 +340,7 @@ model User {
   createdCompanyRoles CompanyRole[] @relation("CompanyRoleCreatedBy")
   updatedCompanyRoles CompanyRole[] @relation("CompanyRoleUpdatedBy")
 
-  // 🔥 APENAS ESTA DECLARAÇÃO (mantenha esta e remova a outra no final)
+  // ðŸ”¥ APENAS ESTA DECLARAÃ‡ÃƒO (mantenha esta e remova a outra no final)
   companyRoleId String?      @map("cargo_empresa_id") @db.Uuid
   companyRole   CompanyRole? @relation("UserCompanyRole", fields: [companyRoleId], references: [id])
 
@@ -279,13 +357,13 @@ model CompanyRole {
   status      SimpleStatus @default(ACTIVE) @map("status")
   name        String       @map("nome") @db.VarChar(100)
   description String?      @map("descricao") @db.Text
-  level       Int          @default(1) @map("nivel") // Para ordenação/hierarquia
+  level       Int          @default(1) @map("nivel") // Para ordenaÃ§Ã£o/hierarquia
 
   // Relacionamento com Empresa (MULTI-TENANT)
   companyId String  @map("empresa_id") @db.Uuid
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
-  // Controle de Criação/Atualização
+  // Controle de CriaÃ§Ã£o/AtualizaÃ§Ã£o
   userCreateId String?  @map("user_create_id") @db.Uuid
   userCreate   User?    @relation("CompanyRoleCreatedBy", fields: [userCreateId], references: [id])
   createdAt    DateTime @default(now()) @map("criado_em")
@@ -294,10 +372,10 @@ model CompanyRole {
   userUpdate   User?    @relation("CompanyRoleUpdatedBy", fields: [userUpdateId], references: [id])
   updatedAt    DateTime @updatedAt @map("atualizado_em")
 
-  // 🔥 RELACIONAMENTO 1: Usuários que têm este cargo como "professionalRole"
+  // ðŸ”¥ RELACIONAMENTO 1: UsuÃ¡rios que tÃªm este cargo como "professionalRole"
   professionalRoleUsers User[] @relation("UserProfessionalRole")
 
-  // 🔥 RELACIONAMENTO 2: Usuários que têm este cargo como "companyRole"
+  // ðŸ”¥ RELACIONAMENTO 2: UsuÃ¡rios que tÃªm este cargo como "companyRole"
   companyRoleUsers User[] @relation("UserCompanyRole")
 
   @@unique([companyId, name])
@@ -333,7 +411,7 @@ model KanbanColumn {
   companyId String?  @map("empresa_id") @db.Uuid
   company   Company? @relation("CompanyKanbanColumns", fields: [companyId], references: [id], onDelete: Cascade) // Consolidado
 
-  // Controle de Criação/Atualização
+  // Controle de CriaÃ§Ã£o/AtualizaÃ§Ã£o
   userCreate   User     @relation("KanbanColumnCreatedBy", fields: [userCreateId], references: [id])
   userCreateId String   @map("user_create_id") @db.Uuid
   createdAt    DateTime @default(now()) @map("criado_em")
@@ -365,7 +443,7 @@ model Task {
 
   intervalTime Int? @map("tempo_intervalo") // Tempo gasto na tarefa, em minutos
 
-  // Usuários Relacionados
+  // UsuÃ¡rios Relacionados
   userAssigned   User?   @relation("TaskAssignedUser", fields: [userAssignedId], references: [id])
   userAssignedId String? @map("user_assigned_id") @db.Uuid
 
@@ -380,14 +458,14 @@ model Task {
   routeId String? @map("rota_id") @db.Uuid
   route   Route?  @relation(fields: [routeId], references: [id])
 
-  // 🔥 NOVO RELACIONAMENTO COM ROUTESTOP
+  // ðŸ”¥ NOVO RELACIONAMENTO COM ROUTESTOP
   routeStops RouteStop[] // <--- ADICIONE ESTA LINHA
 
   // Empresa
   companyId String  @map("empresa_id") @db.Uuid
   company   Company @relation("CompanyTasks", fields: [companyId], references: [id], onDelete: Cascade)
 
-  // Controle de Criação/Atualização
+  // Controle de CriaÃ§Ã£o/AtualizaÃ§Ã£o
   userCreate   User     @relation("TaskCreatedBy", fields: [userCreateId], references: [id])
   userCreateId String   @map("user_create_id") @db.Uuid
   createdAt    DateTime @default(now()) @map("criado_em")
@@ -456,7 +534,7 @@ model TaskImage {
   taskId String @map("tarefa_id") @db.Uuid
   task   Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
-  // Relacionamento com Usuário de Upload
+  // Relacionamento com UsuÃ¡rio de Upload
   userUploadedId String @map("user_upload_id") @db.Uuid
   userUploaded   User   @relation(fields: [userUploadedId], references: [id])
 
@@ -480,7 +558,7 @@ model TaskAudio {
   taskId String @map("tarefa_id") @db.Uuid
   task   Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
-  // Relacionamento com Usuário de Upload
+  // Relacionamento com UsuÃ¡rio de Upload
   userUploadedId String @map("user_upload_id") @db.Uuid
   userUploaded   User   @relation(fields: [userUploadedId], references: [id])
 
@@ -509,7 +587,7 @@ model TaskVideo {
   companyId String  @map("empresa_id") @db.Uuid
   company   Company @relation("CompanyTaskVideos", fields: [companyId], references: [id], onDelete: Cascade) // Consolidado
 
-  // Relacionamento com Usuário de Upload
+  // Relacionamento com UsuÃ¡rio de Upload
   userUploadedId String @map("user_upload_id") @db.Uuid
   userUploaded   User   @relation(fields: [userUploadedId], references: [id])
 
@@ -532,17 +610,27 @@ model Route {
   optimizedAt          DateTime? @map("otimizado_em")
 
   fuelConsumptionLitres Float? @map("consumo_combustivel_litros") // em litros
+  // NOVO: Consumo de combustÃ­vel previsto (litros)
+  estimatedFuel Float? @map("combustivel_previsto")
+
+  // ROTA REALIZADA (executada)
+  actualDistance Float?   @map("distancia_real")      // Km de fato rodados
+  actualTime     Int?     @map("tempo_real")          // Minutos de fato levou
+  actualFuel     Float?   @map("combustivel_real")    // Litros de fato consumidos
+  startedAt      DateTime? @map("iniciado_em")
+  completedAt    DateTime? @map("finalizado_em")
+
 
   // NOVO RELACIONAMENTO
   stops RouteStop[]
 
-  // Usuário Atribuído
+  // UsuÃ¡rio AtribuÃ­do
   userAssigned   User?   @relation("RouteAssignedUser", fields: [userAssignedId], references: [id])
   userAssignedId String? @map("user_assigned_id") @db.Uuid
 
   tasks Task[]
 
-  // Controle de Criação/Atualização
+  // Controle de CriaÃ§Ã£o/AtualizaÃ§Ã£o
   userCreate   User     @relation("RouteCreatedBy", fields: [userCreateId], references: [id])
   userCreateId String   @map("user_create_id") @db.Uuid
   createdAt    DateTime @default(now()) @map("criado_em")
@@ -566,7 +654,7 @@ model Route {
 model RouteStop {
   id String @id @default(uuid()) @map("id") @db.Uuid
 
-  // 🔥 NOVO CAMPO: Referência à tarefa
+  // ðŸ”¥ NOVO CAMPO: ReferÃªncia Ã  tarefa
   taskId String? @map("task_id") @db.Uuid
   task   Task?   @relation(fields: [taskId], references: [id], onDelete: SetNull)
 
@@ -647,8 +735,8 @@ model UserNotification {
 
 // 1. Enum para diferenciar quem vende tecido de quem costura
 enum SupplierCategory {
-  MATERIAL_ONLY // Só vende materiais
-  SERVICE_ONLY // Só presta serviço (Oficinas/Facções)
+  MATERIAL_ONLY // SÃ³ vende materiais
+  SERVICE_ONLY // SÃ³ presta serviÃ§o (Oficinas/FacÃ§Ãµes)
   HYBRID // Faz os dois
 }
 
@@ -679,7 +767,7 @@ model Supplier {
   companyId String  @map("empresa_id") @db.Uuid
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
-  // Controle de Criação/Atualização
+  // Controle de CriaÃ§Ã£o/AtualizaÃ§Ã£o
   userCreate   User     @relation("SupplierCreatedBy", fields: [userCreateId], references: [id])
   userCreateId String   @map("user_create_id") @db.Uuid
   createdAt    DateTime @default(now()) @map("criado_em")
@@ -711,7 +799,7 @@ model Material {
   companyId String  @map("empresa_id") @db.Uuid
   company   Company @relation("CompanyMaterials", fields: [companyId], references: [id], onDelete: Cascade) // Consolidado
 
-  // Controle de Criação/Atualização
+  // Controle de CriaÃ§Ã£o/AtualizaÃ§Ã£o
   userCreate   User     @relation("MaterialCreatedBy", fields: [userCreateId], references: [id])
   userCreateId String   @map("user_create_id") @db.Uuid
   createdAt    DateTime @default(now()) @map("criado_em")
@@ -750,7 +838,7 @@ model SupplierMaterial {
   material   Material @relation(fields: [materialId], references: [id])
   materialId String   @map("material_id") @db.Uuid
 
-  // Controle de Criação/Atualização
+  // Controle de CriaÃ§Ã£o/AtualizaÃ§Ã£o
   userCreate   User     @relation("SupplierMaterialCreatedBy", fields: [userCreateId], references: [id])
   userCreateId String   @map("user_create_id") @db.Uuid
   createdAt    DateTime @default(now()) @map("criado_em")
@@ -783,7 +871,7 @@ model Product {
   companyId String  @map("empresa_id") @db.Uuid
   company   Company @relation("CompanyProducts", fields: [companyId], references: [id], onDelete: Cascade) // Consolidado
 
-  // Controle de Criação/Atualização
+  // Controle de CriaÃ§Ã£o/AtualizaÃ§Ã£o
   userCreate   User     @relation("ProductCreatedBy", fields: [userCreateId], references: [id])
   userCreateId String   @map("user_create_id") @db.Uuid
   createdAt    DateTime @default(now()) @map("criado_em")
@@ -811,7 +899,7 @@ model ProductMaterial {
   material   Material @relation(fields: [materialId], references: [id], onDelete: Restrict)
   materialId String   @map("material_id") @db.Uuid
 
-  // Controle de Criação/Atualização
+  // Controle de CriaÃ§Ã£o/AtualizaÃ§Ã£o
   userCreate   User     @relation("ProductMaterialCreatedBy", fields: [userCreateId], references: [id])
   userCreateId String   @map("user_create_id") @db.Uuid
   createdAt    DateTime @default(now()) @map("criado_em")
@@ -836,7 +924,7 @@ model Budget {
 
   paymentMethod String? @map("forma_pagamento") @db.VarChar(50)
 
-  // Usuários
+  // UsuÃ¡rios
   userAssignedId String    @map("atribuido_para_id") @db.Uuid
   userAssigned   User      @relation("BudgetAssignedTo", fields: [userAssignedId], references: [id])
   answeredAt     DateTime? @map("respondido_em")
@@ -853,7 +941,7 @@ model Budget {
   taskId String? @db.Uuid
   task   Task?   @relation("TaskAssociation", fields: [taskId], references: [id])
 
-  // Controle de Criação/Atualização
+  // Controle de CriaÃ§Ã£o/AtualizaÃ§Ã£o
   userCreate   User     @relation("BudgetCreatedBy", fields: [userCreateId], references: [id])
   userCreateId String   @map("user_create_id") @db.Uuid
   createdAt    DateTime @default(now()) @map("criado_em")
@@ -927,12 +1015,12 @@ model BudgetGroup {
 
   title String? @map("nome") @db.VarChar(150)
 
-  // Controle de Criação
+  // Controle de CriaÃ§Ã£o
   userCreateId String   @map("user_create_id") @db.Uuid
   userCreate   User     @relation("BudgetGroupCreatedBy", fields: [userCreateId], references: [id])
   createdAt    DateTime @default(now()) @map("criado_em")
 
-  // Atribuído
+  // AtribuÃ­do
   userAssignedId String @map("atribuido_para_id") @db.Uuid
   userAssigned   User   @relation("BudgetGroupAssignedTo", fields: [userAssignedId], references: [id])
 
@@ -940,7 +1028,7 @@ model BudgetGroup {
   companyId String  @map("empresa_id") @db.Uuid
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
-  // Orçamento Aprovado (Foreign Key para Budget)
+  // OrÃ§amento Aprovado (Foreign Key para Budget)
   budgetApprovedId String? @unique @map("orcamento_aprovado_id") @db.Uuid
   budgetApproved   Budget? @relation("BudgetGroupApprovedBudget", fields: [budgetApprovedId], references: [id])
 
@@ -992,7 +1080,7 @@ model ChatMessage {
   @@map("mensagens_chat")
 }
 
-// 1. FLUXO DE PRODUÇÃO (Esteira)
+// 1. FLUXO DE PRODUÃ‡ÃƒO (Esteira)
 model ProductFlow {
   id       String    @id @default(uuid()) @map("id") @db.Uuid
   name     String    @map("nome") @db.VarChar(100)
@@ -1021,7 +1109,7 @@ model FlowStage {
   order Int     @default(0) @map("ordem")
   color String? @map("cor") @db.VarChar(7)
 
-  // 🔥 NOVO CAMPO: Dias padrão para conclusão da etapa
+  // ðŸ”¥ NOVO CAMPO: Dias padrÃ£o para conclusÃ£o da etapa
   defaultDays Int? @default(1) @map("dias_padrao")
 
   // // NOVO CAMPO: Prazo sugerido em dias (template)
@@ -1033,7 +1121,7 @@ model FlowStage {
   flowId String      @map("fluxo_id") @db.Uuid
   flow   ProductFlow @relation(fields: [flowId], references: [id])
 
-  // Relacionamento com Empresa (Opcional, se a etapa puder ser global ou precisar de referência direta)
+  // Relacionamento com Empresa (Opcional, se a etapa puder ser global ou precisar de referÃªncia direta)
   companyId String?  @db.Uuid
   company   Company? @relation("CompanyFlowStages", fields: [companyId], references: [id]) // Consolidado
 
@@ -1050,7 +1138,7 @@ model FlowStage {
 model FlowItemStage {
   id String @id @default(uuid()) @map("id") @db.Uuid
 
-  // Campo obrigatório (prazo calculado)
+  // Campo obrigatÃ³rio (prazo calculado)
   deadline DateTime @map("prazo")
 
   // Status da etapa
@@ -1063,13 +1151,13 @@ model FlowItemStage {
   suggestedDeadline DateTime? @map("prazo_sugerido")
   actualDeadline    DateTime? @map("prazo_real")
 
-  // 🔥 NOVO: Guardar referência ao prazo sugerido original da etapa
+  // ðŸ”¥ NOVO: Guardar referÃªncia ao prazo sugerido original da etapa
   basedOnSuggestedDeadline Int? @map("baseado_em_prazo_sugerido")
 
   // Metadados
   notes String? @map("observacoes") @db.Text
 
-  // Controle de alterações
+  // Controle de alteraÃ§Ãµes
   changedAt DateTime @default(now()) @map("alterado_em")
   changedBy String?  @map("alterado_por") @db.Uuid
 
@@ -1088,7 +1176,7 @@ model FlowItemStage {
   createdAt DateTime @default(now()) @map("criado_em")
   updatedAt DateTime @updatedAt @map("atualizado_em")
 
-  // Índices
+  // Ãndices
   @@unique([itemId, stageId])
   @@index([itemId])
   @@index([stageId])
@@ -1106,7 +1194,7 @@ model FlowItem {
   orderNumber String @map("numero_pedido") @db.VarChar(50)
   status      String @default("PENDENTE") @map("status") // Verifique se este campo existe aqui!
 
-  // Posição
+  // PosiÃ§Ã£o
   stageId      String?    @map("etapa_id") @db.Uuid
   stage        FlowStage? @relation(fields: [stageId], references: [id])
   orderInStage Int        @default(0) @map("ordem_etapa")
@@ -1131,7 +1219,7 @@ model FlowItem {
   productionStartedAt DateTime? @map("data_do_inicio_da_producao")
   deliveryAt          DateTime? @map("data_de_entrega_da_producao")
 
-  // Responsável
+  // ResponsÃ¡vel
   assignedToId String? @map("responsavel_id") @db.Uuid
   assignedTo   User?   @relation(fields: [assignedToId], references: [id])
 
@@ -1142,7 +1230,7 @@ model FlowItem {
   // NOVO RELACIONAMENTO: ItensStage
   itemStages FlowItemStage[] // Todos os prazos por etapa
 
-  // Relacionamentos com mídias
+  // Relacionamentos com mÃ­dias
   images FlowImage[]
   audios FlowAudio[]
   videos FlowVideo[]
@@ -1190,7 +1278,7 @@ model FlowImage {
   companyId String  @map("empresa_id") @db.Uuid
   company   Company @relation("CompanyFlowImages", fields: [companyId], references: [id]) // Consolidado
 
-  // Relacionamento com Usuário de Upload
+  // Relacionamento com UsuÃ¡rio de Upload
   uploadedById String @map("user_upload_id") @db.Uuid
   uploadedBy   User   @relation(fields: [uploadedById], references: [id])
 
@@ -1199,7 +1287,7 @@ model FlowImage {
   @@map("imagens_fluxo")
 }
 
-// 5. ÁUDIOS DO ITEM (igual ao TaskAudio)
+// 5. ÃUDIOS DO ITEM (igual ao TaskAudio)
 model FlowAudio {
   id        String   @id @default(uuid()) @map("id") @db.Uuid
   url       String   @map("url") @db.VarChar(500)
@@ -1216,7 +1304,7 @@ model FlowAudio {
   companyId String  @map("empresa_id") @db.Uuid
   company   Company @relation("CompanyFlowAudios", fields: [companyId], references: [id])
 
-  // Relacionamento com Usuário de Upload
+  // Relacionamento com UsuÃ¡rio de Upload
   uploadedById String @map("user_upload_id") @db.Uuid
   uploadedBy   User   @relation(fields: [uploadedById], references: [id])
 
@@ -1225,7 +1313,7 @@ model FlowAudio {
   @@map("audios_fluxo")
 }
 
-// 6. VÍDEOS DO ITEM (igual ao TaskVideo)
+// 6. VÃDEOS DO ITEM (igual ao TaskVideo)
 model FlowVideo {
   id        String   @id @default(uuid()) @map("id") @db.Uuid
   url       String   @map("url") @db.VarChar(500)
@@ -1242,7 +1330,7 @@ model FlowVideo {
   companyId String  @map("empresa_id") @db.Uuid
   company   Company @relation("CompanyFlowVideos", fields: [companyId], references: [id])
 
-  // Relacionamento com Usuário de Upload
+  // Relacionamento com UsuÃ¡rio de Upload
   uploadedById String @map("user_upload_id") @db.Uuid
   uploadedBy   User   @relation(fields: [uploadedById], references: [id])
 
@@ -1255,11 +1343,11 @@ model AuditLog {
   id        String   @id @default(uuid()) @map("id") @db.Uuid
   createdAt DateTime @default(now()) @map("criado_em")
 
-  // Usuário que executou a ação
+  // UsuÃ¡rio que executou a aÃ§Ã£o
   userId String @map("usuario_id") @db.Uuid
   user   User   @relation(fields: [userId], references: [id])
 
-  // Tipo da ação (CREATE, UPDATE, DELETE, MOVE, ASSIGN, COMPLETE, etc.)
+  // Tipo da aÃ§Ã£o (CREATE, UPDATE, DELETE, MOVE, ASSIGN, COMPLETE, etc.)
   action String @map("acao")
 
   // Entidade afetada (FLOW_ITEM, TASK, BUDGET, USER, etc.)
@@ -1268,18 +1356,18 @@ model AuditLog {
   // ID do registro afetado
   entityId String @map("entidade_id") @db.Uuid
 
-  // Dados antes/depois da alteração (armazenar como JSON)
+  // Dados antes/depois da alteraÃ§Ã£o (armazenar como JSON)
   oldData Json? @map("dados_antigos")
   newData Json? @map("dados_novos")
 
-  // Metadados adicionais (IP, userAgent, informações específicas)
+  // Metadados adicionais (IP, userAgent, informaÃ§Ãµes especÃ­ficas)
   metadata Json? @map("metadados")
 
   // Empresa (para filtrar logs por empresa)
   companyId String?  @map("empresa_id") @db.Uuid
   company   Company? @relation(fields: [companyId], references: [id])
 
-  // Índices para performance
+  // Ãndices para performance
   @@index([userId])
   @@index([action])
   @@index([entity])
@@ -1287,6 +1375,221 @@ model AuditLog {
   @@index([companyId])
   @@index([createdAt])
   @@map("auditoria")
+}
+
+model BillingPlan {
+  id          String     @id @default(uuid()) @map("id") @db.Uuid
+  name        String     @map("nome") @db.VarChar(100)
+  description String?    @map("descricao") @db.Text
+  price       Decimal    @map("preco") @db.Decimal(10, 2)
+  period      PlanPeriod @default(MONTHLY) @map("periodo")
+  trialDays   Int        @default(7) @map("dias_teste")
+  userLimit   Int?       @map("limite_usuarios")
+  features    Json?      @map("recursos")
+  isActive    Boolean    @default(true) @map("ativo")
+  createdAt   DateTime   @default(now()) @map("criado_em")
+  updatedAt   DateTime   @updatedAt @map("atualizado_em")
+
+  subscriptions BillingSubscription[]
+
+  @@index([isActive])
+  @@index([period])
+  @@map("billing_plans")
+}
+
+model BillingSubscription {
+  id                 String                    @id @default(uuid()) @map("id") @db.Uuid
+  status             BillingSubscriptionStatus @default(PENDING) @map("status")
+  asaasSubscriptionId String?                   @unique @map("asaas_subscription_id") @db.VarChar(120)
+  value              Decimal                   @map("valor") @db.Decimal(10, 2)
+  cycle              PlanPeriod                @default(MONTHLY) @map("ciclo")
+  nextDueDate        DateTime?                 @map("proximo_vencimento")
+  startedAt          DateTime                  @default(now()) @map("inicio_em")
+  canceledAt         DateTime?                 @map("cancelado_em")
+  createdAt          DateTime                  @default(now()) @map("criado_em")
+  updatedAt          DateTime                  @updatedAt @map("atualizado_em")
+
+  companyId String  @map("empresa_id") @db.Uuid
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  planId String      @map("plano_id") @db.Uuid
+  plan   BillingPlan @relation(fields: [planId], references: [id])
+
+  payments BillingPayment[]
+
+  @@index([companyId])
+  @@index([planId])
+  @@index([status])
+  @@index([nextDueDate])
+  @@map("billing_subscriptions")
+}
+
+model BillingPayment {
+  id             String               @id @default(uuid()) @map("id") @db.Uuid
+  status         BillingPaymentStatus @default(PENDING) @map("status")
+  asaasPaymentId String?              @unique @map("asaas_payment_id") @db.VarChar(120)
+  billingType    String?              @map("tipo_cobranca") @db.VarChar(40)
+  value          Decimal              @map("valor") @db.Decimal(10, 2)
+  netValue       Decimal?             @map("valor_liquido") @db.Decimal(10, 2)
+  dueDate        DateTime?            @map("vencimento")
+  paymentDate    DateTime?            @map("data_pagamento")
+  invoiceUrl     String?              @map("invoice_url") @db.Text
+  bankSlipUrl    String?              @map("bank_slip_url") @db.Text
+  pixQrCode      String?              @map("pix_qr_code") @db.Text
+  rawPayload     Json?                @map("payload_bruto")
+  createdAt      DateTime             @default(now()) @map("criado_em")
+  updatedAt      DateTime             @updatedAt @map("atualizado_em")
+
+  companyId String  @map("empresa_id") @db.Uuid
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  subscriptionId String?              @map("assinatura_id") @db.Uuid
+  subscription   BillingSubscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+
+  commissions PartnerCommission[]
+
+  @@index([companyId])
+  @@index([subscriptionId])
+  @@index([status])
+  @@index([dueDate])
+  @@map("billing_payments")
+}
+
+model AsaasWebhookEvent {
+  id           String               @id @default(uuid()) @map("id") @db.Uuid
+  eventId      String               @unique @map("asaas_event_id") @db.VarChar(160)
+  eventType    String               @map("tipo_evento") @db.VarChar(120)
+  status       BillingWebhookStatus @default(RECEIVED) @map("status")
+  rawPayload   Json                 @map("payload_bruto")
+  processedAt  DateTime?            @map("processado_em")
+  errorMessage String?              @map("erro") @db.Text
+  createdAt    DateTime             @default(now()) @map("criado_em")
+
+  companyId String?  @map("empresa_id") @db.Uuid
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+
+  @@index([eventType])
+  @@index([status])
+  @@index([companyId])
+  @@index([createdAt])
+  @@map("asaas_webhook_events")
+}
+
+model Partner {
+  id              String        @id @default(uuid()) @map("id") @db.Uuid
+  status          PartnerStatus @default(PENDING) @map("status")
+  code            String        @unique @map("codigo") @db.VarChar(40)
+  commissionRate  Decimal       @default(10.00) @map("percentual_comissao") @db.Decimal(5, 2)
+  approvedAt      DateTime?     @map("aprovado_em")
+  rejectedReason  String?       @map("motivo_rejeicao") @db.Text
+  createdAt       DateTime      @default(now()) @map("criado_em")
+  updatedAt       DateTime      @updatedAt @map("atualizado_em")
+
+  companyId String  @unique @map("empresa_id") @db.Uuid
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  userId String? @unique @map("usuario_id") @db.Uuid
+  user   User?   @relation("PartnerUser", fields: [userId], references: [id], onDelete: SetNull)
+
+  approvedById String? @map("aprovado_por_id") @db.Uuid
+  approvedBy   User?   @relation("PartnerApprovedBy", fields: [approvedById], references: [id])
+
+  referredCompanies Company[] @relation("PartnerReferredCompanies")
+  referrals          PartnerReferral[]
+  commissions        PartnerCommission[]
+  withdrawals        PartnerWithdrawal[]
+
+  @@index([status])
+  @@index([companyId])
+  @@index([userId])
+  @@map("partners")
+}
+
+model PartnerReferral {
+  id        String   @id @default(uuid()) @map("id") @db.Uuid
+  leadName  String   @map("nome_lead") @db.VarChar(150)
+  document  String?  @map("documento") @db.VarChar(20)
+  email     String?  @map("email") @db.VarChar(255)
+  phone     String?  @map("telefone") @db.VarChar(30)
+  status    String   @default("TRIAL") @map("status") @db.VarChar(40)
+  companyId String?  @map("empresa_convertida_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("criado_em")
+  updatedAt DateTime @updatedAt @map("atualizado_em")
+
+  partnerId String  @map("parceiro_id") @db.Uuid
+  partner   Partner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  @@index([partnerId])
+  @@index([companyId])
+  @@index([status])
+  @@map("partner_referrals")
+}
+
+model PartnerCommission {
+  id           String                  @id @default(uuid()) @map("id") @db.Uuid
+  status       PartnerCommissionStatus @default(PENDING) @map("status")
+  baseValue    Decimal                 @map("valor_base") @db.Decimal(10, 2)
+  rate         Decimal                 @map("percentual") @db.Decimal(5, 2)
+  amount       Decimal                 @map("valor_comissao") @db.Decimal(10, 2)
+  availableAt  DateTime?               @map("disponivel_em")
+  paidAt       DateTime?               @map("pago_em")
+  canceledAt   DateTime?               @map("cancelado_em")
+  reason       String?                 @map("motivo") @db.Text
+  createdAt    DateTime                @default(now()) @map("criado_em")
+  updatedAt    DateTime                @updatedAt @map("atualizado_em")
+
+  partnerId String  @map("parceiro_id") @db.Uuid
+  partner   Partner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  companyId String  @map("empresa_id") @db.Uuid
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  paymentId String         @map("pagamento_id") @db.Uuid
+  payment   BillingPayment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  withdrawalId String?             @map("saque_id") @db.Uuid
+  withdrawal   PartnerWithdrawal?  @relation(fields: [withdrawalId], references: [id], onDelete: SetNull)
+
+  @@unique([partnerId, paymentId])
+  @@index([partnerId])
+  @@index([companyId])
+  @@index([paymentId])
+  @@index([status])
+  @@index([availableAt])
+  @@map("partner_commissions")
+}
+
+model PartnerWithdrawal {
+  id              String                  @id @default(uuid()) @map("id") @db.Uuid
+  status          PartnerWithdrawalStatus @default(REQUESTED) @map("status")
+  amount          Decimal                 @map("valor") @db.Decimal(10, 2)
+  nfseUrl         String?                 @map("nfse_url") @db.Text
+  nfseNumber      String?                 @map("nfse_numero") @db.VarChar(80)
+  nfseDocument    String?                 @map("nfse_documento") @db.VarChar(20)
+  nfseIssuedAt    DateTime?               @map("nfse_emitida_em")
+  reviewedAt      DateTime?               @map("revisado_em")
+  rejectionReason String?                 @map("motivo_reprovacao") @db.Text
+  paidAt          DateTime?               @map("pago_em")
+  paymentReceipt  String?                 @map("comprovante_pagamento") @db.Text
+  createdAt       DateTime                @default(now()) @map("criado_em")
+  updatedAt       DateTime                @updatedAt @map("atualizado_em")
+
+  partnerId String  @map("parceiro_id") @db.Uuid
+  partner   Partner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  companyId String  @map("empresa_id") @db.Uuid
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  reviewedById String? @map("revisado_por_id") @db.Uuid
+  reviewedBy   User?   @relation("WithdrawalReviewedBy", fields: [reviewedById], references: [id])
+
+  commissions PartnerCommission[]
+
+  @@index([partnerId])
+  @@index([companyId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("partner_withdrawals")
 }
 
 // model Subscription {

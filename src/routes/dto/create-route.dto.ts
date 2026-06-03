@@ -59,9 +59,8 @@ export class OptimizeRouteDto {
   orderBy?: RouteOrderType;
 }
 
-// DTO para finalizar tarefa (existente)
 export class FinalizeTaskDto {
-  @IsString()
+  @IsEnum(['COMPLETED', 'FAILED', 'RESCHEDULED'])
   status: 'COMPLETED' | 'FAILED' | 'RESCHEDULED';
 
   @IsOptional()
@@ -69,13 +68,14 @@ export class FinalizeTaskDto {
   finalComment?: string;
 
   @IsOptional()
-  @IsDateString()
-  scheduledAt?: string;
+  @IsString()
+  dueDate?: string;
 
   @IsOptional()
-  @IsDateString()
-  dueDate?: string;
+  @IsString()
+  scheduledAt?: string;
 }
+
 
 // DTO para criar uma parada/stop da rota
 export class RouteStopDto {
@@ -124,6 +124,10 @@ export class RouteStopDto {
 
 // DTO para criar rota sem tarefas
 export class CreateRouteDto {
+  @IsOptional()
+  @IsNumber()
+  combustivelPrevisto?: number; // Litros previstos
+
   @IsString()
   title: string;
 
@@ -177,8 +181,30 @@ export class UpdateRouteDto {
   userAssignedId?: string;
 
   @IsOptional()
-  @IsEnum(RouteOrderType)
-  orderBy?: RouteOrderType;
+  @IsString()
+  orderBy?: 'DISTANCE' | 'PRIORITY';
+
+  // 🔥 NOVOS CAMPOS PARA INICIAR/FINALIZAR ROTA
+  @IsOptional()
+  @IsDateString()
+  startedAt?: string;
+
+  @IsOptional()
+  @IsDateString()
+  completedAt?: string;
+
+  // 🔥 NOVOS CAMPOS PARA DADOS REAIS
+  @IsOptional()
+  @IsNumber()
+  actualDistance?: number;
+
+  @IsOptional()
+  @IsNumber()
+  actualTime?: number;
+
+  @IsOptional()
+  @IsNumber()
+  actualFuel?: number;
 }
 
 // DTO para converter rota em tarefas

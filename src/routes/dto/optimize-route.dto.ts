@@ -4,12 +4,17 @@ import {
   IsArray,
   IsDateString,
   IsEnum,
+  IsIn,
   IsNumber,
   IsOptional,
   IsString,
   IsUUID,
   ValidateNested,
 } from 'class-validator';
+
+// ============================================
+// ENUMS
+// ============================================
 
 export enum RouteOrderType {
   DISTANCE = 'DISTANCE',
@@ -23,26 +28,26 @@ export enum RouteStatus {
   CANCELED = 'CANCELED',
 }
 
-// Interface para estatísticas da rota com tarefas
+// ============================================
+// INTERFACES
+// ============================================
+
 export interface RouteStats {
   totalDurationSeconds: number;
   totalDistanceMeters: number;
   formattedDuration: string;
   formattedDistance: string;
-  // 🔥 NOVO: consumo de combustível
-  fuelConsumptionLitres?: number | null;
-  formattedFuelConsumption?: string;
 }
 
-// Interface para estatísticas simples (rotas sem tarefas)
 export interface SimpleRouteStats {
   totalDurationSeconds: number;
   totalDistanceMeters: number;
-  // 🔥 NOVO: consumo de combustível
-  fuelConsumptionLitres?: number | null;
 }
 
-// DTO existente para otimização com tarefas
+// ============================================
+// DTOS EXISTENTES
+// ============================================
+
 export class OptimizeRouteDto {
   @IsNumber()
   driverLatitude: number;
@@ -59,9 +64,8 @@ export class OptimizeRouteDto {
   orderBy?: RouteOrderType;
 }
 
-// DTO para finalizar tarefa (existente)
 export class FinalizeTaskDto {
-  @IsString()
+  @IsEnum(['COMPLETED', 'FAILED', 'RESCHEDULED'])
   status: 'COMPLETED' | 'FAILED' | 'RESCHEDULED';
 
   @IsOptional()
@@ -69,15 +73,40 @@ export class FinalizeTaskDto {
   finalComment?: string;
 
   @IsOptional()
-  @IsDateString()
-  scheduledAt?: string;
+  @IsString()
+  dueDate?: string;
 
   @IsOptional()
-  @IsDateString()
-  dueDate?: string;
+  @IsString()
+  scheduledAt?: string;
 }
 
-// DTO para criar uma parada/stop da rota
+// ============================================
+// NOVO DTO: CompleteRouteDto (para motorista finalizar rota)
+// ============================================
+
+export class CompleteRouteDto {
+  @IsOptional()
+  @IsNumber()
+  actualDistance?: number;  // distancia_real
+
+  @IsOptional()
+  @IsNumber()
+  actualFuel?: number;      // combustivel_real
+
+  @IsOptional()
+  @IsNumber()
+  actualTime?: number;      // tempo_real
+
+  @IsOptional()
+  @IsString()
+  observations?: string;    // observacoes
+}
+
+// ============================================
+// DTO PARA PARADA (STOP)
+// ============================================
+
 export class RouteStopDto {
   @IsOptional()
   @IsString()
@@ -122,7 +151,10 @@ export class RouteStopDto {
   bairro?: string;
 }
 
-// DTO para criar rota sem tarefas
+// ============================================
+// DTO PARA CRIAR ROTA
+// ============================================
+
 export class CreateRouteDto {
   @IsString()
   title: string;
@@ -147,7 +179,16 @@ export class CreateRouteDto {
   @IsOptional()
   @IsEnum(RouteOrderType)
   orderBy?: RouteOrderType;
+
+  // 🔥 NOVO CAMPO: Combustível previsto (litros)
+  @IsOptional()
+  @IsNumber()
+  combustivelPrevisto?: number;
 }
+
+// ============================================
+// DTO PARA ATUALIZAR ROTA
+// ============================================
 
 export class UpdateRouteDto {
   @IsOptional()
@@ -179,9 +220,17 @@ export class UpdateRouteDto {
   @IsOptional()
   @IsEnum(RouteOrderType)
   orderBy?: RouteOrderType;
+
+  // 🔥 NOVO CAMPO: Combustível previsto (litros)
+  @IsOptional()
+  @IsNumber()
+  combustivelPrevisto?: number;
 }
 
-// DTO para converter rota em tarefas
+// ============================================
+// DTO PARA CONVERTER ROTA EM TAREFAS
+// ============================================
+
 export class ConvertRouteToTasksDto {
   @IsOptional()
   @IsUUID()
@@ -190,22 +239,4 @@ export class ConvertRouteToTasksDto {
   @IsOptional()
   @IsUUID()
   userAssignedId?: string;
-}
-
-// 🔥 NOVO DTO PARA RESPOSTA DE ROTA (opcional, mas recomendado)
-export class RouteResponseDto {
-  id: string;
-  title: string;
-  description?: string;
-  routeDate?: Date;
-  status: RouteStatus;
-  orderBy?: string;
-  totalDistanceMeters?: number;
-  totalDurationSeconds?: number;
-  fuelConsumptionLitres?: number | null;
-  stops?: RouteStopDto[];
-  userAssigned?: { id: string; name: string; contact?: string };
-  formattedDistance?: string;
-  formattedDuration?: string;
-  formattedFuelConsumption?: string;
 }

@@ -10,6 +10,10 @@ npx prisma migrate diff \
 
   npx prisma migrate resolve --applied 20260101_consumo
 
+  mkdir prisma/migrations/20260101_pagamento
+
+  npx prisma migrate resolve --applied 20260101_pagamento
+
    npx prisma generate
 
    testar notificao proximosa vencer e itens atrasados
