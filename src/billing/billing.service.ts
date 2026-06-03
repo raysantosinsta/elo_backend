@@ -310,9 +310,12 @@ export class BillingService {
       throw new ForbiddenException('Token de webhook invalido');
     }
 
+    this.logAsaasWebhookPayload(dto);
+
     const eventId = dto.id || `${dto.event}:${dto.payment?.id || dto.subscription?.id || Date.now()}`;
     const existing = await this.prisma.asaasWebhookEvent.findUnique({ where: { eventId } });
     if (existing) {
+      console.log('[ASAAS WEBHOOK] Evento duplicado:', eventId);
       await this.prisma.asaasWebhookEvent.update({
         where: { eventId },
         data: { status: BillingWebhookStatus.DUPLICATED },
@@ -321,6 +324,7 @@ export class BillingService {
     }
 
     const companyId = await this.resolveCompanyIdFromWebhook(dto);
+    console.log('[ASAAS WEBHOOK] Company ID resolvido:', companyId || null);
     await this.prisma.asaasWebhookEvent.create({
       data: {
         eventId,
@@ -347,6 +351,7 @@ export class BillingService {
   }
 
   private async processWebhook(dto: AsaasWebhookDto, companyId?: string | null) {
+    console.log('[ASAAS WEBHOOK] Processando evento:', dto.event);
     if (dto.payment) {
       await this.upsertPaymentFromAsaas(dto.event, dto.payment, companyId);
     }
@@ -357,9 +362,17 @@ export class BillingService {
 
   private async upsertPaymentFromAsaas(event: string, payment: any, companyId?: string | null) {
     const resolvedCompanyId = companyId || await this.resolveCompanyIdFromPayment(payment);
-    if (!resolvedCompanyId) return;
+    const asaasCustomerId = this.extractAsaasCustomerId(payment);
+    console.log('[ASAAS WEBHOOK] Payment customer extraido:', asaasCustomerId || null);
+    console.log('[ASAAS WEBHOOK] Payment company resolvida:', resolvedCompanyId || null);
+    if (!resolvedCompanyId) {
+      console.log('[ASAAS WEBHOOK] Pagamento sem empresa resolvida. Customer recebido:', asaasCustomerId || null);
+      return;
+    }
     const status = this.mapPaymentStatus(event, payment.status);
     const subscription = await this.resolveSubscriptionFromPayment(payment);
+    console.log('[ASAAS WEBHOOK] Payment status mapeado:', status);
+    console.log('[ASAAS WEBHOOK] Payment subscription local:', subscription?.id || null);
 
     const saved = await this.prisma.billingPayment.upsert({
       where: { asaasPaymentId: payment.id },
@@ -391,8 +404,7 @@ export class BillingService {
 
     if (status === BillingPaymentStatus.RECEIVED || status === BillingPaymentStatus.CONFIRMED) {
       const trialPeriod = subscription?.planId ? await this.buildTrialPeriodFromSubscription(subscription.id) : null;
-      const asaasCustomerId = this.extractAsaasCustomerId(payment);
-      await this.prisma.company.update({
+      const updatedCompany = await this.prisma.company.update({
         where: { id: resolvedCompanyId },
         data: {
           billingStatus: BillingAccountStatus.ACTIVE,
@@ -404,16 +416,28 @@ export class BillingService {
               }
             : {}),
         },
+        select: {
+          id: true,
+          asaasCustomerId: true,
+          billingStatus: true,
+        },
       });
+      console.log('[ASAAS WEBHOOK] Empresa ativada apos pagamento:', updatedCompany);
       if (subscription) {
-        await this.prisma.billingSubscription.update({
+        const updatedSubscription = await this.prisma.billingSubscription.update({
           where: { id: subscription.id },
           data: {
             status: BillingSubscriptionStatus.ACTIVE,
             asaasSubscriptionId: payment.subscription || subscription.asaasSubscriptionId,
             nextDueDate: payment.dueDate ? new Date(`${payment.dueDate}T00:00:00`) : subscription.nextDueDate,
           },
+          select: {
+            id: true,
+            asaasSubscriptionId: true,
+            status: true,
+          },
         });
+        console.log('[ASAAS WEBHOOK] Assinatura atualizada via pagamento:', updatedSubscription);
       }
       await this.generateCommissionForPayment(saved.id);
     }
@@ -432,19 +456,19 @@ export class BillingService {
   }
 
   private async updateSubscriptionFromAsaas(event: string, subscription: any) {
-    const local = subscription.id
-      ? await this.prisma.billingSubscription.findFirst({
-          where: {
-            OR: [
-              { asaasSubscriptionId: subscription.id },
-              ...(subscription.externalReference ? [{ id: subscription.externalReference }] : []),
-              ...(subscription.paymentLink ? [{ asaasPaymentLinkId: subscription.paymentLink }] : []),
-            ],
-          },
-        })
-      : null;
-    if (!local) return;
+    const local = await this.resolveSubscriptionFromAsaasSubscription(subscription);
     const asaasCustomerId = this.extractAsaasCustomerId(subscription);
+    console.log('[ASAAS WEBHOOK] Subscription customer extraido:', asaasCustomerId || null);
+    console.log('[ASAAS WEBHOOK] Subscription local resolvida:', local?.id || null);
+    if (!local) {
+      console.log('[ASAAS WEBHOOK] Assinatura sem registro local resolvido:', {
+        id: subscription?.id,
+        externalReference: subscription?.externalReference,
+        paymentLink: subscription?.paymentLink,
+        customer: asaasCustomerId || null,
+      });
+      return;
+    }
     const status = event.includes('DELETED') || event.includes('CANCELED')
       ? BillingSubscriptionStatus.CANCELED
       : BillingSubscriptionStatus.ACTIVE;
@@ -460,13 +484,19 @@ export class BillingService {
     if (status === BillingSubscriptionStatus.CANCELED) {
       await this.prisma.company.update({ where: { id: local.companyId }, data: { billingStatus: BillingAccountStatus.CANCELED } });
     } else if (asaasCustomerId) {
-      await this.prisma.company.update({
+      const updatedCompany = await this.prisma.company.update({
         where: { id: local.companyId },
         data: {
           billingStatus: BillingAccountStatus.ACTIVE,
           asaasCustomerId,
         },
+        select: {
+          id: true,
+          asaasCustomerId: true,
+          billingStatus: true,
+        },
       });
+      console.log('[ASAAS WEBHOOK] Empresa atualizada via assinatura:', updatedCompany);
     }
   }
 
@@ -687,10 +717,7 @@ export class BillingService {
 
   private async resolveCompanyIdFromWebhook(dto: AsaasWebhookDto) {
     if (dto.payment) return this.resolveCompanyIdFromPayment(dto.payment);
-    if (dto.subscription?.id) {
-      const subscription = await this.prisma.billingSubscription.findFirst({ where: { asaasSubscriptionId: dto.subscription.id } });
-      return subscription?.companyId;
-    }
+    if (dto.subscription) return (await this.resolveSubscriptionFromAsaasSubscription(dto.subscription))?.companyId;
     return null;
   }
 
@@ -710,7 +737,7 @@ export class BillingService {
   }
 
   private async resolveSubscriptionFromPayment(payment: any) {
-    if (payment.externalReference) {
+    if (payment.externalReference && this.isUuid(payment.externalReference)) {
       const byReference = await this.prisma.billingSubscription.findUnique({ where: { id: payment.externalReference } });
       if (byReference) return byReference;
     }
@@ -722,7 +749,41 @@ export class BillingService {
       const byPaymentLink = await this.prisma.billingSubscription.findFirst({ where: { asaasPaymentLinkId: payment.paymentLink } });
       if (byPaymentLink) return byPaymentLink;
     }
+    if (payment.subscription) {
+      const asaasSubscription = await this.fetchAsaasSubscriptionForWebhook(payment.subscription);
+      const byFetchedSubscription = await this.resolveSubscriptionFromAsaasSubscription(asaasSubscription);
+      if (byFetchedSubscription) return byFetchedSubscription;
+    }
     return null;
+  }
+
+  private async resolveSubscriptionFromAsaasSubscription(subscription: any) {
+    if (!subscription) return null;
+    const filters: Prisma.BillingSubscriptionWhereInput[] = [];
+    if (subscription.id) filters.push({ asaasSubscriptionId: subscription.id });
+    if (subscription.externalReference && this.isUuid(subscription.externalReference)) filters.push({ id: subscription.externalReference });
+    if (subscription.paymentLink) filters.push({ asaasPaymentLinkId: subscription.paymentLink });
+    if (!filters.length) return null;
+    return this.prisma.billingSubscription.findFirst({ where: { OR: filters } });
+  }
+
+  private async fetchAsaasSubscriptionForWebhook(subscriptionId: string) {
+    try {
+      const subscription = await this.asaas.getSubscription(subscriptionId);
+      console.log('[ASAAS WEBHOOK] Assinatura consultada no Asaas:', {
+        id: subscription?.id,
+        customer: this.extractAsaasCustomerId(subscription) || null,
+        externalReference: subscription?.externalReference,
+        paymentLink: subscription?.paymentLink,
+      });
+      return subscription;
+    } catch (error) {
+      console.log('[ASAAS WEBHOOK] Falha ao consultar assinatura no Asaas:', {
+        subscriptionId,
+        error: this.asaas.sanitizeError(error),
+      });
+      return null;
+    }
   }
 
   private mapPaymentStatus(event: string, status?: string): BillingPaymentStatus {
@@ -734,6 +795,24 @@ export class BillingService {
     if (event.includes('DELETED') || event.includes('CANCELED')) return BillingPaymentStatus.CANCELED;
     if (status && Object.values(BillingPaymentStatus).includes(status as BillingPaymentStatus)) return status as BillingPaymentStatus;
     return BillingPaymentStatus.PENDING;
+  }
+
+  private logAsaasWebhookPayload(payload: AsaasWebhookDto) {
+    console.log('=== WEBHOOK ASAAS RECEBIDO ===');
+    console.log(JSON.stringify(payload, null, 2));
+    console.log('Event:', payload.event);
+    console.log('Payment ID:', payload.payment?.id);
+    console.log('Customer ID:', this.extractAsaasCustomerId(payload.payment) || this.extractAsaasCustomerId(payload.subscription) || this.extractAsaasCustomerId(payload.customer));
+    console.log('Payment Customer ID:', this.extractAsaasCustomerId(payload.payment));
+    console.log('Subscription Customer ID:', this.extractAsaasCustomerId(payload.subscription));
+    console.log('Payment Subscription ID:', payload.payment?.subscription);
+    console.log('Subscription ID:', payload.subscription?.id);
+    console.log('Payment Link ID:', payload.payment?.paymentLink || payload.subscription?.paymentLink);
+    console.log('External Reference:', payload.payment?.externalReference || payload.subscription?.externalReference);
+  }
+
+  private isUuid(value: unknown) {
+    return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
   }
 
   private async resolvePartner(partnerId?: string) {

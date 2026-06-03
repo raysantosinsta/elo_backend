@@ -86,6 +86,12 @@ export class AsaasService {
     return response.data;
   }
 
+  async getSubscription(subscriptionId: string) {
+    this.assertConfigured();
+    const response = await this.client.get(`/subscriptions/${subscriptionId}`);
+    return response.data;
+  }
+
   sanitizeError(error: any) {
     const message = error?.response?.data?.errors?.[0]?.description || error?.response?.data?.message || error?.message || 'Erro ao chamar Asaas';
     const isEnvironmentMismatch = error?.response?.status === 401 && String(message).toLowerCase().includes('ambiente');
