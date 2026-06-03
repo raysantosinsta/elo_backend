@@ -264,7 +264,7 @@ export class BillingService {
         expectedWebhookUrl,
         observacao: 'successUrl e apenas retorno do navegador; webhook precisa estar configurado no painel/API do Asaas.',
       });
-      const paymentLink = await this.asaas.createPaymentLink({
+      const paymentLinkPayload = {
         name: `Assinatura ${plan.name}`,
         description: plan.description || `Assinatura ${plan.name} - Elospro`,
         value: Number(plan.price),
@@ -282,7 +282,8 @@ export class BillingService {
               },
             }
           : {}),
-      });
+      };
+      const paymentLink = await this.createPaymentLinkWithCallbackFallback(paymentLinkPayload, checkoutSuccessUrl);
       console.log('[ASAAS CHECKOUT] Payment link retornado pelo Asaas:', {
         id: paymentLink.id,
         url: paymentLink.url || paymentLink.link || paymentLink.paymentLinkUrl,
@@ -326,6 +327,22 @@ export class BillingService {
       });
       if (error instanceof BadRequestException) throw error;
       throw new BadRequestException(this.asaas.sanitizeError(error));
+    }
+  }
+
+  private async createPaymentLinkWithCallbackFallback(paymentLinkPayload: any, checkoutSuccessUrl?: string) {
+    try {
+      return await this.asaas.createPaymentLink(paymentLinkPayload);
+    } catch (error) {
+      if (!checkoutSuccessUrl || !this.isAsaasDomainConfigError(error)) {
+        throw error;
+      }
+      console.log('[ASAAS CHECKOUT] Dominio do callback nao cadastrado no Asaas. Tentando criar checkout sem callback:', {
+        checkoutSuccessUrl,
+        detalhe: this.asaas.sanitizeError(error),
+      });
+      const { callback, ...payloadWithoutCallback } = paymentLinkPayload;
+      return this.asaas.createPaymentLink(payloadWithoutCallback);
     }
   }
 
@@ -869,6 +886,18 @@ export class BillingService {
 
   private isUuid(value: unknown) {
     return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+  }
+
+  private isAsaasDomainConfigError(error: any) {
+    const rawMessage = [
+      error?.response?.data?.errors?.[0]?.description,
+      error?.response?.data?.message,
+      error?.message,
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+    return rawMessage.includes('dominio') || rawMessage.includes('domínio');
   }
 
   private async resolvePartner(partnerId?: string) {
