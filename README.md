@@ -6,13 +6,9 @@ npx prisma migrate diff \
   --to-schema-datamodel prisma/schema.prisma \
   --script 
 
-  mkdir prisma/migrations/20260101_consumo
+  mkdir prisma/migrations/20260101_pagamento_v001
 
-  npx prisma migrate resolve --applied 20260101_consumo
-
-  mkdir prisma/migrations/20260101_pagamento
-
-  npx prisma migrate resolve --applied 20260101_pagamento
+  npx prisma migrate resolve --applied 20260101_pagamento_v001
 
    npx prisma generate
 

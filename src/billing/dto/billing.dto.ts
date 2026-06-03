@@ -87,6 +87,21 @@ export class CreateSubscriptionDto {
   billingType?: string;
 }
 
+export class CreateCheckoutDto {
+  @ApiProperty()
+  @IsUUID()
+  companyId: string;
+
+  @ApiProperty()
+  @IsUUID()
+  planId: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  billingType?: string;
+}
+
 export class UpdateBillingStatusDto {
   @ApiProperty({ enum: BillingAccountStatus })
   @IsEnum(BillingAccountStatus)

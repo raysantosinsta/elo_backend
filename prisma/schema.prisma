@@ -1401,6 +1401,8 @@ model BillingSubscription {
   id                 String                    @id @default(uuid()) @map("id") @db.Uuid
   status             BillingSubscriptionStatus @default(PENDING) @map("status")
   asaasSubscriptionId String?                   @unique @map("asaas_subscription_id") @db.VarChar(120)
+  asaasPaymentLinkId  String?                   @unique @map("asaas_payment_link_id") @db.VarChar(120)
+  checkoutUrl         String?                   @map("checkout_url") @db.Text
   value              Decimal                   @map("valor") @db.Decimal(10, 2)
   cycle              PlanPeriod                @default(MONTHLY) @map("ciclo")
   nextDueDate        DateTime?                 @map("proximo_vencimento")
@@ -1420,6 +1422,7 @@ model BillingSubscription {
   @@index([companyId])
   @@index([planId])
   @@index([status])
+  @@index([asaasPaymentLinkId])
   @@index([nextDueDate])
   @@map("billing_subscriptions")
 }

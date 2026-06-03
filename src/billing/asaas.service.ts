@@ -16,7 +16,7 @@ export class AsaasService {
       this.config.get<string>('ASAAS_BASE_URL') ||
       (this.environment === 'production'
         ? 'https://api.asaas.com/v3'
-        : 'https://sandbox.asaas.com/api/v3');
+        : 'https://api-sandbox.asaas.com/v3');
 
     this.client = axios.create({
       baseURL: this.baseURL,
@@ -57,6 +57,26 @@ export class AsaasService {
   }) {
     this.assertConfigured();
     const response = await this.client.post('/subscriptions', data);
+    return response.data;
+  }
+
+  async createPaymentLink(data: {
+    name: string;
+    description?: string;
+    value: number;
+    billingType: string;
+    chargeType: 'DETACHED' | 'RECURRENT' | 'INSTALLMENT';
+    subscriptionCycle?: 'MONTHLY' | 'YEARLY';
+    dueDateLimitDays?: number;
+    externalReference?: string;
+    notificationEnabled?: boolean;
+    callback?: {
+      successUrl?: string;
+      autoRedirect?: boolean;
+    };
+  }) {
+    this.assertConfigured();
+    const response = await this.client.post('/paymentLinks', data);
     return response.data;
   }
 

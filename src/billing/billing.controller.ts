@@ -6,6 +6,7 @@ import { BillingService } from './billing.service';
 import {
   AsaasWebhookDto,
   CreateBillingPlanDto,
+  CreateCheckoutDto,
   CreatePartnerDto,
   CreateReferralDto,
   CreateSubscriptionDto,
@@ -63,6 +64,11 @@ export class BillingController {
   @Post('subscriptions')
   createSubscription(@Body() dto: CreateSubscriptionDto) {
     return this.billing.createSubscription(dto);
+  }
+
+  @Post('checkout')
+  createCheckout(@Body() dto: CreateCheckoutDto) {
+    return this.billing.createCheckout(dto);
   }
 
   @Get('companies/:companyId')

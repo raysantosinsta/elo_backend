@@ -24,6 +24,7 @@ import { AsaasService } from './asaas.service';
 import {
   AsaasWebhookDto,
   CreateBillingPlanDto,
+  CreateCheckoutDto,
   CreatePartnerDto,
   CreateReferralDto,
   CreateSubscriptionDto,
@@ -200,6 +201,69 @@ export class BillingService {
     }
   }
 
+  async createCheckout(dto: CreateCheckoutDto) {
+    await this.assertCompanyAccess(dto.companyId);
+    const company = await this.prisma.company.findUnique({ where: { id: dto.companyId } });
+    if (!company) throw new NotFoundException('Empresa nao encontrada');
+    const plan = await this.prisma.billingPlan.findUnique({ where: { id: dto.planId } });
+    if (!plan || !plan.isActive) throw new NotFoundException('Plano ativo nao encontrado');
+
+    const pending = await this.prisma.billingSubscription.create({
+      data: {
+        companyId: dto.companyId,
+        planId: plan.id,
+        value: plan.price,
+        cycle: plan.period,
+        status: BillingSubscriptionStatus.PENDING,
+      },
+    });
+
+    try {
+      const paymentLink = await this.asaas.createPaymentLink({
+        name: `Assinatura ${plan.name}`,
+        description: plan.description || `Assinatura ${plan.name} - Elospro`,
+        value: Number(plan.price),
+        billingType: dto.billingType || 'UNDEFINED',
+        chargeType: 'RECURRENT',
+        subscriptionCycle: plan.period === PlanPeriod.YEARLY ? 'YEARLY' : 'MONTHLY',
+        dueDateLimitDays: 3,
+        externalReference: pending.id,
+        notificationEnabled: true,
+        callback: {
+          successUrl: this.config.get<string>('ASAAS_CHECKOUT_SUCCESS_URL') || this.config.get<string>('APP_URL'),
+          autoRedirect: true,
+        },
+      });
+
+      const checkoutUrl = paymentLink.url || paymentLink.link || paymentLink.paymentLinkUrl;
+      if (!checkoutUrl) {
+        throw new BadRequestException('Asaas nao retornou URL de checkout');
+      }
+
+      const subscription = await this.prisma.billingSubscription.update({
+        where: { id: pending.id },
+        data: {
+          asaasPaymentLinkId: paymentLink.id,
+          checkoutUrl,
+        },
+        include: { plan: true },
+      });
+
+      return {
+        subscriptionId: subscription.id,
+        paymentLinkId: paymentLink.id,
+        checkoutUrl,
+      };
+    } catch (error) {
+      await this.prisma.billingSubscription.update({
+        where: { id: pending.id },
+        data: { status: BillingSubscriptionStatus.CANCELED, canceledAt: new Date() },
+      });
+      if (error instanceof BadRequestException) throw error;
+      throw new BadRequestException(this.asaas.sanitizeError(error));
+    }
+  }
+
   async getCompanyBilling(companyId?: string) {
     const resolvedCompanyId = companyId || this.cls.get<string>('tenantId');
     if (!resolvedCompanyId) throw new BadRequestException('Empresa nao informada');
@@ -280,9 +344,7 @@ export class BillingService {
     const resolvedCompanyId = companyId || await this.resolveCompanyIdFromPayment(payment);
     if (!resolvedCompanyId) return;
     const status = this.mapPaymentStatus(event, payment.status);
-    const subscription = payment.subscription
-      ? await this.prisma.billingSubscription.findFirst({ where: { asaasSubscriptionId: payment.subscription } })
-      : null;
+    const subscription = await this.resolveSubscriptionFromPayment(payment);
 
     const saved = await this.prisma.billingPayment.upsert({
       where: { asaasPaymentId: payment.id },
@@ -314,6 +376,16 @@ export class BillingService {
 
     if (status === BillingPaymentStatus.RECEIVED || status === BillingPaymentStatus.CONFIRMED) {
       await this.prisma.company.update({ where: { id: resolvedCompanyId }, data: { billingStatus: BillingAccountStatus.ACTIVE } });
+      if (subscription) {
+        await this.prisma.billingSubscription.update({
+          where: { id: subscription.id },
+          data: {
+            status: BillingSubscriptionStatus.ACTIVE,
+            asaasSubscriptionId: payment.subscription || subscription.asaasSubscriptionId,
+            nextDueDate: payment.dueDate ? new Date(`${payment.dueDate}T00:00:00`) : subscription.nextDueDate,
+          },
+        });
+      }
       await this.generateCommissionForPayment(saved.id);
     }
 
@@ -331,7 +403,16 @@ export class BillingService {
   }
 
   private async updateSubscriptionFromAsaas(event: string, subscription: any) {
-    const local = await this.prisma.billingSubscription.findFirst({ where: { asaasSubscriptionId: subscription.id } });
+    const local = subscription.id
+      ? await this.prisma.billingSubscription.findFirst({
+          where: {
+            OR: [
+              { asaasSubscriptionId: subscription.id },
+              ...(subscription.externalReference ? [{ id: subscription.externalReference }] : []),
+            ],
+          },
+        })
+      : null;
     if (!local) return;
     const status = event.includes('DELETED') || event.includes('CANCELED')
       ? BillingSubscriptionStatus.CANCELED
@@ -340,6 +421,7 @@ export class BillingService {
       where: { id: local.id },
       data: {
         status,
+        asaasSubscriptionId: subscription.id || local.asaasSubscriptionId,
         nextDueDate: subscription.nextDueDate ? new Date(`${subscription.nextDueDate}T00:00:00`) : undefined,
         canceledAt: status === BillingSubscriptionStatus.CANCELED ? new Date() : undefined,
       },
@@ -574,6 +656,8 @@ export class BillingService {
   }
 
   private async resolveCompanyIdFromPayment(payment: any) {
+    const subscription = await this.resolveSubscriptionFromPayment(payment);
+    if (subscription) return subscription.companyId;
     if (payment.externalReference) return payment.externalReference;
     if (payment.customer) {
       const company = await this.prisma.company.findUnique({ where: { asaasCustomerId: payment.customer } });
@@ -582,6 +666,22 @@ export class BillingService {
     if (payment.subscription) {
       const subscription = await this.prisma.billingSubscription.findFirst({ where: { asaasSubscriptionId: payment.subscription } });
       if (subscription) return subscription.companyId;
+    }
+    return null;
+  }
+
+  private async resolveSubscriptionFromPayment(payment: any) {
+    if (payment.externalReference) {
+      const byReference = await this.prisma.billingSubscription.findUnique({ where: { id: payment.externalReference } });
+      if (byReference) return byReference;
+    }
+    if (payment.subscription) {
+      const bySubscription = await this.prisma.billingSubscription.findFirst({ where: { asaasSubscriptionId: payment.subscription } });
+      if (bySubscription) return bySubscription;
+    }
+    if (payment.paymentLink) {
+      const byPaymentLink = await this.prisma.billingSubscription.findFirst({ where: { asaasPaymentLinkId: payment.paymentLink } });
+      if (byPaymentLink) return byPaymentLink;
     }
     return null;
   }
