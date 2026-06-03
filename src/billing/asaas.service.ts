@@ -86,9 +86,21 @@ export class AsaasService {
     return response.data;
   }
 
+  async listPayments(params: Record<string, any>) {
+    this.assertConfigured();
+    const response = await this.client.get('/payments', { params });
+    return response.data;
+  }
+
   async getSubscription(subscriptionId: string) {
     this.assertConfigured();
     const response = await this.client.get(`/subscriptions/${subscriptionId}`);
+    return response.data;
+  }
+
+  async listSubscriptions(params: Record<string, any>) {
+    this.assertConfigured();
+    const response = await this.client.get('/subscriptions', { params });
     return response.data;
   }
 

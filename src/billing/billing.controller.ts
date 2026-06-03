@@ -61,6 +61,16 @@ export class BillingController {
     return this.billing.syncCustomer(companyId);
   }
 
+  @Post('companies/:companyId/sync-asaas-payments')
+  syncAsaasPayments(@Param('companyId') companyId: string) {
+    return this.billing.syncPendingCheckoutPayments(companyId);
+  }
+
+  @Post('me/sync-asaas-payments')
+  syncMyAsaasPayments() {
+    return this.billing.syncPendingCheckoutPayments();
+  }
+
   @Post('subscriptions')
   createSubscription(@Body() dto: CreateSubscriptionDto) {
     return this.billing.createSubscription(dto);

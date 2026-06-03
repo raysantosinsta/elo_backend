@@ -350,6 +350,7 @@ export class BillingService {
     const resolvedCompanyId = companyId || this.cls.get<string>('tenantId');
     if (!resolvedCompanyId) throw new BadRequestException('Empresa nao informada');
     await this.assertCompanyAccess(resolvedCompanyId);
+    await this.syncPendingCheckoutPaymentsSafely(resolvedCompanyId);
     const company = await this.prisma.company.findUnique({
       where: { id: resolvedCompanyId },
       select: {
@@ -360,6 +361,120 @@ export class BillingService {
     });
     if (!company) throw new NotFoundException('Empresa nao encontrada');
     return company;
+  }
+
+  async syncPendingCheckoutPayments(companyId?: string) {
+    const resolvedCompanyId = companyId || this.cls.get<string>('tenantId');
+    if (!resolvedCompanyId) throw new BadRequestException('Empresa nao informada');
+    await this.assertCompanyAccess(resolvedCompanyId);
+    return this.syncPendingCheckoutPaymentsForCompany(resolvedCompanyId);
+  }
+
+  private async syncPendingCheckoutPaymentsSafely(companyId: string) {
+    try {
+      await this.syncPendingCheckoutPaymentsForCompany(companyId);
+    } catch (error) {
+      console.log('[ASAAS SYNC] Falha ao sincronizar checkouts pendentes:', {
+        companyId,
+        error: this.asaas.sanitizeError(error),
+      });
+    }
+  }
+
+  private async syncPendingCheckoutPaymentsForCompany(companyId: string) {
+    console.log('=== ASAAS SYNC CHECKOUTS PENDENTES ===');
+    console.log('[ASAAS SYNC] Empresa:', companyId);
+
+    const pendingSubscriptions = await this.prisma.billingSubscription.findMany({
+      where: {
+        companyId,
+        asaasPaymentLinkId: { not: null },
+        status: { in: [BillingSubscriptionStatus.PENDING, BillingSubscriptionStatus.ACTIVE] },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+      include: { company: true },
+    });
+
+    console.log('[ASAAS SYNC] Assinaturas locais encontradas:', pendingSubscriptions.map((subscription) => ({
+      subscriptionId: subscription.id,
+      status: subscription.status,
+      asaasPaymentLinkId: subscription.asaasPaymentLinkId,
+      asaasSubscriptionId: subscription.asaasSubscriptionId,
+      companyAsaasCustomerId: subscription.company.asaasCustomerId || null,
+    })));
+
+    const processed: any[] = [];
+    for (const subscription of pendingSubscriptions) {
+      const payments = await this.findAsaasPaymentsForSubscription(subscription.id);
+      console.log('[ASAAS SYNC] Pagamentos encontrados no Asaas:', {
+        subscriptionId: subscription.id,
+        count: payments.length,
+        payments: payments.map((payment) => ({
+          id: payment.id,
+          status: payment.status,
+          customer: this.extractAsaasCustomerId(payment) || null,
+          subscription: payment.subscription || null,
+          paymentLink: payment.paymentLink || null,
+          externalReference: payment.externalReference || null,
+        })),
+      });
+
+      const paidPayment = payments.find((payment) => this.isAsaasPaymentApproved(payment));
+      if (!paidPayment) {
+        processed.push({ subscriptionId: subscription.id, synced: false, reason: 'Nenhum pagamento RECEIVED/CONFIRMED encontrado' });
+        continue;
+      }
+
+      const event = paidPayment.status === 'CONFIRMED' ? 'PAYMENT_CONFIRMED' : 'PAYMENT_RECEIVED';
+      await this.upsertPaymentFromAsaas(event, paidPayment, subscription.companyId);
+      const company = await this.prisma.company.findUnique({
+        where: { id: subscription.companyId },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          cnpj: true,
+          asaasCustomerId: true,
+          billingStatus: true,
+        },
+      });
+      console.log('[ASAAS SYNC] Empresa apos sincronizacao:', company);
+      processed.push({
+        subscriptionId: subscription.id,
+        synced: true,
+        paymentId: paidPayment.id,
+        customer: this.extractAsaasCustomerId(paidPayment) || null,
+        company,
+      });
+    }
+
+    return { companyId, checked: pendingSubscriptions.length, processed };
+  }
+
+  private async findAsaasPaymentsForSubscription(subscriptionId: string) {
+    const byExternalReference = await this.asaas.listPayments({ externalReference: subscriptionId, limit: 20 });
+    const payments = this.extractAsaasListData(byExternalReference);
+    if (payments.length) return payments;
+
+    const subscription = await this.prisma.billingSubscription.findUnique({
+      where: { id: subscriptionId },
+      select: { asaasSubscriptionId: true },
+    });
+    if (!subscription?.asaasSubscriptionId) return payments;
+
+    const bySubscription = await this.asaas.listPayments({ subscription: subscription.asaasSubscriptionId, limit: 20 });
+    return this.extractAsaasListData(bySubscription);
+  }
+
+  private extractAsaasListData(response: any) {
+    if (Array.isArray(response)) return response;
+    if (Array.isArray(response?.data)) return response.data;
+    return [];
+  }
+
+  private isAsaasPaymentApproved(payment: any) {
+    return payment?.status === 'RECEIVED' || payment?.status === 'CONFIRMED';
   }
 
   async updateCompanyBillingStatus(companyId: string, dto: UpdateBillingStatusDto) {
