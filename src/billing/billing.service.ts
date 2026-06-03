@@ -219,6 +219,7 @@ export class BillingService {
     });
 
     try {
+      const checkoutSuccessUrl = this.config.get<string>('ASAAS_CHECKOUT_SUCCESS_URL');
       const paymentLink = await this.asaas.createPaymentLink({
         name: `Assinatura ${plan.name}`,
         description: plan.description || `Assinatura ${plan.name} - Elospro`,
@@ -229,10 +230,14 @@ export class BillingService {
         dueDateLimitDays: 3,
         externalReference: pending.id,
         notificationEnabled: true,
-        callback: {
-          successUrl: this.config.get<string>('ASAAS_CHECKOUT_SUCCESS_URL') || this.config.get<string>('APP_URL'),
-          autoRedirect: true,
-        },
+        ...(checkoutSuccessUrl
+          ? {
+              callback: {
+                successUrl: checkoutSuccessUrl,
+                autoRedirect: true,
+              },
+            }
+          : {}),
       });
 
       const checkoutUrl = paymentLink.url || paymentLink.link || paymentLink.paymentLinkUrl;
