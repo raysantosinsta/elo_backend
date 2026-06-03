@@ -1,5 +1,5 @@
 /* eslint-disable prettier/prettier */
-import { Body, Controller, Delete, Get, Headers, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Headers, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Public } from '../auth/public.decorator';
 import { BillingService } from './billing.service';
@@ -89,7 +89,16 @@ export class BillingController {
   @Public()
   @Post('asaas/webhook')
   @ApiOperation({ summary: 'Webhook publico do Asaas com idempotencia' })
-  handleAsaasWebhook(@Body() dto: AsaasWebhookDto, @Headers('asaas-access-token') token?: string) {
+  handleAsaasWebhook(@Body() dto: AsaasWebhookDto, @Headers('asaas-access-token') token?: string, @Req() req?: any) {
+    console.log('=== ASAAS WEBHOOK ENDPOINT ACIONADO ===');
+    console.log('Method:', req?.method);
+    console.log('Url:', req?.originalUrl || req?.url);
+    console.log('Headers:', {
+      asaasAccessTokenPresent: Boolean(token),
+      userAgent: req?.headers?.['user-agent'],
+      contentType: req?.headers?.['content-type'],
+      forwardedFor: req?.headers?.['x-forwarded-for'],
+    });
     return this.billing.handleWebhook(dto, token);
   }
 

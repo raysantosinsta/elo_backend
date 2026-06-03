@@ -209,6 +209,23 @@ export class BillingService {
     if (!plan || !plan.isActive) throw new NotFoundException('Plano ativo nao encontrado');
     const trialPeriod = this.buildTrialPeriod(plan.trialDays);
 
+    console.log('=== ASAAS CHECKOUT SOLICITADO ===');
+    console.log('[ASAAS CHECKOUT] Empresa:', {
+      companyId: company.id,
+      name: company.name,
+      email: company.email,
+      cnpj: company.cnpj,
+      asaasCustomerIdAtual: company.asaasCustomerId || null,
+      billingStatus: company.billingStatus,
+    });
+    console.log('[ASAAS CHECKOUT] Plano:', {
+      planId: plan.id,
+      name: plan.name,
+      price: String(plan.price),
+      period: plan.period,
+      trialDays: plan.trialDays,
+    });
+
     const pending = await this.prisma.billingSubscription.create({
       data: {
         companyId: dto.companyId,
@@ -217,6 +234,13 @@ export class BillingService {
         cycle: plan.period,
         status: BillingSubscriptionStatus.PENDING,
       },
+    });
+    console.log('[ASAAS CHECKOUT] Assinatura local pendente criada:', {
+      subscriptionId: pending.id,
+      companyId: pending.companyId,
+      planId: pending.planId,
+      status: pending.status,
+      externalReferenceEnviadoAoAsaas: pending.id,
     });
 
     await this.prisma.company.update({
@@ -230,6 +254,16 @@ export class BillingService {
 
     try {
       const checkoutSuccessUrl = this.config.get<string>('ASAAS_CHECKOUT_SUCCESS_URL');
+      const configuredWebhookUrl = this.config.get<string>('ASAAS_WEBHOOK_URL');
+      const backendUrl = this.config.get<string>('BACKEND_URL');
+      const expectedWebhookUrl = configuredWebhookUrl || (backendUrl
+        ? `${backendUrl}/billing/asaas/webhook`
+        : 'CONFIGURE_NO_ASAAS: https://SEU_BACKEND/billing/asaas/webhook');
+      console.log('[ASAAS CHECKOUT] URLs configuradas:', {
+        checkoutSuccessUrl: checkoutSuccessUrl || null,
+        expectedWebhookUrl,
+        observacao: 'successUrl e apenas retorno do navegador; webhook precisa estar configurado no painel/API do Asaas.',
+      });
       const paymentLink = await this.asaas.createPaymentLink({
         name: `Assinatura ${plan.name}`,
         description: plan.description || `Assinatura ${plan.name} - Elospro`,
@@ -249,6 +283,15 @@ export class BillingService {
             }
           : {}),
       });
+      console.log('[ASAAS CHECKOUT] Payment link retornado pelo Asaas:', {
+        id: paymentLink.id,
+        url: paymentLink.url || paymentLink.link || paymentLink.paymentLinkUrl,
+        chargeType: paymentLink.chargeType,
+        billingType: paymentLink.billingType,
+        subscriptionCycle: paymentLink.subscriptionCycle,
+        externalReference: paymentLink.externalReference,
+        rawKeys: Object.keys(paymentLink || {}),
+      });
 
       const checkoutUrl = paymentLink.url || paymentLink.link || paymentLink.paymentLinkUrl;
       if (!checkoutUrl) {
@@ -262,6 +305,13 @@ export class BillingService {
           checkoutUrl,
         },
         include: { plan: true },
+      });
+      console.log('[ASAAS CHECKOUT] Assinatura local vinculada ao payment link:', {
+        subscriptionId: subscription.id,
+        companyId: subscription.companyId,
+        asaasPaymentLinkId: subscription.asaasPaymentLinkId,
+        checkoutUrl: subscription.checkoutUrl,
+        status: subscription.status,
       });
 
       return {
@@ -418,6 +468,9 @@ export class BillingService {
         },
         select: {
           id: true,
+          name: true,
+          email: true,
+          cnpj: true,
           asaasCustomerId: true,
           billingStatus: true,
         },
@@ -492,6 +545,9 @@ export class BillingService {
         },
         select: {
           id: true,
+          name: true,
+          email: true,
+          cnpj: true,
           asaasCustomerId: true,
           billingStatus: true,
         },
