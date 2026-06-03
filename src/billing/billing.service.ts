@@ -48,7 +48,7 @@ export class BillingService {
   ) {}
 
   async createPlan(dto: CreateBillingPlanDto) {
-    this.assertAdmin();
+    this.assertMaster();
     return this.prisma.billingPlan.create({
       data: {
         name: dto.name,
@@ -63,14 +63,15 @@ export class BillingService {
   }
 
   async listPlans(includeInactive = false) {
+    const canIncludeInactive = includeInactive && this.isMaster();
     return this.prisma.billingPlan.findMany({
-      where: includeInactive ? {} : { isActive: true },
+      where: canIncludeInactive ? {} : { isActive: true },
       orderBy: { price: 'asc' },
     });
   }
 
   async updatePlan(id: string, dto: UpdateBillingPlanDto) {
-    this.assertAdmin();
+    this.assertMaster();
     return this.prisma.billingPlan.update({
       where: { id },
       data: {
@@ -83,6 +84,14 @@ export class BillingService {
         ...(dto.features !== undefined ? { features: dto.features } : {}),
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
       },
+    });
+  }
+
+  async deletePlan(id: string) {
+    this.assertMaster();
+    return this.prisma.billingPlan.update({
+      where: { id },
+      data: { isActive: false },
     });
   }
 
@@ -110,7 +119,7 @@ export class BillingService {
   }
 
   async expireTrials() {
-    this.assertAdmin();
+    this.assertMaster();
     const now = new Date();
     const result = await this.prisma.company.updateMany({
       where: {
@@ -208,7 +217,7 @@ export class BillingService {
   }
 
   async updateCompanyBillingStatus(companyId: string, dto: UpdateBillingStatusDto) {
-    this.assertAdmin();
+    this.assertMaster();
     return this.prisma.company.update({
       where: { id: companyId },
       data: { billingStatus: dto.status },
@@ -592,7 +601,7 @@ export class BillingService {
     if (partnerId) {
       const partner = await this.prisma.partner.findUnique({ where: { id: partnerId }, include: { company: true, user: true } });
       if (!partner) throw new NotFoundException('Parceiro nao encontrado');
-      if (!this.isAdmin()) {
+      if (!this.isMaster()) {
         const tenantId = this.cls.get<string>('tenantId');
         if (partner.companyId !== tenantId) throw new ForbiddenException('Acesso negado ao parceiro');
       }
@@ -642,18 +651,27 @@ export class BillingService {
   }
 
   private async assertCompanyAccess(companyId: string) {
-    if (this.isAdmin()) return;
+    if (this.isMaster()) return;
     const tenantId = this.cls.get<string>('tenantId');
     if (tenantId !== companyId) throw new ForbiddenException('Acesso negado a empresa');
   }
 
   private assertAdmin() {
-    if (!this.isAdmin()) throw new ForbiddenException('Apenas MASTER ou ADMIN podem executar esta acao');
+    this.assertMaster();
+  }
+
+  private assertMaster() {
+    if (!this.isMaster()) throw new ForbiddenException('Apenas MASTER pode executar esta acao');
   }
 
   private isAdmin() {
     const role = this.cls.get<string>('userRole') as UserRole;
     return role === UserRole.MASTER || role === UserRole.ADMIN || this.cls.get<boolean>('isMaster');
+  }
+
+  private isMaster() {
+    const role = this.cls.get<string>('userRole') as UserRole;
+    return role === UserRole.MASTER || this.cls.get<boolean>('isMaster');
   }
 
   private companyBillingSelect() {

@@ -1,5 +1,5 @@
 /* eslint-disable prettier/prettier */
-import { Body, Controller, Get, Headers, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Headers, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Public } from '../auth/public.decorator';
 import { BillingService } from './billing.service';
@@ -38,6 +38,11 @@ export class BillingController {
   @Patch('plans/:id')
   updatePlan(@Param('id') id: string, @Body() dto: UpdateBillingPlanDto) {
     return this.billing.updatePlan(id, dto);
+  }
+
+  @Delete('plans/:id')
+  deletePlan(@Param('id') id: string) {
+    return this.billing.deletePlan(id);
   }
 
   @Post('trial/start')
