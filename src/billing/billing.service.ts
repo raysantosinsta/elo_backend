@@ -391,11 +391,12 @@ export class BillingService {
 
     if (status === BillingPaymentStatus.RECEIVED || status === BillingPaymentStatus.CONFIRMED) {
       const trialPeriod = subscription?.planId ? await this.buildTrialPeriodFromSubscription(subscription.id) : null;
+      const asaasCustomerId = this.extractAsaasCustomerId(payment);
       await this.prisma.company.update({
         where: { id: resolvedCompanyId },
         data: {
           billingStatus: BillingAccountStatus.ACTIVE,
-          asaasCustomerId: payment.customer || undefined,
+          ...(asaasCustomerId ? { asaasCustomerId } : {}),
           ...(trialPeriod
             ? {
                 trialStart: trialPeriod.trialStart,
@@ -437,11 +438,13 @@ export class BillingService {
             OR: [
               { asaasSubscriptionId: subscription.id },
               ...(subscription.externalReference ? [{ id: subscription.externalReference }] : []),
+              ...(subscription.paymentLink ? [{ asaasPaymentLinkId: subscription.paymentLink }] : []),
             ],
           },
         })
       : null;
     if (!local) return;
+    const asaasCustomerId = this.extractAsaasCustomerId(subscription);
     const status = event.includes('DELETED') || event.includes('CANCELED')
       ? BillingSubscriptionStatus.CANCELED
       : BillingSubscriptionStatus.ACTIVE;
@@ -456,6 +459,14 @@ export class BillingService {
     });
     if (status === BillingSubscriptionStatus.CANCELED) {
       await this.prisma.company.update({ where: { id: local.companyId }, data: { billingStatus: BillingAccountStatus.CANCELED } });
+    } else if (asaasCustomerId) {
+      await this.prisma.company.update({
+        where: { id: local.companyId },
+        data: {
+          billingStatus: BillingAccountStatus.ACTIVE,
+          asaasCustomerId,
+        },
+      });
     }
   }
 
@@ -838,5 +849,14 @@ export class BillingService {
       trialStart: subscription.company.trialStart || trialPeriod.trialStart,
       trialEnd: subscription.company.trialEnd || trialPeriod.trialEnd,
     };
+  }
+
+  private extractAsaasCustomerId(payload: any): string | undefined {
+    const customer = payload?.customer;
+    if (typeof customer === 'string' && customer.trim()) return customer;
+    if (customer?.id) return customer.id;
+    if (payload?.customerId) return payload.customerId;
+    if (payload?.customer?.object === 'customer' && payload.customer.id) return payload.customer.id;
+    return undefined;
   }
 }
