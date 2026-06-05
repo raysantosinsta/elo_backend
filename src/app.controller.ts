@@ -12,6 +12,7 @@ export class AppController {
       status: 'ok',
       timestamp: new Date().toISOString(),
       service: 'ELO API',
+      integration: 'frontend-backend',
     };
   }
 
