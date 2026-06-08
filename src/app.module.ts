@@ -42,6 +42,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { WhatsappConnectionModule } from './whatsapp-connection/whatsapp-connection.module';
 import { AtendeproAuthModule } from './atendepro-auth/atendepro-auth.module';
 import { BillingModule } from './billing/billing.module';
+import { BillingAccessGuard } from './billing/billing-access.guard';
 
 
 @Module({
@@ -104,6 +105,10 @@ import { BillingModule } from './billing/billing.module';
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard, // Agora protege tudo por padrão!
+    },
+    {
+      provide: APP_GUARD,
+      useClass: BillingAccessGuard,
     },
     {
       provide: APP_GUARD,

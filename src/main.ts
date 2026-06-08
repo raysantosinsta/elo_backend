@@ -40,13 +40,23 @@ async function bootstrap() {
   app.use(helmet());
 
   // CORS configurado para produção (aceita variáveis de ambiente)
-  app.enableCors({
-    origin: [
+  const corsOrigins = [
       'https://app.elospro.com.br',
       'https://elo-frontend-three.vercel.app', // <--- COLOQUE SUA URL DA VERCEL AQUI
       'http://localhost:3000',
       'http://localhost:3001'
-    ],
+    ];
+  const envOrigins = [
+    process.env.FRONTEND_URL,
+    process.env.CORS_ORIGINS,
+  ]
+    .filter(Boolean)
+    .flatMap((value) => value!.split(','))
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  app.enableCors({
+    origin: Array.from(new Set([...corsOrigins, ...envOrigins])),
     credentials: true,
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     allowedHeaders: 'Content-Type, Accept, Authorization',
@@ -115,7 +125,7 @@ async function bootstrap() {
   logger.log(`Application is running on: ${await app.getUrl()}`);
   logger.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 }
-bootstrap();
+void bootstrap();
 
 // /* eslint-disable prettier/prettier */
 // import { NestFactory } from '@nestjs/core';

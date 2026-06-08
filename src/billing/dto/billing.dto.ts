@@ -1,10 +1,8 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
-/* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable prettier/prettier */
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { BillingAccountStatus, BillingSubscriptionStatus, PartnerStatus, PartnerWithdrawalStatus, PlanPeriod } from '@prisma/client';
-import { Type } from 'class-transformer';
-import { IsArray, IsDateString, IsEnum, IsNumber, IsObject, IsOptional, IsString, IsUUID, Max, Min } from 'class-validator';
+import { PartialType } from '@nestjs/mapped-types';
+import { BillingAccountStatus, PartnerStatus, PartnerWithdrawalStatus, PlanPeriod } from '@prisma/client';
+import { IsArray, IsBoolean, IsDateString, IsEnum, IsNumber, IsObject, IsOptional, IsString, IsUUID, Max, Min } from 'class-validator';
 
 export class CreateBillingPlanDto {
   @ApiProperty()
@@ -44,9 +42,10 @@ export class CreateBillingPlanDto {
   features?: Record<string, any>;
 }
 
-export class UpdateBillingPlanDto extends CreateBillingPlanDto {
+export class UpdateBillingPlanDto extends PartialType(CreateBillingPlanDto) {
   @ApiPropertyOptional()
   @IsOptional()
+  @IsBoolean()
   isActive?: boolean;
 }
 

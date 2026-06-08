@@ -71,6 +71,11 @@ export class BillingController {
     return this.billing.syncPendingCheckoutPayments();
   }
 
+  @Post('admin/sync-asaas-payments')
+  syncAllAsaasPayments() {
+    return this.billing.syncAllPendingCheckoutPayments();
+  }
+
   @Post('subscriptions')
   createSubscription(@Body() dto: CreateSubscriptionDto) {
     return this.billing.createSubscription(dto);

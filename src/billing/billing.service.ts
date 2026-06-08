@@ -119,8 +119,8 @@ export class BillingService {
     });
   }
 
-  async expireTrials() {
-    this.assertMaster();
+  async expireTrials(requireMaster = true) {
+    if (requireMaster) this.assertMaster();
     const now = new Date();
     const result = await this.prisma.company.updateMany({
       where: {
@@ -368,6 +368,37 @@ export class BillingService {
     if (!resolvedCompanyId) throw new BadRequestException('Empresa nao informada');
     await this.assertCompanyAccess(resolvedCompanyId);
     return this.syncPendingCheckoutPaymentsForCompany(resolvedCompanyId);
+  }
+
+  async syncAllPendingCheckoutPayments(limit = 50, requireMaster = true) {
+    if (requireMaster) this.assertMaster();
+    const pendingCompanies = await this.prisma.billingSubscription.findMany({
+      where: {
+        asaasPaymentLinkId: { not: null },
+        status: { in: [BillingSubscriptionStatus.PENDING, BillingSubscriptionStatus.ACTIVE] },
+      },
+      distinct: ['companyId'],
+      select: { companyId: true },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+
+    const processed: any[] = [];
+    for (const item of pendingCompanies) {
+      try {
+        processed.push(await this.syncPendingCheckoutPaymentsForCompany(item.companyId));
+      } catch (error) {
+        processed.push({
+          companyId: item.companyId,
+          error: this.asaas.sanitizeError(error),
+        });
+      }
+    }
+
+    return {
+      checkedCompanies: pendingCompanies.length,
+      processed,
+    };
   }
 
   private async syncPendingCheckoutPaymentsSafely(companyId: string) {
@@ -762,8 +793,8 @@ export class BillingService {
     });
   }
 
-  async releasePendingCommissions() {
-    this.assertAdmin();
+  async releasePendingCommissions(requireAdmin = true) {
+    if (requireAdmin) this.assertAdmin();
     const now = new Date();
     const result = await this.prisma.partnerCommission.updateMany({
       where: { status: PartnerCommissionStatus.PENDING, availableAt: { lte: now } },
